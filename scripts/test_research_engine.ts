@@ -2,6 +2,7 @@
  * Comprehensive End-to-End Verification of the Multi-Agent Trading Research Engine
  */
 
+import { communityChatEngine } from '../lib/research/CommunityChatEngine';
 import { discoveryBriefCompiler } from '../lib/research/DiscoveryBriefCompiler';
 import { researchEngineOrchestrator } from '../lib/research/ResearchEngineOrchestrator';
 import { workflowEngine } from '../lib/research/WorkflowEngine';
@@ -10,9 +11,31 @@ import { PdfReportGenerator } from '../lib/research/PdfReportGenerator';
 async function runTests() {
   console.log('================================================================');
   console.log('🧪 TESTING MULTI-AGENT TRADING RESEARCH ENGINE ARCHITECTURE');
+  console.log('   (Real-Time Community Live Chat Ingestion & 5 Sequential Subagents)');
   console.log('================================================================\n');
 
-  // TEST 1: Universal Market Grounding across diverse asset classes
+  // TEST 0: Community Live Chat Engine Buffering, Ticker Filtering & Dispatch
+  console.log('--- TEST 0: Community Live Chat Engine & Transcript Ingestion ---');
+  const chatSymbols = ['NVDA', 'XAU/USD', 'EUR/USD', 'NIFTY 50', 'TSLA'];
+  for (const sym of chatSymbols) {
+    const transcript = communityChatEngine.getBufferedTranscript(sym);
+    console.log(`✅ [Chat Feed] ${sym}: ${transcript.totalMessages} buffered messages`);
+    console.log(`   Consensus Sentiment: ${transcript.consensusSentiment} (${transcript.consensusStrengthPercent}% strength)`);
+    console.log(`   Chat Velocity: ${transcript.chatVelocityScore}/100 | Supports: [${transcript.extractedPriceLevels?.supports?.join(', ') || 'none'}]`);
+    console.log(`   Key Linguistic Themes: ${transcript.dominantThemes.join(', ')}`);
+  }
+
+  // Test User Message Dispatch
+  const dispatched = communityChatEngine.dispatchUserMessage({
+    symbol: 'NVDA',
+    username: 'AlphaQuant',
+    message: '$NVDA breakout confirmed above 128.50 with heavy volume, looking for 136 target!',
+    sentiment: 'BULLISH',
+    badges: ['PRO TRADER']
+  });
+  console.log(`✅ Real-Time Chat Dispatch verified: [${dispatched.username}] "${dispatched.text}" (ID: ${dispatched.id})`);
+
+  // TEST 1: Universal Market Grounding across diverse asset classes from Chat Ingestion
   console.log('--- TEST 1: Phase 1 Discovery Brief Compilation Across Asset Classes ---');
   const testSymbols = ['EUR/USD', 'XAU/USD', 'NIFTY 50', 'RELIANCE', 'NVDA'];
   

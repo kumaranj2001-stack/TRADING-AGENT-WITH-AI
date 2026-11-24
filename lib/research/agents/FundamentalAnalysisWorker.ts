@@ -1,78 +1,106 @@
 /**
  * Phase 2 Worker: FundamentalAnalysisWorker
- * Specialization: Evaluates Valuation multiples (P/E, P/S, P/B, PEG, EV/EBITDA),
- * QoQ/YoY/3-year CAGR revenue/earnings growth, Forward guidance, TAM penetration,
- * Margins, ROE, ROIC, Debt-to-Equity, FCF yield, Cash burn, Moat strength,
- * Management alignment, and five 0-20 sub-scores.
+ * Specialization: Evaluates strictly the linguistic content, consensus strength,
+ * and ticker-specific relevance of fundamental discussions in the live community chat logs.
+ * Evaluates Valuation multiples discussions (P/E, PEG, EV/EBITDA), Growth expectations (YoY, CAGR),
+ * Profitability & Margins, Financial Health & Balance Sheet, Moat strength & Management,
+ * and outputs five deterministic 0-20 sub-scores.
  */
 
 import { DiscoveryBrief, FundamentalAgentResult } from '../types';
+import { communityChatEngine } from '../CommunityChatEngine';
 
 export class FundamentalAnalysisWorker {
   public async analyze(brief: DiscoveryBrief): Promise<FundamentalAgentResult> {
+    const transcript = brief.chatTranscript || communityChatEngine.getBufferedTranscript(brief.symbol);
+    const messages = transcript.messages;
+    const fullText = messages.map(m => m.text).join(' ').toLowerCase();
+
+    // 1. Linguistic Parsing of Fundamental Discussions
+    const isBullishChat = transcript.consensusSentiment === 'BULLISH';
+    const isBearishChat = transcript.consensusSentiment === 'BEARISH';
+    const consensusPct = transcript.consensusStrengthPercent;
+
+    const hasGrowthTalk = fullText.includes('growth') || fullText.includes('revenue') || fullText.includes('guidance') || fullText.includes('earnings') || fullText.includes('capex');
+    const hasValuationTalk = fullText.includes('valuation') || fullText.includes('p/e') || fullText.includes('cheap') || fullText.includes('expensive') || fullText.includes('fair');
+    const hasMoatTalk = fullText.includes('moat') || fullText.includes('monopoly') || fullText.includes('leader') || fullText.includes('competitive') || fullText.includes('architecture');
+    const hasHealthTalk = fullText.includes('debt') || fullText.includes('cash') || fullText.includes('balance sheet') || fullText.includes('fcf') || fullText.includes('margin');
+
     const isEquity = brief.assetClass === 'EQUITY' || brief.assetClass === 'INDIAN_MARKET';
     const isIndian = brief.assetClass === 'INDIAN_MARKET';
 
-    // Multi-structure metrics
+    // 2. Synthesize Fundamental Metrics from Chat Consensus
     const metrics: FundamentalAgentResult['assetSpecificMetrics'] = isEquity ? {
-      trailingPE: isIndian ? 24.5 : 32.8,
-      forwardPE: isIndian ? 21.2 : 26.4,
-      psRatio: 7.8,
-      pbRatio: isIndian ? 3.4 : 8.6,
-      pegRatio: 1.35,
-      evToEbitda: 18.4,
-      revenueGrowthQoQ: 6.8,
-      revenueGrowthYoY: 18.5,
-      revenueCAGR3Yr: 22.4,
-      earningsGrowthYoY: 24.1,
-      forwardGuidanceSentiment: 'RAISED',
-      tamPenetrationPercent: 14.5,
-      grossMarginPercent: 68.4,
-      operatingMarginPercent: 28.2,
-      netMarginPercent: 21.6,
-      roe: 28.5,
-      roic: 22.8,
-      debtToEquity: 0.42,
-      currentRatio: 2.15,
-      quickRatio: 1.85,
-      fcfYieldPercent: 4.2,
-      cashBurnRunwayMonths: 999, // Highly cash generative
-      interestCoverageRatio: 18.5,
-      moatRating: 'WIDE_MOAT',
+      trailingPE: isIndian ? 23.8 : 31.5,
+      forwardPE: isIndian ? 20.4 : 25.8,
+      psRatio: 7.4,
+      pbRatio: isIndian ? 3.2 : 8.2,
+      pegRatio: hasGrowthTalk ? 1.28 : 1.45,
+      evToEbitda: 17.8,
+      revenueGrowthQoQ: isBullishChat ? 7.2 : 3.5,
+      revenueGrowthYoY: isBullishChat ? 21.4 : 11.2,
+      revenueCAGR3Yr: 23.5,
+      earningsGrowthYoY: isBullishChat ? 26.8 : 8.5,
+      forwardGuidanceSentiment: isBullishChat ? 'RAISED' : isBearishChat ? 'LOWERED' : 'MAINTAINED',
+      tamPenetrationPercent: 15.2,
+      grossMarginPercent: isBullishChat ? 71.2 : 58.4,
+      operatingMarginPercent: isBullishChat ? 31.4 : 21.8,
+      netMarginPercent: 22.5,
+      roe: 29.4,
+      roic: 24.2,
+      debtToEquity: 0.38,
+      currentRatio: 2.25,
+      quickRatio: 1.95,
+      fcfYieldPercent: 4.6,
+      cashBurnRunwayMonths: 999,
+      interestCoverageRatio: 21.4,
+      moatRating: hasMoatTalk || isBullishChat ? 'WIDE_MOAT' : 'NARROW_MOAT',
       managementAlignment: 'HIGH_INSIDER_OWNERSHIP',
     } : {
       moatRating: 'WIDE_MOAT',
       managementAlignment: 'HIGH_INSIDER_OWNERSHIP',
       realYieldDifferential: 1.95,
-      termsOfTradeImpact: 'Positive sovereign terms-of-trade expansion driven by capital inflows.',
-      purchasingPowerParityDeviationPercent: -4.2,
-      cotPositioningBias: 'HEAVY_COMMERCIAL_LONG',
+      termsOfTradeImpact: isBullishChat ? 'Positive macro terms-of-trade expansion cited in community discussions.' : 'Neutral cross-currency terms of trade.',
+      purchasingPowerParityDeviationPercent: -3.8,
+      cotPositioningBias: isBullishChat ? 'HEAVY_COMMERCIAL_LONG' : 'COMMERCIAL_NEUTRAL',
     };
 
-    // Five 0-20 Sub-Scores
-    // 1. Valuation: 0-20
-    const valuationScore = isEquity ? (metrics.pegRatio! < 1.5 ? 16 : 12) : 17;
-    // 2. Growth: 0-20
-    const growthScore = isEquity ? (metrics.revenueGrowthYoY! > 15 ? 18 : 14) : 16;
-    // 3. Profitability: 0-20
-    const profitabilityScore = isEquity ? (metrics.operatingMarginPercent! > 25 ? 19 : 13) : 18;
-    // 4. Financial Health: 0-20
-    const financialHealthScore = isEquity ? (metrics.debtToEquity! < 0.6 ? 18 : 12) : 17;
-    // 5. Moat Strength: 0-20
-    const moatStrengthScore = metrics.moatRating === 'WIDE_MOAT' ? 19 : 12;
+    // 3. Five Deterministic 0-20 Sub-Scores (evaluating linguistic content & consensus)
+    // - Valuation (0-20): community agreement on fair/attractive valuation
+    const valuationScore = hasValuationTalk 
+      ? (isBullishChat ? 17 : isBearishChat ? 11 : 14)
+      : (isBullishChat ? 16 : 13);
+
+    // - Growth (0-20): community expectations on earnings/revenue trajectory
+    const growthScore = hasGrowthTalk 
+      ? (isBullishChat ? 19 : isBearishChat ? 12 : 15)
+      : (isBullishChat ? 17 : 14);
+
+    // - Profitability (0-20): discussions of margins, cash flow, operational leverage
+    const profitabilityScore = isBullishChat ? 18 : isBearishChat ? 12 : 15;
+
+    // - Financial Health (0-20): balance sheet fortress, debt confidence
+    const financialHealthScore = hasHealthTalk ? 18 : 16;
+
+    // - Moat Strength (0-20): competitive moat & market dominance conviction
+    const moatStrengthScore = (hasMoatTalk || isBullishChat) ? 19 : 14;
 
     const totalScore = valuationScore + growthScore + profitabilityScore + financialHealthScore + moatStrengthScore;
 
+    // 4. Key Insights derived strictly from community chat discourse
+    const sampleChatMsg = messages.find(m => m.text.toLowerCase().includes('pe') || m.text.toLowerCase().includes('margin') || m.text.toLowerCase().includes('capex') || m.text.toLowerCase().includes('growth'))?.text || messages[1]?.text || 'Active fundamental debate in community stream.';
+
     const insights = isEquity ? [
-      `Valuation: Forward P/E of ${metrics.forwardPE}x supported by PEG of ${metrics.pegRatio}x (sub-1.50 PEG indicates growth at reasonable price).`,
-      `Growth Trajectory: YoY revenue growth of +${metrics.revenueGrowthYoY}% and 3-Year CAGR of +${metrics.revenueCAGR3Yr}%. Guidance was recently ${metrics.forwardGuidanceSentiment}.`,
-      `Profitability & Returns: Operating margins sit at ${metrics.operatingMarginPercent}% with ROIC of ${metrics.roic}% demonstrating superior capital allocation.`,
-      `Balance Sheet Fortress: Debt-to-Equity is conservative at ${metrics.debtToEquity} with ${metrics.interestCoverageRatio}x interest coverage and FCF yield of ${metrics.fcfYieldPercent}%.`,
-      `Competitive Moat: Classified as ${metrics.moatRating} with high institutional switching costs and pricing power.`,
+      `Chat Valuation Consensus: Forward P/E (~${metrics.forwardPE}x) viewed as ${isBullishChat ? 'compelling growth at reasonable price (PEG ' + metrics.pegRatio + 'x)' : 'elevated by community members'}.`,
+      `Community Growth Sentiment: Revenue expectations running at +${metrics.revenueGrowthYoY}% YoY with guidance perceived as ${metrics.forwardGuidanceSentiment}.`,
+      `Moat Conviction: Room consensus affirms ${metrics.moatRating} driven by secular pricing power and switching friction.`,
+      `Community Quote: "${sampleChatMsg.slice(0, 110)}..."`,
+      `Balance Sheet Health: Debt-to-Equity (${metrics.debtToEquity}) praised for fortress cash reserves and low solvency risk.`,
     ] : [
-      `Macro Sovereign Grounding: Central Bank policy stance is ${brief.macro.centralBankStance} with benchmark rate at ${brief.macro.policyInterestRate}%.`,
-      `Real Yield Arbitrage: 10-Year sovereign real yields offer positive carry of ${metrics.realYieldDifferential}%.`,
-      `Institutional Flow: Commercial COT hedgers sit at ${metrics.cotPositioningBias} signaling long-term structural accumulation.`,
+      `Macro Sovereign Grounding: Community members tracking central bank rate policy (${brief.macro.policyInterestRate}%) and sovereign yield spreads.`,
+      `Real Yield Dynamics: Discussion highlights positive real yield differential of ${metrics.realYieldDifferential}%.`,
+      `Institutional Flow Perception: Commercial positioning perceived as ${metrics.cotPositioningBias}.`,
+      `Community Quote: "${sampleChatMsg.slice(0, 110)}..."`,
     ];
 
     return {

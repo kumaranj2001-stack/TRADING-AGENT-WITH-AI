@@ -60,6 +60,48 @@ export interface MacroeconomicBenchmarks {
   putCallRatio?: number;
 }
 
+// -------------------------------------------------------------
+// COMMUNITY LIVE CHAT DATA MODEL (Sole Input Payload)
+// -------------------------------------------------------------
+export interface CommunityChatMessage {
+  id: string;
+  username: string;
+  userAvatar?: string;
+  badge: 'PRO TRADER' | 'MACRO ANALYST' | 'ALGO SCALPER' | 'CHARTIST' | 'RETAIL' | 'COMMUNITY';
+  ticker: string; // e.g. 'NVDA', 'XAU/USD', 'EUR/USD'
+  tickerTag: string; // e.g. '$NVDA', '$XAUUSD'
+  text: string;
+  timestamp: number;
+  formattedTime: string;
+  sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  likes: number;
+  technicalCitations?: string[];
+  fundamentalCitations?: string[];
+  riskCitations?: string[];
+}
+
+export interface CommunityChatTranscript {
+  symbol: string;
+  tickerTag: string;
+  messages: CommunityChatMessage[];
+  totalMessages: number;
+  bullishCount: number;
+  bearishCount: number;
+  neutralCount: number;
+  consensusSentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  consensusStrengthPercent: number;
+  chatVelocityScore: number; // 0-100
+  dominantThemes: string[];
+  extractedPriceLevels?: {
+    supports: number[];
+    resistances: number[];
+    entryZone?: { min: number; max: number };
+    stopLoss?: number;
+    targets?: number[];
+  };
+  timestamp: number;
+}
+
 export interface DiscoveryBrief {
   symbol: string;
   name: string;
@@ -71,6 +113,7 @@ export interface DiscoveryBrief {
   volatility: VolatilityBenchmarks;
   macro: MacroeconomicBenchmarks;
   summary: string;
+  chatTranscript?: CommunityChatTranscript;
 }
 
 // -------------------------------------------------------------

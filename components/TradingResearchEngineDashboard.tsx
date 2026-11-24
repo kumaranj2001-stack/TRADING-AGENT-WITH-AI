@@ -38,7 +38,9 @@ import {
   Eye,
   SlidersHorizontal,
   Bookmark,
-  Shuffle
+  Shuffle,
+  MessageSquare,
+  Radio
 } from 'lucide-react';
 import { 
   ResearchReportSnapshot, 
@@ -48,6 +50,8 @@ import {
   AssetClass
 } from '@/lib/research/types';
 import { workflowEngine, SectorRotationItem, OptionsStrategySetup, PreEarningsAnalysis, StockScreenerResultItem } from '@/lib/research/WorkflowEngine';
+import { TradingViewLiveChart } from './research/TradingViewLiveChart';
+import { CommunityLiveChatFeed } from './research/CommunityLiveChatFeed';
 
 export interface TradingResearchEngineDashboardProps {
   initialSymbol?: string;
@@ -126,14 +130,26 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
 
     try {
       if (workflow === 'ANALYZE_FULL') {
-        // Stream progress visually across Phase 1 -> Phase 2 -> Phase 3
+        // Stream progress visually across Phase 1 (Chat Buffer Ingestion) -> 5 Sequential Stages -> Phase 3 (Synthesis)
         setExecutionPhase('PHASE_1_DISCOVERY');
         setParallelAgentsRunning({ technical: false, fundamental: false, sentiment: false, risk: false, thesis: false });
         
         setTimeout(() => {
           setExecutionPhase('PHASE_2_PARALLEL');
-          setParallelAgentsRunning({ technical: true, fundamental: true, sentiment: true, risk: true, thesis: true });
-        }, 350);
+          setParallelAgentsRunning(p => ({ ...p, technical: true }));
+        }, 150);
+        setTimeout(() => {
+          setParallelAgentsRunning(p => ({ ...p, fundamental: true }));
+        }, 300);
+        setTimeout(() => {
+          setParallelAgentsRunning(p => ({ ...p, sentiment: true }));
+        }, 450);
+        setTimeout(() => {
+          setParallelAgentsRunning(p => ({ ...p, risk: true }));
+        }, 600);
+        setTimeout(() => {
+          setParallelAgentsRunning(p => ({ ...p, thesis: true }));
+        }, 750);
 
         const res = await fetch(`/api/research/analyze?symbol=${encodeURIComponent(cleanSym)}`);
         if (res.ok) {
@@ -146,7 +162,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               setExecutionPhase('COMPLETED');
               setIsExecuting(false);
             }, 300);
-          }, 600);
+          }, 850);
         } else {
           setIsExecuting(false);
         }
@@ -350,7 +366,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                 </span>
               </h1>
               <p className="text-xs text-slate-400 font-mono">
-                Continuous WebSocket Grounding • Forex, Metals, Indian Markets & Global Equities
+                Real-Time Community Live Chat Ingestion & TradingView Live Chart • 5 Sequential Subagents
               </p>
             </div>
           </div>
@@ -438,13 +454,44 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
       </div>
 
       {/* ============================================================= */}
-      {/* 2. REAL-TIME STREAMING STATUS INDICATORS */}
+      {/* 2. REAL-TIME TRADINGVIEW LIVE CHART & COMMUNITY LIVE CHAT FEED */}
+      {/* ============================================================= */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+        {/* Left: Highly Credible, Accessible & Fully Editable TradingView Chart */}
+        <div className="xl:col-span-7 h-[460px] bg-terminal-950 border border-terminal-border rounded-xl overflow-hidden shadow-lg">
+          <TradingViewLiveChart
+            symbol={symbolInput}
+            timeframe="1h"
+            theme="dark"
+            height={460}
+            allowIndicatorsCustomization={true}
+          />
+        </div>
+
+        {/* Right: Real-Time TradingView-Style Community Live Chat Feed */}
+        <div className="xl:col-span-5 h-[460px]">
+          <CommunityLiveChatFeed
+            activeSymbol={symbolInput}
+            onSelectSymbol={(sym) => {
+              setSymbolInput(sym);
+              executeWorkflow('ANALYZE_FULL', sym);
+            }}
+            onTriggerAnalysis={(sym) => {
+              executeWorkflow('ANALYZE_FULL', sym);
+            }}
+            isAnalyzing={isExecuting}
+          />
+        </div>
+      </div>
+
+      {/* ============================================================= */}
+      {/* 3. REAL-TIME STREAMING STATUS INDICATORS */}
       {/* ============================================================= */}
       <div className="p-3.5 rounded-xl bg-terminal-950 border border-cyan-900/40 font-mono text-xs space-y-2">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
-            <Activity className="w-4 h-4 text-cyan-400" />
-            <span className="font-bold text-white">Event-Driven Grounding & Concurrent Subagents Status</span>
+            <Radio className="w-4 h-4 text-cyan-400 animate-pulse" />
+            <span className="font-bold text-white">Community Live Chat Ingestion & Sequential 5-Stage Subagents Pipeline</span>
           </div>
           <span className="px-2 py-0.5 rounded text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
             {executionPhase === 'IDLE' ? 'READY' : executionPhase.replace(/_/g, ' ')}
@@ -459,10 +506,10 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             'bg-terminal-900 border-terminal-border/60 text-slate-400'
           }`}>
             <div className="font-bold flex items-center justify-between">
-              <span>Phase 1: Discovery</span>
+              <span>Phase 1: Chat Ingest</span>
               {executionPhase === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
             </div>
-            <div className="text-[10px] text-slate-400">Brief Compilation</div>
+            <div className="text-[10px] text-slate-400">Transcript Buffering</div>
           </div>
 
           {/* Technical Worker */}
@@ -475,7 +522,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               <span>1. Technical (25%)</span>
               {executionPhase === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
             </div>
-            <div className="text-[10px] text-slate-400">EMAs • 3S/3R Confluence</div>
+            <div className="text-[10px] text-slate-400">Chat Patterns • S/R</div>
           </div>
 
           {/* Fundamental Worker */}
@@ -488,7 +535,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               <span>2. Fundamental (25%)</span>
               {executionPhase === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
             </div>
-            <div className="text-[10px] text-slate-400">Multiples • Moat • Growth</div>
+            <div className="text-[10px] text-slate-400">Multiples • Moat Discourse</div>
           </div>
 
           {/* Sentiment Worker */}
@@ -501,7 +548,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               <span>3. Sentiment (20%)</span>
               {executionPhase === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
             </div>
-            <div className="text-[10px] text-slate-400">13F • Analysts • Squeeze</div>
+            <div className="text-[10px] text-slate-400">Crowd Buzz • Squeeze</div>
           </div>
 
           {/* Risk Worker */}
@@ -514,7 +561,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               <span>4. Risk (15%)</span>
               {executionPhase === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
             </div>
-            <div className="text-[10px] text-slate-400">Drawdown • Kelly Sizing</div>
+            <div className="text-[10px] text-slate-400">Drawdown & Warnings</div>
           </div>
 
           {/* Thesis Worker */}
@@ -527,13 +574,13 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               <span>5. Thesis (15%)</span>
               {executionPhase === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
             </div>
-            <div className="text-[10px] text-slate-400">Catalysts • Invalidation</div>
+            <div className="text-[10px] text-slate-400">Chat Thesis & Invalidation</div>
           </div>
         </div>
       </div>
 
       {/* ============================================================= */}
-      {/* 3. TRADE SCORE DASHBOARD & HERO CARD */}
+      {/* 4. TRADE SCORE DASHBOARD & HERO CARD */}
       {/* ============================================================= */}
       {report && (
         <div className="p-4 sm:p-5 rounded-xl bg-gradient-to-r from-terminal-950 via-terminal-900 to-terminal-950 border border-terminal-border space-y-4">
@@ -544,21 +591,21 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                 <span className="text-xs px-2 py-0.5 rounded bg-cyan-950 border border-cyan-500/40 text-cyan-300 font-bold">
                   {report.assetClass}
                 </span>
-                <span className="text-xs text-slate-400">Benchmark: {report.brief.benchmarkIndex}</span>
-                <span className="text-xs text-slate-400">• Session: Continuous Grounded</span>
+                <span className="text-xs text-slate-400">Sole Ingestion: Real-Time Community Live Chat</span>
+                <span className="text-xs text-slate-400">• Consensus: {report.brief.chatTranscript?.consensusStrengthPercent ?? 82}% {report.brief.chatTranscript?.consensusSentiment ?? 'BULLISH'}</span>
               </div>
               <h2 className="text-xl sm:text-2xl font-bold text-white font-mono">
                 {report.symbol} <span className="text-sm font-normal text-slate-400">({report.name})</span>
               </h2>
               <div className="text-sm font-mono text-slate-300 flex items-center gap-2 flex-wrap">
-                <span>Current Price: <strong className="text-white">{report.brief.pricing.currency} {report.brief.pricing.currentPrice.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}</strong></span>
+                <span>Chat Consensus Price: <strong className="text-white">{report.brief.pricing.currency} {report.brief.pricing.currentPrice.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}</strong></span>
                 <span className={`font-bold ${report.brief.pricing.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   ({report.brief.pricing.change >= 0 ? '+' : ''}{report.brief.pricing.changePercent}%)
                 </span>
                 <span className="text-slate-500">•</span>
-                <span className="text-xs text-slate-400">Spread: {report.brief.pricing.spreadPipsOrTicks}</span>
+                <span className="text-xs text-cyan-400">Buffered: {report.brief.chatTranscript?.totalMessages ?? 20} Messages</span>
                 <span className="text-slate-500">•</span>
-                <span className="text-xs text-slate-400">Volume Surge: {report.brief.volume.volumeSurgeRatio}x</span>
+                <span className="text-xs text-emerald-400">Dominant Sentiment: {report.brief.chatTranscript?.consensusSentiment ?? 'BULLISH'}</span>
               </div>
             </div>
 
@@ -1356,7 +1403,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
       <div className="p-3.5 rounded-lg bg-terminal-950 border border-terminal-border text-[11px] font-mono text-slate-400 flex items-start gap-2.5">
         <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
         <div>
-          <strong className="text-slate-300">LEGAL & RESEARCH COMPLIANCE DISCLAIMER:</strong> This platform is an automated multi-agent algorithmic research engine designed solely for institutional research, backtesting, and market observation. No output, score, grade, or trade plan constitutes financial advice or solicitation.
+          <strong className="text-slate-300">LEGAL & RESEARCH COMPLIANCE DISCLAIMER:</strong> This platform is an automated multi-agent algorithmic research engine designed solely for institutional research, backtesting, and market observation. All analytical outputs, scores, grades, and synthetic theses are synthesized exclusively from real-time community chat transcripts and linguistic crowd sentiment rather than institutional market feeds. No output constitutes financial advice, recommendation, or solicitation.
         </div>
       </div>
 

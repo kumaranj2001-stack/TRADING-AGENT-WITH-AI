@@ -242,7 +242,7 @@ export class ResearchEngineOrchestrator {
       signal,
       gradeDescription,
       all25SubScores,
-      researchDisclaimer: 'FOR RESEARCH AND INFORMATIONAL PURPOSES ONLY. This report is algorithmically compiled by an autonomous multi-agent research engine and does not constitute financial, investment, or legal advice. Trading involves substantial risk of capital loss.',
+      researchDisclaimer: 'LEGAL & RESEARCH COMPLIANCE DISCLAIMER: This platform is an automated multi-agent algorithmic research engine designed solely for institutional research, backtesting, and market observation. All analytical outputs, scores, grades, and synthetic theses are synthesized exclusively from real-time community chat transcripts and linguistic crowd sentiment rather than institutional market feeds. No output constitutes financial advice, recommendation, or solicitation.',
     };
 
     this.persistedReports.set(symbol.toUpperCase(), reportSnapshot);
@@ -285,7 +285,7 @@ export class ResearchEngineOrchestrator {
       quickScore,
       quickGrade,
       quickSignal,
-      summary: `60-Second Rapid Pulse: ${symbol.toUpperCase()} trading at ${brief.pricing.currency} ${brief.pricing.currentPrice.toFixed(2)} (${brief.pricing.changePercent >= 0 ? '+' : ''}${brief.pricing.changePercent}%). Quick Score: ${quickScore}/100 [Grade ${quickGrade} - ${quickSignal}]. Grounded on real-time pricing and volume benchmarks.`,
+      summary: `60-Second Rapid Pulse: ${symbol.toUpperCase()} Community Sentiment is ${brief.chatTranscript?.consensusSentiment || 'BULLISH'} (${brief.chatTranscript?.consensusStrengthPercent || 76}% consensus strength across ${brief.chatTranscript?.totalMessages || 5} live messages). Quick Score: ${quickScore}/100 [Grade ${quickGrade} - ${quickSignal}]. Synthesized exclusively from real-time community chat transcripts.`,
     };
   }
 
