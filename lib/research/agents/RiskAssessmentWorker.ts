@@ -136,9 +136,9 @@ export class RiskAssessmentWorker {
       totalScore,
       keyInsights: [
         `Risk Profile Inverted Score: ${totalScore}/100 (Higher indicates superior safety and downside protection).`,
-        `Kelly Optimal Sizing: Prudent 2.50% NAV position allocation with max capital risk capped at $${positionSizingKelly.maxRiskExposureDollars}.`,
-        `Stress-Tested Scenarios: Mild correction target at $${bearCaseDrawdownScenario.mildCorrectionPrice} (-7%), Deep correction cushion at $${bearCaseDrawdownScenario.deepCorrectionPrice} (-15%).`,
-        `Deep Institutional Liquidity: Daily volume dollar value of $${(liquidityAssessment.dailyVolumeDollar / 1e6).toFixed(1)}M with negligible ${liquidityAssessment.bidAskSlippagePercent.toFixed(3)}% spread slippage impact.`,
+        `Kelly Optimal Sizing: Prudent 2.50% NAV position allocation with max capital risk capped at ${brief.pricing.currency} ${positionSizingKelly.maxRiskExposureDollars}.`,
+        `Stress-Tested Scenarios: Mild correction target at ${brief.pricing.currency} ${bearCaseDrawdownScenario.mildCorrectionPrice} (-7%), Deep correction cushion at ${brief.pricing.currency} ${bearCaseDrawdownScenario.deepCorrectionPrice} (-15%).`,
+        `Deep Institutional Liquidity: Daily volume dollar value of ${brief.pricing.currency} ${(liquidityAssessment.dailyVolumeDollar / 1e6).toFixed(1)}M with negligible ${liquidityAssessment.bidAskSlippagePercent.toFixed(3)}% spread slippage impact.`,
         `Top Ranked Factor: Macro interest rate stickiness identified as primary risk factor with strict stop-loss mitigation.`,
       ],
     };

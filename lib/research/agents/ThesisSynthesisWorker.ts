@@ -88,13 +88,13 @@ export class ThesisSynthesisWorker {
     const scalingPlan = {
       initialTranchePercent: 50,
       scalingTriggers: [
-        `Deploy 50% initial tranche in Entry Zone ($${(price - atr * 0.2).toFixed(2)} - $${price.toFixed(2)}).`,
+        `Deploy 50% initial tranche in Entry Zone (${brief.pricing.currency} ${(price - atr * 0.2).toFixed(2)} - ${brief.pricing.currency} ${price.toFixed(2)}).`,
         `Add 25% second tranche upon confirmed breakout above Resistance 1 with volume confirmation.`,
         `Scale in final 25% on first successful retest of breakout level as new support.`,
       ],
       profitTakingSchedule: [
-        `Trim 33% at Target 1 ($${(price + atr * 1.8).toFixed(2)}) and elevate Stop Loss to Break-Even.`,
-        `Trim 33% at Target 2 ($${(price + atr * 3.2).toFixed(2)}) and lock in substantial realized gains.`,
+        `Trim 33% at Target 1 (${brief.pricing.currency} ${(price + atr * 1.8).toFixed(2)}) and elevate Stop Loss to Break-Even.`,
+        `Trim 33% at Target 2 (${brief.pricing.currency} ${(price + atr * 3.2).toFixed(2)}) and lock in substantial realized gains.`,
         `Hold remaining 34% runner position trailing behind 15M/1H swing lows.`,
       ],
     };
@@ -114,7 +114,7 @@ export class ThesisSynthesisWorker {
     const conviction = 18;
     const totalScore = catalystClarity + timing + asymmetry + edge + conviction;
 
-    const executiveThesis = `${brief.symbol} displays a high-conviction ${isBull ? 'BULLISH' : 'SELECTIVE ACCUMULATION'} posture across technical market structure, institutional order flow, and fundamental momentum. Favorable asymmetry (+${upsidePotential}% upside vs -${downsideRisk}% risk) warrants a disciplined 2.5% portfolio allocation with strict invalidation anchored at $${invalidationTrigger.priceLevel.toFixed(2)}.`;
+    const executiveThesis = `${brief.symbol} displays a high-conviction ${isBull ? 'BULLISH' : 'SELECTIVE ACCUMULATION'} posture across technical market structure, institutional order flow, and fundamental momentum. Favorable asymmetry (+${upsidePotential}% upside vs -${downsideRisk}% risk) warrants a disciplined 2.5% portfolio allocation with strict invalidation anchored at ${brief.pricing.currency} ${invalidationTrigger.priceLevel.toFixed(2)}.`;
 
     return {
       agentName: 'Thesis Synthesis Agent',
@@ -139,7 +139,7 @@ export class ThesisSynthesisWorker {
         `Executive Thesis: ${executiveThesis}`,
         `Asymmetry Profile: 1:${(upsidePotential / (downsideRisk || 1)).toFixed(2)} upside-to-downside asymmetry favorable for swing deployment.`,
         `Disciplined Scaling: 50% initial tranche followed by staged scale-in upon volume breakout confirmation.`,
-        `Hard Invalidation: Clear structural line in the sand at $${invalidationTrigger.priceLevel.toFixed(2)} (${invalidationTrigger.macroOrEventCondition}).`,
+        `Hard Invalidation: Clear structural line in the sand at ${brief.pricing.currency} ${invalidationTrigger.priceLevel.toFixed(2)} (${invalidationTrigger.macroOrEventCondition}).`,
       ],
     };
   }

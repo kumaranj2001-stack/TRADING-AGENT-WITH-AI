@@ -32,7 +32,13 @@ import {
   RefreshCw,
   Terminal,
   Crosshair,
-  ListOrdered
+  ListOrdered,
+  Calendar,
+  Clock,
+  Eye,
+  SlidersHorizontal,
+  Bookmark,
+  Shuffle
 } from 'lucide-react';
 import { 
   ResearchReportSnapshot, 
@@ -41,11 +47,23 @@ import {
   ResearchEngineWorkflow,
   AssetClass
 } from '@/lib/research/types';
+import { workflowEngine, SectorRotationItem, OptionsStrategySetup, PreEarningsAnalysis, StockScreenerResultItem } from '@/lib/research/WorkflowEngine';
 
 export interface TradingResearchEngineDashboardProps {
   initialSymbol?: string;
   onBackToTerminal?: () => void;
 }
+
+export type DashboardTab = 
+  | 'overview' 
+  | 'technical' 
+  | 'fundamental' 
+  | 'sentiment' 
+  | 'risk' 
+  | 'catalyst' 
+  | 'bull-bear' 
+  | 'strategy' 
+  | 'workflows';
 
 export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashboardProps> = ({
   initialSymbol = 'NVDA',
@@ -53,7 +71,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
 }) => {
   const [symbolInput, setSymbolInput] = useState<string>(initialSymbol);
   const [activeWorkflow, setActiveWorkflow] = useState<ResearchEngineWorkflow>('ANALYZE_FULL');
-  const [activeTab, setActiveTab] = useState<'overview' | 'technical' | 'fundamental' | 'sentiment' | 'risk' | 'thesis' | 'strategy' | 'workflows'>('overview');
+  const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   
   // Execution & Streaming State
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
@@ -69,14 +87,16 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
   // Report Data State
   const [report, setReport] = useState<ResearchReportSnapshot | null>(null);
   const [quickSnapshot, setQuickSnapshot] = useState<any>(null);
-  const [sectorData, setSectorData] = useState<any[]>([]);
+  const [sectorData, setSectorData] = useState<SectorRotationItem[]>([]);
   const [compareData, setCompareData] = useState<any>(null);
+  const [compareSymbolA, setCompareSymbolA] = useState<string>('NVDA');
   const [compareSymbolB, setCompareSymbolB] = useState<string>('AMD');
   const [optionsData, setOptionsData] = useState<any>(null);
-  const [earningsData, setEarningsData] = useState<any>(null);
+  const [earningsData, setEarningsData] = useState<PreEarningsAnalysis | null>(null);
   const [portfolioData, setPortfolioData] = useState<any>(null);
-  const [screenerData, setScreenerData] = useState<any[]>([]);
+  const [screenerData, setScreenerData] = useState<StockScreenerResultItem[]>([]);
   const [watchlistData, setWatchlistData] = useState<any[]>([]);
+  const [standaloneAgentData, setStandaloneAgentData] = useState<any>(null);
   const [showPdfModal, setShowPdfModal] = useState<boolean>(false);
   const [pdfHtml, setPdfHtml] = useState<string>('');
 
@@ -85,7 +105,20 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
     executeWorkflow('ANALYZE_FULL', initialSymbol);
   }, []);
 
-  const executeWorkflow = async (workflow: ResearchEngineWorkflow, sym: string = symbolInput) => {
+  const handleCommandSubmit = (cmdText: string) => {
+    const parsed = workflowEngine.parseSlashCommand(cmdText);
+    setSymbolInput(parsed.primarySymbol);
+    if (parsed.secondarySymbol) {
+      setCompareSymbolB(parsed.secondarySymbol);
+    }
+    executeWorkflow(parsed.parsedWorkflow, parsed.primarySymbol, parsed.secondarySymbol);
+  };
+
+  const executeWorkflow = async (
+    workflow: ResearchEngineWorkflow, 
+    sym: string = symbolInput, 
+    symB: string = compareSymbolB
+  ) => {
     const cleanSym = sym.trim().toUpperCase() || 'NVDA';
     setSymbolInput(cleanSym);
     setActiveWorkflow(workflow);
@@ -97,7 +130,6 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
         setExecutionPhase('PHASE_1_DISCOVERY');
         setParallelAgentsRunning({ technical: false, fundamental: false, sentiment: false, risk: false, thesis: false });
         
-        // Simulating subagent dispatch telemetry
         setTimeout(() => {
           setExecutionPhase('PHASE_2_PARALLEL');
           setParallelAgentsRunning({ technical: true, fundamental: true, sentiment: true, risk: true, thesis: true });
@@ -125,6 +157,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
           const data = await res.json();
           setQuickSnapshot(data);
           setExecutionPhase('COMPLETED');
+          setActiveTab('workflows');
         }
         setIsExecuting(false);
       } else if (workflow === 'SECTOR_ROTATION') {
@@ -132,13 +165,17 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
         if (res.ok) {
           const data = await res.json();
           setSectorData(data.sectors);
+          setActiveTab('workflows');
         }
         setIsExecuting(false);
       } else if (workflow === 'COMPARE_ASSETS') {
-        const res = await fetch(`/api/research/workflows?action=COMPARE&symbolA=${encodeURIComponent(cleanSym)}&symbolB=${encodeURIComponent(compareSymbolB)}`);
+        setCompareSymbolA(cleanSym);
+        setCompareSymbolB(symB);
+        const res = await fetch(`/api/research/workflows?action=COMPARE&symbolA=${encodeURIComponent(cleanSym)}&symbolB=${encodeURIComponent(symB)}`);
         if (res.ok) {
           const data = await res.json();
           setCompareData(data.comparison);
+          setActiveTab('workflows');
         }
         setIsExecuting(false);
       } else if (workflow === 'OPTIONS_STRATEGIES') {
@@ -146,6 +183,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
         if (res.ok) {
           const data = await res.json();
           setOptionsData(data.options);
+          setActiveTab('workflows');
         }
         setIsExecuting(false);
       } else if (workflow === 'PRE_EARNINGS') {
@@ -153,6 +191,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
         if (res.ok) {
           const data = await res.json();
           setEarningsData(data.earnings);
+          setActiveTab('workflows');
         }
         setIsExecuting(false);
       } else if (workflow === 'PORTFOLIO_REBALANCE') {
@@ -160,6 +199,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
         if (res.ok) {
           const data = await res.json();
           setPortfolioData(data.portfolio);
+          setActiveTab('workflows');
         }
         setIsExecuting(false);
       } else if (workflow === 'STOCK_SCREENER') {
@@ -167,6 +207,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
         if (res.ok) {
           const data = await res.json();
           setScreenerData(data.results);
+          setActiveTab('workflows');
         }
         setIsExecuting(false);
       } else if (workflow === 'SCORED_WATCHLIST') {
@@ -174,13 +215,53 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
         if (res.ok) {
           const data = await res.json();
           setWatchlistData(data.watchlist);
+          setActiveTab('workflows');
         }
         setIsExecuting(false);
       } else if (workflow === 'REPORT_PDF') {
-        handleDownloadPdf(cleanSym);
+        await handleDownloadPdf(cleanSym);
+        setIsExecuting(false);
+      } else if (workflow === 'STANDALONE_TECH') {
+        const res = await fetch(`/api/research/workflows?action=STANDALONE_TECH&symbol=${encodeURIComponent(cleanSym)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setStandaloneAgentData(data);
+          setActiveTab('technical');
+        }
+        setIsExecuting(false);
+      } else if (workflow === 'STANDALONE_FUND') {
+        const res = await fetch(`/api/research/workflows?action=STANDALONE_FUND&symbol=${encodeURIComponent(cleanSym)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setStandaloneAgentData(data);
+          setActiveTab('fundamental');
+        }
+        setIsExecuting(false);
+      } else if (workflow === 'STANDALONE_SENT') {
+        const res = await fetch(`/api/research/workflows?action=STANDALONE_SENT&symbol=${encodeURIComponent(cleanSym)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setStandaloneAgentData(data);
+          setActiveTab('sentiment');
+        }
+        setIsExecuting(false);
+      } else if (workflow === 'STANDALONE_RISK') {
+        const res = await fetch(`/api/research/workflows?action=STANDALONE_RISK&symbol=${encodeURIComponent(cleanSym)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setStandaloneAgentData(data);
+          setActiveTab('risk');
+        }
+        setIsExecuting(false);
+      } else if (workflow === 'STANDALONE_THESIS') {
+        const res = await fetch(`/api/research/workflows?action=STANDALONE_THESIS&symbol=${encodeURIComponent(cleanSym)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setStandaloneAgentData(data);
+          setActiveTab('catalyst');
+        }
         setIsExecuting(false);
       } else {
-        // Standalone views
         const res = await fetch(`/api/research/analyze?symbol=${encodeURIComponent(cleanSym)}`);
         if (res.ok) {
           const data = await res.json();
@@ -240,6 +321,16 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
     );
   };
 
+  // SVG Speedometer Gauge Angle Calculation
+  // 0 -> -90 deg, 100 -> +90 deg
+  const scoreAngle = report ? (report.compositeScore / 100) * 180 - 90 : 0;
+  const gradeGaugeColor = 
+    report?.grade === 'A+' ? '#10b981' :
+    report?.grade === 'A' ? '#059669' :
+    report?.grade === 'B' ? '#3b82f6' :
+    report?.grade === 'C' ? '#f59e0b' :
+    report?.grade === 'D' ? '#f97316' : '#ef4444';
+
   return (
     <div className="bg-terminal-900 border border-terminal-border rounded-xl p-4 sm:p-6 shadow-2xl space-y-6 text-slate-200">
       {/* ============================================================= */}
@@ -259,7 +350,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                 </span>
               </h1>
               <p className="text-xs text-slate-400 font-mono">
-                Universal Real-Time Grounding • Forex, Metals, Indian Markets & Global Equities
+                Continuous WebSocket Grounding • Forex, Metals, Indian Markets & Global Equities
               </p>
             </div>
           </div>
@@ -295,19 +386,19 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               value={symbolInput}
               onChange={(e) => setSymbolInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') executeWorkflow('ANALYZE_FULL', symbolInput);
+                if (e.key === 'Enter') handleCommandSubmit(symbolInput);
               }}
-              placeholder="Enter symbol or slash command (e.g. /trade analyze NVDA, /trade compare NVDA AMD, /trade sector)"
+              placeholder="Enter symbol or slash command (e.g. /trade analyze NVDA, /trade compare NVDA AMD, /trade quick XAU/USD, /trade sector)"
               className="w-full pl-9 pr-4 py-2 bg-terminal-950 border border-terminal-border rounded-lg text-xs font-mono text-white focus:outline-none focus:border-cyan-400"
             />
           </div>
           <button
-            onClick={() => executeWorkflow('ANALYZE_FULL', symbolInput)}
+            onClick={() => handleCommandSubmit(symbolInput)}
             disabled={isExecuting}
             className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md disabled:opacity-50"
           >
             <Zap className={`w-3.5 h-3.5 ${isExecuting ? 'animate-spin' : ''}`} />
-            <span>{isExecuting ? 'ANALYZING...' : 'RUN FLAGSHIP ANALYSIS'}</span>
+            <span>{isExecuting ? 'EXECUTING...' : 'RUN COMMAND / WORKFLOW'}</span>
           </button>
         </div>
 
@@ -323,11 +414,14 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             { label: 'TSLA (Auto/AI)', sym: 'TSLA' },
             { label: 'XAU/USD (Spot Gold)', sym: 'XAU/USD' },
             { label: 'XAG/USD (Silver)', sym: 'XAG/USD' },
+            { label: 'WTI_CRUDE (Oil)', sym: 'WTI_CRUDE' },
             { label: 'NIFTY 50 (NSE)', sym: 'NIFTY 50' },
+            { label: 'BANK NIFTY (NSE)', sym: 'BANK NIFTY' },
             { label: 'RELIANCE (NSE)', sym: 'RELIANCE' },
             { label: 'HDFC BANK (NSE)', sym: 'HDFC BANK' },
             { label: 'EUR/USD (Forex)', sym: 'EUR/USD' },
             { label: 'GBP/USD (Forex)', sym: 'GBP/USD' },
+            { label: 'USD/JPY (Forex)', sym: 'USD/JPY' },
           ].map((item) => (
             <button
               key={item.sym}
@@ -353,7 +447,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             <span className="font-bold text-white">Event-Driven Grounding & Concurrent Subagents Status</span>
           </div>
           <span className="px-2 py-0.5 rounded text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
-            {executionPhase === 'IDLE' ? 'READY' : executionPhase.replace('_', ' ')}
+            {executionPhase === 'IDLE' ? 'READY' : executionPhase.replace(/_/g, ' ')}
           </span>
         </div>
 
@@ -364,7 +458,10 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             executionPhase === 'COMPLETED' || executionPhase === 'PHASE_2_PARALLEL' || executionPhase === 'PHASE_3_SYNTHESIS' ? 'bg-terminal-900 border-emerald-500/40 text-emerald-400' :
             'bg-terminal-900 border-terminal-border/60 text-slate-400'
           }`}>
-            <div className="font-bold">Phase 1: Discovery</div>
+            <div className="font-bold flex items-center justify-between">
+              <span>Phase 1: Discovery</span>
+              {executionPhase === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+            </div>
             <div className="text-[10px] text-slate-400">Brief Compilation</div>
           </div>
 
@@ -374,8 +471,11 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             executionPhase === 'COMPLETED' ? 'bg-terminal-900 border-emerald-500/40 text-emerald-400' :
             'bg-terminal-900 border-terminal-border/60 text-slate-400'
           }`}>
-            <div className="font-bold">1. Technical (25%)</div>
-            <div className="text-[10px] text-slate-400">EMAs • Confluence</div>
+            <div className="font-bold flex items-center justify-between">
+              <span>1. Technical (25%)</span>
+              {executionPhase === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+            </div>
+            <div className="text-[10px] text-slate-400">EMAs • 3S/3R Confluence</div>
           </div>
 
           {/* Fundamental Worker */}
@@ -384,8 +484,11 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             executionPhase === 'COMPLETED' ? 'bg-terminal-900 border-emerald-500/40 text-emerald-400' :
             'bg-terminal-900 border-terminal-border/60 text-slate-400'
           }`}>
-            <div className="font-bold">2. Fundamental (25%)</div>
-            <div className="text-[10px] text-slate-400">Multiples • Moat</div>
+            <div className="font-bold flex items-center justify-between">
+              <span>2. Fundamental (25%)</span>
+              {executionPhase === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+            </div>
+            <div className="text-[10px] text-slate-400">Multiples • Moat • Growth</div>
           </div>
 
           {/* Sentiment Worker */}
@@ -394,7 +497,10 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             executionPhase === 'COMPLETED' ? 'bg-terminal-900 border-emerald-500/40 text-emerald-400' :
             'bg-terminal-900 border-terminal-border/60 text-slate-400'
           }`}>
-            <div className="font-bold">3. Sentiment (20%)</div>
+            <div className="font-bold flex items-center justify-between">
+              <span>3. Sentiment (20%)</span>
+              {executionPhase === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+            </div>
             <div className="text-[10px] text-slate-400">13F • Analysts • Squeeze</div>
           </div>
 
@@ -404,7 +510,10 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             executionPhase === 'COMPLETED' ? 'bg-terminal-900 border-emerald-500/40 text-emerald-400' :
             'bg-terminal-900 border-terminal-border/60 text-slate-400'
           }`}>
-            <div className="font-bold">4. Risk (15%)</div>
+            <div className="font-bold flex items-center justify-between">
+              <span>4. Risk (15%)</span>
+              {executionPhase === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+            </div>
             <div className="text-[10px] text-slate-400">Drawdown • Kelly Sizing</div>
           </div>
 
@@ -414,7 +523,10 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             executionPhase === 'COMPLETED' ? 'bg-terminal-900 border-emerald-500/40 text-emerald-400' :
             'bg-terminal-900 border-terminal-border/60 text-slate-400'
           }`}>
-            <div className="font-bold">5. Thesis (15%)</div>
+            <div className="font-bold flex items-center justify-between">
+              <span>5. Thesis (15%)</span>
+              {executionPhase === 'COMPLETED' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+            </div>
             <div className="text-[10px] text-slate-400">Catalysts • Invalidation</div>
           </div>
         </div>
@@ -425,37 +537,69 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
       {/* ============================================================= */}
       {report && (
         <div className="p-4 sm:p-5 rounded-xl bg-gradient-to-r from-terminal-950 via-terminal-900 to-terminal-950 border border-terminal-border space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 font-mono">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+            {/* Left: Asset Details */}
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 font-mono flex-wrap">
                 <span className="text-xs px-2 py-0.5 rounded bg-cyan-950 border border-cyan-500/40 text-cyan-300 font-bold">
                   {report.assetClass}
                 </span>
                 <span className="text-xs text-slate-400">Benchmark: {report.brief.benchmarkIndex}</span>
+                <span className="text-xs text-slate-400">• Session: Continuous Grounded</span>
               </div>
-              <h2 className="text-xl sm:text-2xl font-bold text-white mt-1 font-mono">
+              <h2 className="text-xl sm:text-2xl font-bold text-white font-mono">
                 {report.symbol} <span className="text-sm font-normal text-slate-400">({report.name})</span>
               </h2>
-              <div className="text-sm font-mono mt-1 text-slate-300 flex items-center gap-2">
-                <span>Current Price: <strong className="text-white">{report.brief.pricing.currency} {report.brief.pricing.currentPrice.toFixed(2)}</strong></span>
+              <div className="text-sm font-mono text-slate-300 flex items-center gap-2 flex-wrap">
+                <span>Current Price: <strong className="text-white">{report.brief.pricing.currency} {report.brief.pricing.currentPrice.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}</strong></span>
                 <span className={`font-bold ${report.brief.pricing.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   ({report.brief.pricing.change >= 0 ? '+' : ''}{report.brief.pricing.changePercent}%)
                 </span>
                 <span className="text-slate-500">•</span>
                 <span className="text-xs text-slate-400">Spread: {report.brief.pricing.spreadPipsOrTicks}</span>
+                <span className="text-slate-500">•</span>
+                <span className="text-xs text-slate-400">Volume Surge: {report.brief.volume.volumeSurgeRatio}x</span>
               </div>
             </div>
 
-            {/* Composite Score & Badge */}
-            <div className="flex items-center gap-4 bg-terminal-950/80 p-3 rounded-xl border border-terminal-border/80">
-              <div className="text-center font-mono">
-                <div className="text-[10px] text-slate-400 uppercase font-semibold">COMPOSITE SCORE</div>
-                <div className="text-2xl sm:text-3xl font-extrabold text-cyan-400">{report.compositeScore}<span className="text-xs text-slate-400">/100</span></div>
+            {/* Right: SVG Semi-Circular Score Gauge */}
+            <div className="flex items-center gap-4 bg-terminal-950/90 p-3 rounded-xl border border-terminal-border shrink-0">
+              <div className="relative w-32 h-20 flex flex-col items-center justify-end">
+                {/* SVG Semi-Circle Speedometer */}
+                <svg viewBox="0 0 100 55" className="w-full h-full overflow-visible">
+                  {/* Background Arc */}
+                  <path
+                    d="M 10 50 A 40 40 0 0 1 90 50"
+                    fill="none"
+                    stroke="#1e293b"
+                    strokeWidth="8"
+                    strokeLinecap="round"
+                  />
+                  {/* Colored Progress Arc */}
+                  <path
+                    d="M 10 50 A 40 40 0 0 1 90 50"
+                    fill="none"
+                    stroke={gradeGaugeColor}
+                    strokeWidth="8"
+                    strokeLinecap="round"
+                    strokeDasharray="126"
+                    strokeDashoffset={`${126 - (report.compositeScore / 100) * 126}`}
+                  />
+                  {/* Needle */}
+                  <g transform={`translate(50, 50) rotate(${scoreAngle})`}>
+                    <line x1="0" y1="0" x2="0" y2="-36" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                    <circle cx="0" cy="0" r="3.5" fill="#ffffff" />
+                  </g>
+                </svg>
+                <div className="absolute bottom-0 text-center font-mono">
+                  <div className="text-lg font-black text-white leading-none">{report.compositeScore}</div>
+                  <div className="text-[9px] text-slate-400 uppercase leading-none mt-0.5">SCORE / 100</div>
+                </div>
               </div>
-              <div className="h-10 w-px bg-terminal-border"></div>
-              <div>
+
+              <div className="space-y-1">
                 {getGradeBadge(report.grade, report.signal)}
-                <div className="text-[11px] text-slate-400 mt-1 font-mono max-w-xs line-clamp-1">
+                <div className="text-[11px] text-slate-400 font-mono max-w-xs leading-snug">
                   {report.gradeDescription}
                 </div>
               </div>
@@ -463,7 +607,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
           </div>
 
           {/* 5-Dimension Weighted Table */}
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto pt-2">
             <table className="w-full text-xs font-mono text-left">
               <thead>
                 <tr className="border-b border-terminal-border/80 text-slate-400 text-[11px]">
@@ -495,23 +639,24 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
       {/* ============================================================= */}
       {/* 4. WORKFLOW & RESEARCH TAB NAVIGATION */}
       {/* ============================================================= */}
-      <div className="border-b border-terminal-border flex items-center gap-1 overflow-x-auto text-xs font-mono">
+      <div className="border-b border-terminal-border flex items-center gap-1 overflow-x-auto text-xs font-mono pb-1">
         {[
-          { id: 'overview', label: 'Overview & 25 Sub-Scores' },
-          { id: 'technical', label: 'Technical Levels (3S / 3R)' },
-          { id: 'fundamental', label: 'Fundamentals & Moat' },
-          { id: 'sentiment', label: 'Sentiment & Smart Money' },
-          { id: 'risk', label: 'Risk Matrix & Sizing' },
-          { id: 'thesis', label: 'Catalysts & Thesis' },
-          { id: 'strategy', label: 'Realistic Trade Plan' },
-          { id: 'workflows', label: 'All 16 Workflows Hub' },
+          { id: 'overview', label: '01. Overview & 25 Sub-Scores' },
+          { id: 'technical', label: '02. Technical Levels (3S / 3R)' },
+          { id: 'fundamental', label: '03. Fundamentals & Moat' },
+          { id: 'sentiment', label: '04. Sentiment & Smart Money' },
+          { id: 'risk', label: '05. Risk Matrix & Position Sizing' },
+          { id: 'catalyst', label: '06. Catalyst Timeline' },
+          { id: 'bull-bear', label: '07. Bull vs. Bear Cards' },
+          { id: 'strategy', label: '08. Entry/Exit Strategy Table' },
+          { id: 'workflows', label: '09. All 16 Workflows Hub' },
         ].map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as any)}
             className={`px-3 py-2 border-b-2 font-medium transition-colors whitespace-nowrap ${
               activeTab === tab.id
-                ? 'border-cyan-400 text-cyan-300 font-bold'
+                ? 'border-cyan-400 text-cyan-300 font-bold bg-terminal-950/50'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -530,10 +675,10 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
           <div className="p-4 rounded-xl bg-terminal-950 border border-terminal-border space-y-3 font-mono text-xs">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <ListOrdered className="w-4 h-4 text-cyan-400" />
-              <span>Full 25 Sub-Score Matrix Breakdown (5 Sub-Scores per AI Agent)</span>
+              <span>Full 25 Sub-Score Matrix Breakdown (5 Sub-Scores per AI Subagent)</span>
             </h3>
             <p className="text-slate-400 text-[11px]">
-              Every specialized agent outputs five strict 0–20 sub-scores across its domain. Risk Assessment sub-scores are inverted so higher scores consistently represent superior safety.
+              Every specialized agent returns five strict 0–20 sub-scores within operational boundaries. Risk Assessment sub-scores are inverted where higher score equals lower risk / superior capital protection.
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 pt-2">
@@ -580,7 +725,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               {report.technical.supportLevels.map((lvl, idx) => (
                 <div key={idx} className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60">
                   <div className="flex justify-between text-white font-bold">
-                    <span>S{idx + 1}: {report.brief.pricing.currency} {lvl.price.toFixed(2)}</span>
+                    <span>S{idx + 1}: {report.brief.pricing.currency} {lvl.price.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}</span>
                     <span className="text-emerald-400 text-[10px]">{lvl.strength}</span>
                   </div>
                   <div className="text-slate-400 text-[11px] mt-1">{lvl.confluenceFactors.join(' • ')}</div>
@@ -597,7 +742,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               {report.technical.resistanceLevels.map((lvl, idx) => (
                 <div key={idx} className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60">
                   <div className="flex justify-between text-white font-bold">
-                    <span>R{idx + 1}: {report.brief.pricing.currency} {lvl.price.toFixed(2)}</span>
+                    <span>R{idx + 1}: {report.brief.pricing.currency} {lvl.price.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}</span>
                     <span className="text-rose-400 text-[10px]">{lvl.strength}</span>
                   </div>
                   <div className="text-slate-400 text-[11px] mt-1">{lvl.confluenceFactors.join(' • ')}</div>
@@ -611,7 +756,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             <div className="p-3 rounded-lg bg-terminal-950 border border-terminal-border space-y-1">
               <span className="text-slate-400 text-[11px]">EMA Ribbon Stack</span>
               <div className="font-bold text-white text-sm">{report.technical.emaAlignment}</div>
-              <span className="text-[10px] text-cyan-400">20: {report.technical.ema20} • 50: {report.technical.ema50}</span>
+              <span className="text-[10px] text-cyan-400">20: {report.technical.ema20} • 50: {report.technical.ema50} • 200: {report.technical.ema200}</span>
             </div>
 
             <div className="p-3 rounded-lg bg-terminal-950 border border-terminal-border space-y-1">
@@ -627,9 +772,9 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             </div>
 
             <div className="p-3 rounded-lg bg-terminal-950 border border-terminal-border space-y-1">
-              <span className="text-slate-400 text-[11px]">Bollinger Bands</span>
+              <span className="text-slate-400 text-[11px]">Bollinger Bands & Squeeze</span>
               <div className="font-bold text-white text-sm">%B: {report.technical.bollingerBands.percentB}</div>
-              <span className="text-[10px] text-slate-400">Mid: {report.technical.bollingerBands.middle}</span>
+              <span className="text-[10px] text-slate-400">{report.technical.bollingerBands.isSqueeze ? 'Squeeze Detected' : 'Normal Volatility'}</span>
             </div>
           </div>
         </div>
@@ -739,20 +884,62 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             <div className="p-3 rounded-lg bg-terminal-950 border border-terminal-border space-y-1">
               <span className="text-slate-400 text-[11px]">Kelly Criterion Recommended Sizing</span>
               <div className="text-base font-bold text-cyan-400">{report.risk.positionSizingKelly.recommendedPositionPercentNAV}% of Portfolio NAV</div>
-              <div className="text-slate-400 text-[10px]">Max Risk Exposure: ${report.risk.positionSizingKelly.maxRiskExposureDollars}</div>
+              <div className="text-slate-400 text-[10px]">Max Capital Risk: {report.brief.pricing.currency} {report.risk.positionSizingKelly.maxRiskExposureDollars}</div>
             </div>
 
             <div className="p-3 rounded-lg bg-terminal-950 border border-terminal-border space-y-1">
               <span className="text-slate-400 text-[11px]">Stress-Tested Bear-Case Drawdowns</span>
-              <div className="text-base font-bold text-rose-400">Mild (-7%): ${report.risk.bearCaseDrawdownScenario.mildCorrectionPrice}</div>
-              <div className="text-slate-400 text-[10px]">Deep (-15%): ${report.risk.bearCaseDrawdownScenario.deepCorrectionPrice}</div>
+              <div className="text-base font-bold text-rose-400">Mild (-7%): {report.brief.pricing.currency} {report.risk.bearCaseDrawdownScenario.mildCorrectionPrice}</div>
+              <div className="text-slate-400 text-[10px]">Deep (-15%): {report.brief.pricing.currency} {report.risk.bearCaseDrawdownScenario.deepCorrectionPrice}</div>
             </div>
           </div>
         </div>
       )}
 
-      {/* TAB 6: CATALYSTS & THESIS */}
-      {activeTab === 'thesis' && report && (
+      {/* TAB 6: CATALYST TIMELINE */}
+      {activeTab === 'catalyst' && report && (
+        <div className="space-y-4 font-mono text-xs">
+          <div className="p-4 rounded-xl bg-terminal-950 border border-terminal-border space-y-3">
+            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-cyan-400" />
+              <span>Upcoming Catalyst Timeline & Milestone Windows</span>
+            </h4>
+            <div className="space-y-3 pt-1">
+              {report.thesis.catalystCalendar.map((cat, i) => (
+                <div key={cat.id || i} className="p-3 rounded-lg bg-terminal-900 border border-terminal-border/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/40 shrink-0 mt-0.5">
+                      <Clock className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <strong className="text-white text-xs sm:text-sm">{cat.title}</strong>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                          {cat.type}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">Execution Window: <strong className="text-slate-200">{cat.dateOrWindow}</strong></div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                      cat.expectedImpact === 'HIGH' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-slate-800 text-slate-300 border-slate-700'
+                    }`}>
+                      {cat.expectedImpact} IMPACT
+                    </span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                      {cat.directionalBias}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 7: BULL VS. BEAR CARDS */}
+      {activeTab === 'bull-bear' && report && (
         <div className="space-y-4 font-mono text-xs">
           <div className="p-4 rounded-xl bg-terminal-950 border border-terminal-border space-y-2">
             <h4 className="text-sm font-bold text-white">Executive Core Investment Thesis:</h4>
@@ -760,32 +947,42 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-4 rounded-xl bg-terminal-950 border border-emerald-900/40 space-y-2">
-              <h4 className="text-sm font-bold text-emerald-400">Top Bullish Catalysts & Targets</h4>
-              {report.thesis.bullCatalysts.map((c, i) => (
-                <div key={i} className="p-2 rounded bg-terminal-900 border border-terminal-border/60">
-                  <strong className="text-white">{c.title}</strong>
-                  <div className="text-[11px] text-slate-400 mt-0.5">{c.catalystExplanation}</div>
-                  <div className="text-emerald-400 font-bold mt-1">Target: ${c.upsideTargetPrice} (+{c.upsidePotentialPercent}%)</div>
-                </div>
-              ))}
+            <div className="p-4 rounded-xl bg-terminal-950 border border-emerald-900/40 space-y-3">
+              <h4 className="text-sm font-bold text-emerald-400 flex items-center gap-1.5">
+                <TrendingUp className="w-4 h-4" />
+                <span>Top Bullish Catalysts & Upside Targets</span>
+              </h4>
+              <div className="space-y-2">
+                {report.thesis.bullCatalysts.map((c, i) => (
+                  <div key={i} className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60">
+                    <strong className="text-white">{c.title}</strong>
+                    <div className="text-[11px] text-slate-400 mt-1">{c.catalystExplanation}</div>
+                    <div className="text-emerald-400 font-bold mt-1.5">Target: {report.brief.pricing.currency} {c.upsideTargetPrice} (+{c.upsidePotentialPercent}%)</div>
+                  </div>
+                ))}
+              </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-terminal-950 border border-rose-900/40 space-y-2">
-              <h4 className="text-sm font-bold text-rose-400">Top Bearish Risks & Price Floors</h4>
-              {report.thesis.bearRisks.map((r, i) => (
-                <div key={i} className="p-2 rounded bg-terminal-900 border border-terminal-border/60">
-                  <strong className="text-white">{r.title}</strong>
-                  <div className="text-[11px] text-slate-400 mt-0.5">{r.riskExplanation}</div>
-                  <div className="text-rose-400 font-bold mt-1">Floor: ${r.downsideTargetPrice} (-{r.downsideRiskPercent}%)</div>
-                </div>
-              ))}
+            <div className="p-4 rounded-xl bg-terminal-950 border border-rose-900/40 space-y-3">
+              <h4 className="text-sm font-bold text-rose-400 flex items-center gap-1.5">
+                <TrendingDown className="w-4 h-4" />
+                <span>Top Bearish Risks & Downside Price Floors</span>
+              </h4>
+              <div className="space-y-2">
+                {report.thesis.bearRisks.map((r, i) => (
+                  <div key={i} className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60">
+                    <strong className="text-white">{r.title}</strong>
+                    <div className="text-[11px] text-slate-400 mt-1">{r.riskExplanation}</div>
+                    <div className="text-rose-400 font-bold mt-1.5">Floor: {report.brief.pricing.currency} {r.downsideTargetPrice} (-{r.downsideRiskPercent}%)</div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* TAB 7: REALISTIC TRADE PLAN TABLE */}
+      {/* TAB 8: REALISTIC TRADE PLAN TABLE */}
       {activeTab === 'strategy' && report && (
         <div className="space-y-4 font-mono text-xs">
           <div className="p-4 rounded-xl bg-terminal-950 border border-terminal-border space-y-3">
@@ -808,7 +1005,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                   <tr>
                     <td className="py-2.5 px-3 font-bold text-cyan-300">ENTRY ZONE</td>
                     <td className="py-2.5 px-3 font-bold text-white">
-                      {report.brief.pricing.currency} {report.technical.tradePlan.entryZone.min.toFixed(2)} - {report.technical.tradePlan.entryZone.max.toFixed(2)}
+                      {report.brief.pricing.currency} {report.technical.tradePlan.entryZone.min.toFixed(report.assetClass === 'FOREX' ? 4 : 2)} - {report.technical.tradePlan.entryZone.max.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}
                     </td>
                     <td className="py-2.5 px-3 text-slate-400">Immediate Proximity</td>
                     <td className="py-2.5 px-3 text-slate-300">{report.technical.tradePlan.entryZone.note}</td>
@@ -816,7 +1013,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                   <tr>
                     <td className="py-2.5 px-3 font-bold text-rose-400">STOP LOSS</td>
                     <td className="py-2.5 px-3 font-bold text-rose-400">
-                      {report.brief.pricing.currency} {report.technical.tradePlan.stopLoss.price.toFixed(2)}
+                      {report.brief.pricing.currency} {report.technical.tradePlan.stopLoss.price.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}
                     </td>
                     <td className="py-2.5 px-3 text-rose-400">
                       -{report.technical.tradePlan.stopLoss.riskPercent}% ({report.technical.tradePlan.stopLoss.distancePoints} pts)
@@ -826,7 +1023,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                   <tr>
                     <td className="py-2.5 px-3 font-bold text-emerald-400">TARGET 1</td>
                     <td className="py-2.5 px-3 font-bold text-emerald-400">
-                      {report.brief.pricing.currency} {report.technical.tradePlan.target1.price.toFixed(2)}
+                      {report.brief.pricing.currency} {report.technical.tradePlan.target1.price.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}
                     </td>
                     <td className="py-2.5 px-3 text-emerald-400">
                       +{report.technical.tradePlan.target1.rewardPercent}% (1:{report.technical.tradePlan.target1.riskRewardRatio} R:R)
@@ -836,7 +1033,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                   <tr>
                     <td className="py-2.5 px-3 font-bold text-emerald-400">TARGET 2 (RUNNER)</td>
                     <td className="py-2.5 px-3 font-bold text-emerald-400">
-                      {report.brief.pricing.currency} {report.technical.tradePlan.target2.price.toFixed(2)}
+                      {report.brief.pricing.currency} {report.technical.tradePlan.target2.price.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}
                     </td>
                     <td className="py-2.5 px-3 text-emerald-400">
                       +{report.technical.tradePlan.target2.rewardPercent}% (1:{report.technical.tradePlan.target2.riskRewardRatio} R:R)
@@ -846,17 +1043,39 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                 </tbody>
               </table>
             </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+              <div className="p-3 rounded-lg bg-terminal-900 border border-terminal-border/70 space-y-1">
+                <span className="text-slate-400 text-[11px] font-bold">Staged Scaling Plan:</span>
+                <ul className="list-disc pl-4 text-slate-300 space-y-0.5 text-[11px]">
+                  {report.thesis.scalingPlan.scalingTriggers.map((t, idx) => (
+                    <li key={idx}>{t}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="p-3 rounded-lg bg-terminal-900 border border-terminal-border/70 space-y-1">
+                <span className="text-rose-400 text-[11px] font-bold">Hard Invalidation Trigger:</span>
+                <div className="text-white font-bold text-xs">{report.brief.pricing.currency} {report.thesis.invalidationTrigger.priceLevel.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}</div>
+                <div className="text-slate-300 text-[11px]">{report.thesis.invalidationTrigger.macroOrEventCondition}</div>
+                <div className="text-amber-400 text-[10px]">{report.thesis.invalidationTrigger.exitAction}</div>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* TAB 8: ALL 16 WORKFLOWS HUB */}
+      {/* TAB 9: ALL 16 WORKFLOWS HUB */}
       {activeTab === 'workflows' && (
         <div className="space-y-4 font-mono text-xs">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             {[
               { id: 'ANALYZE_FULL', cmd: '/trade analyze', label: '01. Flagship Full Analysis' },
               { id: 'QUICK_SNAPSHOT', cmd: '/trade quick', label: '02. 60-Sec Snapshot' },
+              { id: 'STANDALONE_TECH', cmd: '/trade technical', label: '03. Standalone Technical' },
+              { id: 'STANDALONE_FUND', cmd: '/trade fundamental', label: '04. Standalone Fundamental' },
+              { id: 'STANDALONE_SENT', cmd: '/trade sentiment', label: '05. Standalone Sentiment' },
+              { id: 'STANDALONE_RISK', cmd: '/trade risk', label: '06. Standalone Risk' },
+              { id: 'STANDALONE_THESIS', cmd: '/trade thesis', label: '07. Standalone Thesis' },
               { id: 'SECTOR_ROTATION', cmd: '/trade sector', label: '08. Sector Rotation' },
               { id: 'COMPARE_ASSETS', cmd: '/trade compare', label: '09. Asset Comparison' },
               { id: 'OPTIONS_STRATEGIES', cmd: '/trade options', label: '10. Options Strategies' },
@@ -884,23 +1103,38 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
           {/* Quick Snapshot Output */}
           {quickSnapshot && activeWorkflow === 'QUICK_SNAPSHOT' && (
             <div className="p-4 rounded-xl bg-terminal-950 border border-cyan-500/40 space-y-2">
-              <h4 className="text-sm font-bold text-white">60-Second Snapshot Result:</h4>
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Zap className="w-4 h-4 text-cyan-400" />
+                <span>60-Second Rapid Pulse Snapshot:</span>
+              </h4>
               <p className="text-cyan-300">{quickSnapshot.summary}</p>
+              <div className="flex items-center gap-2 pt-1">
+                {getGradeBadge(quickSnapshot.quickGrade, quickSnapshot.quickSignal)}
+                <span className="text-slate-400 text-xs font-bold">Pulse Score: {quickSnapshot.quickScore}/100</span>
+              </div>
             </div>
           )}
 
           {/* Sector Rotation Output */}
           {sectorData.length > 0 && activeWorkflow === 'SECTOR_ROTATION' && (
             <div className="p-4 rounded-xl bg-terminal-950 border border-terminal-border space-y-2">
-              <h4 className="text-sm font-bold text-white">Sector Rotation & Relative Momentum:</h4>
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Shuffle className="w-4 h-4 text-cyan-400" />
+                <span>Sector Rotation & Relative Momentum Heatmap:</span>
+              </h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {sectorData.map((sec, i) => (
-                  <div key={i} className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60 flex justify-between">
+                  <div key={i} className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60 flex justify-between items-center">
                     <div>
                       <strong className="text-white">#{sec.momentumRank} {sec.sector}</strong>
-                      <div className="text-[10px] text-slate-400">Leader: {sec.leadingAsset} • Status: {sec.flowStatus}</div>
+                      <div className="text-[10px] text-slate-400">Leader: <span className="text-cyan-300 font-bold">{sec.leadingAsset}</span> • Status: {sec.flowStatus}</div>
                     </div>
-                    <div className="font-bold text-emerald-400">+{sec.oneMonthPerformance}%</div>
+                    <div className="text-right">
+                      <div className={`font-bold ${sec.oneMonthPerformance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {sec.oneMonthPerformance >= 0 ? '+' : ''}{sec.oneMonthPerformance}% (1M)
+                      </div>
+                      <div className="text-[10px] text-slate-400">+{sec.threeMonthPerformance}% (3M)</div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -910,17 +1144,44 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
           {/* Asset Comparison Output */}
           {compareData && activeWorkflow === 'COMPARE_ASSETS' && (
             <div className="p-4 rounded-xl bg-terminal-950 border border-terminal-border space-y-3">
-              <h4 className="text-sm font-bold text-white">Head-to-Head Comparison: {compareData.assetA.symbol} vs {compareData.assetB.symbol}</h4>
-              <div className="grid grid-cols-2 gap-3 text-center">
-                <div className="p-3 rounded bg-terminal-900 border border-cyan-500/40">
-                  <div className="font-bold text-lg text-white">{compareData.assetA.symbol}</div>
-                  <div className="text-2xl font-extrabold text-cyan-400 mt-1">{compareData.assetA.compositeScore}/100</div>
-                  <div className="text-xs text-slate-400">Grade {compareData.assetA.grade} • {compareData.assetA.signal}</div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-terminal-border/60 pb-2">
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Scale className="w-4 h-4 text-cyan-400" />
+                  <span>Head-to-Head Comparison: {compareData.assetA.symbol} vs {compareData.assetB.symbol}</span>
+                </h4>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400">Winner:</span>
+                  <span className="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    {compareData.headToHeadWinner} (+{compareData.scoreDifference} pts)
+                  </span>
                 </div>
-                <div className="p-3 rounded bg-terminal-900 border border-indigo-500/40">
-                  <div className="font-bold text-lg text-white">{compareData.assetB.symbol}</div>
-                  <div className="text-2xl font-extrabold text-indigo-400 mt-1">{compareData.assetB.compositeScore}/100</div>
-                  <div className="text-xs text-slate-400">Grade {compareData.assetB.grade} • {compareData.assetB.signal}</div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-center">
+                <div className="p-3 rounded-lg bg-terminal-900 border border-cyan-500/40 space-y-1">
+                  <div className="font-bold text-base sm:text-lg text-white">{compareData.assetA.symbol}</div>
+                  <div className="text-2xl sm:text-3xl font-extrabold text-cyan-400">{compareData.assetA.compositeScore}/100</div>
+                  <div className="text-xs text-slate-400">{getGradeBadge(compareData.assetA.grade, compareData.assetA.signal)}</div>
+                  <div className="text-[11px] text-slate-300 pt-2 space-y-0.5 text-left">
+                    <div>Technical: <strong>{compareData.assetA.technicalScore}/100</strong></div>
+                    <div>Fundamental: <strong>{compareData.assetA.fundamentalScore}/100</strong></div>
+                    <div>Sentiment: <strong>{compareData.assetA.sentimentScore}/100</strong></div>
+                    <div>Risk Safety: <strong>{compareData.assetA.riskScore}/100</strong></div>
+                    <div>Thesis: <strong>{compareData.assetA.thesisScore}/100</strong></div>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-terminal-900 border border-indigo-500/40 space-y-1">
+                  <div className="font-bold text-base sm:text-lg text-white">{compareData.assetB.symbol}</div>
+                  <div className="text-2xl sm:text-3xl font-extrabold text-indigo-400">{compareData.assetB.compositeScore}/100</div>
+                  <div className="text-xs text-slate-400">{getGradeBadge(compareData.assetB.grade, compareData.assetB.signal)}</div>
+                  <div className="text-[11px] text-slate-300 pt-2 space-y-0.5 text-left">
+                    <div>Technical: <strong>{compareData.assetB.technicalScore}/100</strong></div>
+                    <div>Fundamental: <strong>{compareData.assetB.fundamentalScore}/100</strong></div>
+                    <div>Sentiment: <strong>{compareData.assetB.sentimentScore}/100</strong></div>
+                    <div>Risk Safety: <strong>{compareData.assetB.riskScore}/100</strong></div>
+                    <div>Thesis: <strong>{compareData.assetB.thesisScore}/100</strong></div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -929,16 +1190,158 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
           {/* Options Strategies Output */}
           {optionsData && activeWorkflow === 'OPTIONS_STRATEGIES' && (
             <div className="p-4 rounded-xl bg-terminal-950 border border-terminal-border space-y-3">
-              <h4 className="text-sm font-bold text-white">Options Strategies for {optionsData.symbol} (IV: {optionsData.impliedVolPercent}%, IV Rank: {optionsData.ivRank})</h4>
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-cyan-400" />
+                <span>Options Strategies for {optionsData.symbol} (IV: {optionsData.impliedVolPercent}%, IV Rank: {optionsData.ivRank})</span>
+              </h4>
               <div className="space-y-2">
                 {optionsData.recommendedStrategies.map((opt: any, i: number) => (
-                  <div key={i} className="p-3 rounded bg-terminal-900 border border-terminal-border/60">
+                  <div key={i} className="p-3 rounded bg-terminal-900 border border-terminal-border/60 space-y-1">
                     <div className="flex justify-between font-bold text-white">
                       <span>{opt.strategyName}</span>
-                      <span className="text-cyan-400">{opt.type}</span>
+                      <span className="text-cyan-400 text-[10px]">{opt.type}</span>
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-1">{opt.description}</p>
-                    <div className="text-[10px] text-slate-300 mt-1">{opt.strikeSetup} • Max Profit: {opt.maxProfit} • Breakeven: {opt.breakeven}</div>
+                    <p className="text-[11px] text-slate-400">{opt.description}</p>
+                    <div className="text-[10px] text-slate-300 pt-0.5">{opt.strikeSetup} • Max Profit: {opt.maxProfit} • Breakeven: {opt.breakeven} • Expiry: {opt.recommendedExpiry}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Pre-Earnings Output */}
+          {earningsData && activeWorkflow === 'PRE_EARNINGS' && (
+            <div className="p-4 rounded-xl bg-terminal-950 border border-terminal-border space-y-3">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-cyan-400" />
+                <span>Pre-Earnings Strategic Deep-Dive: {earningsData.symbol}</span>
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                <div className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60">
+                  <div className="text-slate-400 text-[10px]">Expected Date</div>
+                  <div className="font-bold text-white mt-0.5">{earningsData.expectedDate}</div>
+                </div>
+                <div className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60">
+                  <div className="text-slate-400 text-[10px]">Implied Volatility Move</div>
+                  <div className="font-bold text-cyan-400 mt-0.5">±{earningsData.impliedMovePercent}%</div>
+                </div>
+                <div className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60">
+                  <div className="text-slate-400 text-[10px]">EPS & Revenue Estimate</div>
+                  <div className="font-bold text-emerald-400 mt-0.5">${earningsData.epsEstimate} ({earningsData.revenueEstimate})</div>
+                </div>
+                <div className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60">
+                  <div className="text-slate-400 text-[10px]">Guidance Risk</div>
+                  <div className="font-bold text-amber-400 mt-0.5">{earningsData.guidanceRisk}</div>
+                </div>
+              </div>
+              <div className="p-2.5 rounded bg-terminal-900 border border-cyan-800/40 text-slate-300 text-[11px]">
+                <strong className="text-cyan-300">Options Play Recommendation:</strong> {earningsData.recommendedStraddleOrSpread}
+              </div>
+            </div>
+          )}
+
+          {/* Portfolio Rebalancing Output */}
+          {portfolioData && activeWorkflow === 'PORTFOLIO_REBALANCE' && (
+            <div className="p-4 rounded-xl bg-terminal-950 border border-terminal-border space-y-3">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <PieChart className="w-4 h-4 text-cyan-400" />
+                <span>Cross-Asset Portfolio Correlation & Risk Parity Rebalancing</span>
+              </h4>
+              <div className="flex items-center gap-3 text-xs">
+                <span>Diversification Score: <strong className="text-emerald-400">{portfolioData.crossAssetDiversificationScore}/100</strong></span>
+                <span>•</span>
+                <span>Projected Sharpe: <strong className="text-cyan-400">{portfolioData.portfolioSharpeProjected}</strong></span>
+                <span>•</span>
+                <span>Max Expected Drawdown: <strong className="text-rose-400">{portfolioData.expectedMaxDrawdown}</strong></span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                {portfolioData.riskParityAllocation.map((item: any, i: number) => (
+                  <div key={i} className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60 flex justify-between items-center">
+                    <div>
+                      <strong className="text-white">{item.symbol}</strong>
+                      <span className="ml-2 text-[10px] px-1.5 py-0.2 rounded bg-terminal-950 text-slate-400 border border-terminal-border">{item.assetClass}</span>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{item.rationale}</div>
+                    </div>
+                    <div className="text-base font-bold text-cyan-400">{item.recommendedWeight}%</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Stock Screener Output */}
+          {screenerData.length > 0 && activeWorkflow === 'STOCK_SCREENER' && (
+            <div className="p-4 rounded-xl bg-terminal-950 border border-terminal-border space-y-3">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Eye className="w-4 h-4 text-cyan-400" />
+                <span>Multi-Asset Criteria Stock Screener:</span>
+              </h4>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead>
+                    <tr className="border-b border-terminal-border/80 text-slate-400">
+                      <th className="py-1.5 px-2">SYMBOL</th>
+                      <th className="py-1.5 px-2">ASSET CLASS</th>
+                      <th className="py-1.5 px-2">PRICE</th>
+                      <th className="py-1.5 px-2">CHANGE</th>
+                      <th className="py-1.5 px-2">SCORE</th>
+                      <th className="py-1.5 px-2">GRADE</th>
+                      <th className="py-1.5 px-2 text-center">ACTION</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-terminal-border/40">
+                    {screenerData.map((row, i) => (
+                      <tr key={i} className="hover:bg-terminal-900/50">
+                        <td className="py-2 px-2 font-bold text-white">{row.symbol}</td>
+                        <td className="py-2 px-2 text-slate-400">{row.assetClass}</td>
+                        <td className="py-2 px-2">${row.price.toFixed(2)}</td>
+                        <td className={`py-2 px-2 font-bold ${row.changePercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {row.changePercent >= 0 ? '+' : ''}{row.changePercent}%
+                        </td>
+                        <td className="py-2 px-2 font-bold text-cyan-400">{row.compositeScore}/100</td>
+                        <td className="py-2 px-2">{getGradeBadge(row.grade, row.signal)}</td>
+                        <td className="py-2 px-2 text-center">
+                          <button
+                            onClick={() => executeWorkflow('ANALYZE_FULL', row.symbol)}
+                            className="px-2 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[10px] font-bold"
+                          >
+                            Analyze
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Scored Watchlist Output */}
+          {watchlistData.length > 0 && activeWorkflow === 'SCORED_WATCHLIST' && (
+            <div className="p-4 rounded-xl bg-terminal-950 border border-terminal-border space-y-3">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Bookmark className="w-4 h-4 text-cyan-400" />
+                <span>Scored Watchlist (Live Continuous Grounding):</span>
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {watchlistData.map((w, i) => (
+                  <div key={i} className="p-3 rounded-lg bg-terminal-900 border border-terminal-border/60 flex justify-between items-center">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <strong className="text-white text-sm">{w.symbol}</strong>
+                        <span className="text-[10px] text-slate-400">({w.name})</span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-1">${w.price.toFixed(2)} ({w.changePercent >= 0 ? '+' : ''}{w.changePercent}%)</div>
+                    </div>
+                    <div className="text-right space-y-1">
+                      <div className="text-cyan-400 font-bold">{w.compositeScore}/100</div>
+                      <button
+                        onClick={() => executeWorkflow('ANALYZE_FULL', w.symbol)}
+                        className="px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold"
+                      >
+                        Deep Audit
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

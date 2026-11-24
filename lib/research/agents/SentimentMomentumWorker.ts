@@ -94,7 +94,7 @@ export class SentimentMomentumWorker {
       },
       totalScore,
       keyInsights: [
-        `Wall Street Consensus: ${wallStreetConsensus.consensusRating} (${wallStreetConsensus.buyCount} Buys, ${wallStreetConsensus.holdCount} Holds, ${wallStreetConsensus.sellCount} Sells) with average target of $${wallStreetConsensus.averagePriceTarget} (+${wallStreetConsensus.upsidePercent}% upside).`,
+        `Wall Street Consensus: ${wallStreetConsensus.consensusRating} (${wallStreetConsensus.buyCount} Buys, ${wallStreetConsensus.holdCount} Holds, ${wallStreetConsensus.sellCount} Sells) with average target of ${brief.pricing.currency} ${wallStreetConsensus.averagePriceTarget} (+${wallStreetConsensus.upsidePercent}% upside).`,
         `Net Upgrades: 5 institutional upgrades vs 1 downgrade in the last 30 days.`,
         `Smart Money Inflows: ${institutionalActivity.fiiDiiNetBias}`,
         `Insider Conviction: C-suite net buyers over the last 6 months (${insiderActivity.insiderBuysLast6M} buys vs ${insiderActivity.insiderSellsLast6M} sells).`,

@@ -128,6 +128,7 @@ export class WorkflowEngine {
       assetA: {
         symbol: reportA.symbol,
         name: reportA.name,
+        currency: reportA.brief.pricing.currency,
         price: reportA.brief.pricing.currentPrice,
         compositeScore: reportA.compositeScore,
         grade: reportA.grade,
@@ -141,6 +142,7 @@ export class WorkflowEngine {
       assetB: {
         symbol: reportB.symbol,
         name: reportB.name,
+        currency: reportB.brief.pricing.currency,
         price: reportB.brief.pricing.currentPrice,
         compositeScore: reportB.compositeScore,
         grade: reportB.grade,
@@ -248,11 +250,11 @@ export class WorkflowEngine {
   public getScreenerResults(): StockScreenerResultItem[] {
     return [
       { symbol: 'NVDA', name: 'NVIDIA Corp', assetClass: 'EQUITY', price: 142.80, changePercent: +2.8, compositeScore: 92, grade: 'A+', signal: 'STRONG_BUY', rsi: 62, peRatio: 34.2 },
-      { symbol: 'XAU/USD', name: 'Spot Gold / USD', assetClass: 'METALS', price: 2654.80, changePercent: +0.8, compositeScore: 88, grade: 'A+', signal: 'STRONG_BUY', rsi: 58, peRatio: 0 },
+      { symbol: 'XAU/USD', name: 'Spot Gold / USD', assetClass: 'METALS', price: 3538.20, changePercent: +0.8, compositeScore: 88, grade: 'A+', signal: 'STRONG_BUY', rsi: 58, peRatio: 0 },
       { symbol: 'HDFC BANK', name: 'HDFC Bank Ltd', assetClass: 'INDIAN_MARKET', price: 1740.00, changePercent: +1.4, compositeScore: 84, grade: 'A', signal: 'BUY', rsi: 54, peRatio: 18.5 },
       { symbol: 'AAPL', name: 'Apple Inc', assetClass: 'EQUITY', price: 228.50, changePercent: +0.6, compositeScore: 82, grade: 'A', signal: 'BUY', rsi: 52, peRatio: 28.4 },
       { symbol: 'RELIANCE', name: 'Reliance Industries', assetClass: 'INDIAN_MARKET', price: 1265.40, changePercent: +1.1, compositeScore: 81, grade: 'A', signal: 'BUY', rsi: 56, peRatio: 22.8 },
-      { symbol: 'EUR/USD', name: 'Euro / USD', assetClass: 'FOREX', price: 1.0842, changePercent: -0.1, compositeScore: 68, grade: 'B', signal: 'HOLD_ACCUMULATE', rsi: 48, peRatio: 0 },
+      { symbol: 'EUR/USD', name: 'Euro / USD', assetClass: 'FOREX', price: 1.0968, changePercent: -0.1, compositeScore: 68, grade: 'B', signal: 'HOLD_ACCUMULATE', rsi: 48, peRatio: 0 },
       { symbol: 'TSLA', name: 'Tesla Inc', assetClass: 'EQUITY', price: 345.20, changePercent: -1.8, compositeScore: 52, grade: 'C', signal: 'NEUTRAL_CAUTION', rsi: 44, peRatio: 64.2 },
     ];
   }
@@ -281,47 +283,103 @@ export class WorkflowEngine {
   // -------------------------------------------------------------
   public parseSlashCommand(input: string): SlashCommandPayload {
     const trimmed = input.trim();
-    const parts = trimmed.split(/\s+/);
-    const base = parts[0]?.toLowerCase() || '';
+    const parts = trimmed.split(/\s+/).filter(Boolean);
 
-    // Default to AAPL if no symbol given
-    const symbolA = (parts[2] || parts[1] || 'NVDA').toUpperCase().replace('$', '');
-    const symbolB = (parts[3] || 'AMD').toUpperCase().replace('$', '');
-
-    if (trimmed.includes('/trade quick') || trimmed.includes('/quick')) {
-      return { command: input, parsedWorkflow: 'QUICK_SNAPSHOT', primarySymbol: symbolA };
-    }
-    if (trimmed.includes('/trade compare') || trimmed.includes('/compare')) {
-      return { command: input, parsedWorkflow: 'COMPARE_ASSETS', primarySymbol: symbolA, secondarySymbol: symbolB };
-    }
-    if (trimmed.includes('/trade sector') || trimmed.includes('/sector')) {
-      return { command: input, parsedWorkflow: 'SECTOR_ROTATION', primarySymbol: symbolA };
-    }
-    if (trimmed.includes('/trade options') || trimmed.includes('/options')) {
-      return { command: input, parsedWorkflow: 'OPTIONS_STRATEGIES', primarySymbol: symbolA };
-    }
-    if (trimmed.includes('/trade earnings') || trimmed.includes('/earnings')) {
-      return { command: input, parsedWorkflow: 'PRE_EARNINGS', primarySymbol: symbolA };
-    }
-    if (trimmed.includes('/trade portfolio') || trimmed.includes('/portfolio')) {
-      return { command: input, parsedWorkflow: 'PORTFOLIO_REBALANCE', primarySymbol: symbolA };
-    }
-    if (trimmed.includes('/trade screen') || trimmed.includes('/screen')) {
-      return { command: input, parsedWorkflow: 'STOCK_SCREENER', primarySymbol: symbolA };
-    }
-    if (trimmed.includes('/trade watchlist') || trimmed.includes('/watchlist')) {
-      return { command: input, parsedWorkflow: 'SCORED_WATCHLIST', primarySymbol: symbolA };
-    }
-    if (trimmed.includes('/trade report-pdf') || trimmed.includes('/report-pdf') || trimmed.includes('/pdf')) {
-      return { command: input, parsedWorkflow: 'REPORT_PDF', primarySymbol: symbolA };
+    // If input is purely a raw symbol (e.g., "NVDA", "XAU/USD", "NIFTY 50")
+    if (!trimmed.startsWith('/')) {
+      const cleanSym = trimmed.toUpperCase().replace('$', '');
+      return {
+        command: `/trade analyze ${cleanSym}`,
+        parsedWorkflow: 'ANALYZE_FULL',
+        primarySymbol: cleanSym || 'NVDA',
+      };
     }
 
-    // Default: Flagship Full Analysis
-    return {
-      command: input,
-      parsedWorkflow: 'ANALYZE_FULL',
-      primarySymbol: symbolA,
-    };
+    // Determine command verb and arguments
+    // Examples:
+    // ["/trade", "analyze", "AAPL"]
+    // ["/trade", "compare", "NVDA", "AMD"]
+    // ["/trade", "quick", "EUR/USD"]
+    // ["/trade", "sector"]
+    // ["/quick", "TSLA"]
+    // ["/analyze", "AAPL"]
+    const first = parts[0]?.toLowerCase() || '';
+    const second = parts[1]?.toLowerCase() || '';
+
+    let verb = '';
+    let symbolA = 'NVDA';
+    let symbolB = 'AMD';
+
+    if (first === '/trade') {
+      verb = second;
+      symbolA = (parts[2] || 'NVDA').toUpperCase().replace('$', '');
+      symbolB = (parts[3] || 'AMD').toUpperCase().replace('$', '');
+    } else {
+      verb = first.replace('/', '');
+      symbolA = (parts[1] || 'NVDA').toUpperCase().replace('$', '');
+      symbolB = (parts[2] || 'AMD').toUpperCase().replace('$', '');
+    }
+
+    // Map verb to workflow
+    switch (verb) {
+      case 'quick':
+      case 'snapshot':
+        return { command: input, parsedWorkflow: 'QUICK_SNAPSHOT', primarySymbol: symbolA };
+
+      case 'tech':
+      case 'technical':
+        return { command: input, parsedWorkflow: 'STANDALONE_TECH', primarySymbol: symbolA };
+
+      case 'fund':
+      case 'fundamental':
+        return { command: input, parsedWorkflow: 'STANDALONE_FUND', primarySymbol: symbolA };
+
+      case 'sent':
+      case 'sentiment':
+        return { command: input, parsedWorkflow: 'STANDALONE_SENT', primarySymbol: symbolA };
+
+      case 'risk':
+        return { command: input, parsedWorkflow: 'STANDALONE_RISK', primarySymbol: symbolA };
+
+      case 'thesis':
+        return { command: input, parsedWorkflow: 'STANDALONE_THESIS', primarySymbol: symbolA };
+
+      case 'sector':
+      case 'sectors':
+        return { command: input, parsedWorkflow: 'SECTOR_ROTATION', primarySymbol: symbolA };
+
+      case 'compare':
+        return { command: input, parsedWorkflow: 'COMPARE_ASSETS', primarySymbol: symbolA, secondarySymbol: symbolB };
+
+      case 'options':
+      case 'option':
+        return { command: input, parsedWorkflow: 'OPTIONS_STRATEGIES', primarySymbol: symbolA };
+
+      case 'earnings':
+      case 'earning':
+        return { command: input, parsedWorkflow: 'PRE_EARNINGS', primarySymbol: symbolA };
+
+      case 'portfolio':
+      case 'rebalance':
+        return { command: input, parsedWorkflow: 'PORTFOLIO_REBALANCE', primarySymbol: symbolA };
+
+      case 'screen':
+      case 'screener':
+        return { command: input, parsedWorkflow: 'STOCK_SCREENER', primarySymbol: symbolA };
+
+      case 'watchlist':
+      case 'watch':
+        return { command: input, parsedWorkflow: 'SCORED_WATCHLIST', primarySymbol: symbolA };
+
+      case 'report-pdf':
+      case 'pdf':
+      case 'report':
+        return { command: input, parsedWorkflow: 'REPORT_PDF', primarySymbol: symbolA };
+
+      case 'analyze':
+      default:
+        return { command: input, parsedWorkflow: 'ANALYZE_FULL', primarySymbol: symbolA };
+    }
   }
 }
 

@@ -62,6 +62,7 @@ import { diagnosticReasoningEngine } from '@/lib/diagnosticReasoningEngine';
 import { preExecutionVerificationEngine } from '@/lib/preExecutionVerificationEngine';
 import { tradingStore } from '@/lib/tradingStore';
 import { AutonomousEcosystemDashboard } from '@/components/AutonomousEcosystemDashboard';
+import { TradingResearchEngineDashboard } from '@/components/TradingResearchEngineDashboard';
 
 const executionTelemetryEngine = ExecutionTelemetryEngine.getInstance();
 
@@ -1340,70 +1341,12 @@ export default function Home() {
           />
         )}
 
-        {/* Tab 2: Dedicated 5-Desk Agent Swarm Command Desk */}
+        {/* Tab 2: Multi-Agent Trading Research Engine (All 16 Workflows) */}
         {activeTab === 'agent' && (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-terminal-950 border border-terminal-border rounded-xl text-xs font-mono shadow-sm">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
-                  <Bot className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-white text-sm sm:text-base">
-                      02 // 24/7 AUTONOMOUS MULTI-AGENT SWARM INTELLIGENCE COMMAND DESK
-                    </span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                      8 AUTONOMOUS SPECIALISTS
-                    </span>
-                  </div>
-                  <p className="text-slate-400 text-xs">
-                    Simultaneous asynchronous processes: Technical (525+), Fundamental (525+), Candlestick (120+), 38 News Wires, Intermarket Relativity, Order Flow Microstructure & CRO Risk Gatekeeper
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setActiveTab('terminal')}
-                className="px-3 py-1.5 rounded-lg bg-terminal-800 hover:bg-terminal-700 text-slate-300 hover:text-white border border-terminal-border transition-colors flex items-center gap-1.5 font-semibold text-xs"
-              >
-                <ArrowLeft className="w-3.5 h-3.5 text-cyan-400" />
-                <span>RETURN TO TERMINAL</span>
-              </button>
-            </div>
-
-            {consensus && consensus.pair === selectedPair && (
-              <UnifiedDecisionBanner
-                consensus={consensus}
-                onExecuteTrade={handleExecuteTrade}
-                onOpenNewsWire={() => setActiveTab('wire')}
-                onOpenMonteCarlo={() => setActiveTab('var')}
-                onOpenSequentialPipeline={() => setActiveTab('debate')}
-                onForceRecalibrate={handleForceRecalibrate}
-                isMarketFrozen={isMarketFrozen}
-                sessionInfo={sessionInfo}
-                theme={theme}
-                suppressIntermediateModules={false}
-              />
-            )}
-
-            {consensus && consensus.pair === selectedPair && (
-              <AgentSwarmPanel
-                technical={consensus.agents.technical}
-                fundamental={consensus.agents.fundamental}
-                forex={consensus.agents.forex}
-                news={consensus.agents.news}
-                risk={consensus.agents.risk}
-                orderFlow={consensus.agents.orderFlow}
-                candlestickPattern={consensus.agents.candlestickPattern}
-                chiefReviewerAudit={consensus.chiefReviewerAudit}
-                onExecuteTrade={handleExecuteTrade}
-                onOpenMonteCarlo={() => setActiveTab('var')}
-                onOpenNewsWire={() => setActiveTab('wire')}
-                telemetry={consensus.autonomousLoopTelemetry}
-                theme={theme}
-              />
-            )}
-          </div>
+          <TradingResearchEngineDashboard
+            initialSymbol={selectedPair}
+            onBackToTerminal={() => setActiveTab('terminal')}
+          />
         )}
 
         {/* Tab 3: Historical Backtest */}

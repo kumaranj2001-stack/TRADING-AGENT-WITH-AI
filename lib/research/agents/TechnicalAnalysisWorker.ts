@@ -118,7 +118,7 @@ export class TechnicalAnalysisWorker {
       entryZone: {
         min: Math.round((isBullishBias ? price - atr * 0.35 : price) * 100) / 100,
         max: Math.round((isBullishBias ? price + atr * 0.20 : price + atr * 0.35) * 100) / 100,
-        note: `Immediate proximity zone anchored around EMA-20 ($${ema20.toFixed(2)}) and VWAP support.`,
+        note: `Immediate proximity zone anchored around EMA-20 (${brief.pricing.currency} ${ema20.toFixed(2)}) and VWAP support.`,
       },
       stopLoss: {
         price: stopLossPrice,
@@ -201,10 +201,10 @@ export class TechnicalAnalysisWorker {
       },
       totalScore,
       keyInsights: [
-        `EMA 20/50/200 stack is ${emaAlignment} with price respecting EMA-20 ($${ema20.toFixed(2)}) on intraday pullbacks.`,
-        `Identified 3 Confluent Support Zones ($${supportLevels[0].price}, $${supportLevels[1].price}, $${supportLevels[2].price}) and 3 Resistance Pools ($${resistanceLevels[0].price}, $${resistanceLevels[1].price}, $${resistanceLevels[2].price}).`,
+        `EMA 20/50/200 stack is ${emaAlignment} with price respecting EMA-20 (${brief.pricing.currency} ${ema20.toFixed(2)}) on intraday pullbacks.`,
+        `Identified 3 Confluent Support Zones (${brief.pricing.currency} ${supportLevels[0].price.toFixed(2)}, ${brief.pricing.currency} ${supportLevels[1].price.toFixed(2)}, ${brief.pricing.currency} ${supportLevels[2].price.toFixed(2)}) and 3 Resistance Pools (${brief.pricing.currency} ${resistanceLevels[0].price.toFixed(2)}, ${brief.pricing.currency} ${resistanceLevels[1].price.toFixed(2)}, ${brief.pricing.currency} ${resistanceLevels[2].price.toFixed(2)}).`,
         `RSI-14 sits at ${rsi14} (${rsiCondition}) with positive MACD histogram divergence (${histogram > 0 ? '+' : ''}${histogram}).`,
-        `Realistic Entry Zone configured between $${tradePlan.entryZone.min.toFixed(2)} - $${tradePlan.entryZone.max.toFixed(2)} with 1:1.80 R:R at Target 1 ($${tradePlan.target1.price.toFixed(2)}).`,
+        `Realistic Entry Zone configured between ${brief.pricing.currency} ${tradePlan.entryZone.min.toFixed(2)} - ${tradePlan.entryZone.max.toFixed(2)} with 1:1.80 R:R at Target 1 (${brief.pricing.currency} ${tradePlan.target1.price.toFixed(2)}).`,
       ],
     };
   }

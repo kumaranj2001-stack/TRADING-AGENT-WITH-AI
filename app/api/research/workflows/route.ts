@@ -26,16 +26,33 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ success: true, earnings });
 
       case 'PORTFOLIO':
-        const portfolio = workflowEngine.getPortfolioRebalance();
-        return NextResponse.json({ success: true, portfolio });
+        return NextResponse.json({ success: true, portfolio: workflowEngine.getPortfolioRebalance() });
 
       case 'SCREENER':
-        const results = workflowEngine.getScreenerResults();
-        return NextResponse.json({ success: true, results });
+        return NextResponse.json({ success: true, results: workflowEngine.getScreenerResults() });
 
       case 'WATCHLIST':
-        const watchlist = workflowEngine.getScoredWatchlist();
-        return NextResponse.json({ success: true, watchlist });
+        return NextResponse.json({ success: true, watchlist: workflowEngine.getScoredWatchlist() });
+
+      case 'STANDALONE_TECH':
+        const techData = await workflowEngine.getStandaloneAgentView(symbol, 'tech');
+        return NextResponse.json({ success: true, agent: 'Technical Analysis Agent', data: techData });
+
+      case 'STANDALONE_FUND':
+        const fundData = await workflowEngine.getStandaloneAgentView(symbol, 'fund');
+        return NextResponse.json({ success: true, agent: 'Fundamental Analysis Agent', data: fundData });
+
+      case 'STANDALONE_SENT':
+        const sentData = await workflowEngine.getStandaloneAgentView(symbol, 'sent');
+        return NextResponse.json({ success: true, agent: 'Sentiment & Momentum Agent', data: sentData });
+
+      case 'STANDALONE_RISK':
+        const riskData = await workflowEngine.getStandaloneAgentView(symbol, 'risk');
+        return NextResponse.json({ success: true, agent: 'Risk Assessment Agent', data: riskData });
+
+      case 'STANDALONE_THESIS':
+        const thesisData = await workflowEngine.getStandaloneAgentView(symbol, 'thesis');
+        return NextResponse.json({ success: true, agent: 'Thesis Synthesis Agent', data: thesisData });
 
       default:
         return NextResponse.json({ success: false, error: `Unknown action: ${action}` }, { status: 400 });

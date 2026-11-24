@@ -238,6 +238,22 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>Technical Analysis</span>
               </button>
             )}
+
+            {/* Multi-Agent Trading Research Engine Button */}
+            {setActiveTab && (
+              <button
+                onClick={() => setActiveTab(activeTab === 'agent' ? 'terminal' : 'agent')}
+                className={`px-2.5 sm:px-3 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm shrink-0 ${
+                  activeTab === 'agent'
+                    ? 'bg-gradient-to-r from-cyan-500 to-indigo-600 text-white border-transparent font-extrabold shadow-md'
+                    : 'bg-terminal-800 hover:bg-terminal-700 text-indigo-300 border-terminal-border hover:text-white'
+                }`}
+                title="Open Multi-Agent Trading Research Engine (16 Workflows & 5 Parallel Agents)"
+              >
+                <Bot className="w-3.5 h-3.5 text-indigo-400" />
+                <span>AI Research</span>
+              </button>
+            )}
           </div>
 
           {/* Right: Swarm Synchronizer, Risk Settings, and Dark/Light Mode */}
@@ -370,6 +386,20 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Compass className="w-3.5 h-3.5 text-cyan-400" />
               <span>Analysis</span>
+            </button>
+          )}
+
+          {setActiveTab && (
+            <button
+              onClick={() => setActiveTab(activeTab === 'agent' ? 'terminal' : 'agent')}
+              className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1 transition-all shadow-sm shrink-0 ${
+                activeTab === 'agent'
+                  ? 'bg-gradient-to-r from-cyan-500 to-indigo-600 text-white border-transparent font-extrabold shadow-sm'
+                  : 'bg-terminal-800 hover:bg-terminal-700 text-indigo-300 border-terminal-border hover:text-white'
+              }`}
+            >
+              <Bot className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Research</span>
             </button>
           )}
         </div>

@@ -210,14 +210,14 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
     {
       id: 'agent',
       number: '04',
-      label: 'Agent',
-      description: '7-Role Multi-Agent Swarm Intelligence',
+      label: 'AI Research Engine',
+      description: 'Multi-Agent Research Swarm (16 Workflows & 5 Parallel Agents)',
       icon: Bot,
       color: 'text-indigo-400',
       activeBg: 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300 font-semibold',
       isActive: activeTab === 'agent',
-      badge: '7 DESKS',
-      badgeColor: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
+      badge: '16 WORKFLOWS',
+      badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
       action: () => {
         setActiveTab('agent');
         onClose();
