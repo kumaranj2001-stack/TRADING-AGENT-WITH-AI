@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { CurrencyPair, TimeFrame } from '@/lib/types';
 import { SwarmCoordinator } from '@/lib/agents/SwarmCoordinator';
 import { BASE_PRICES } from '@/lib/marketData';
+import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 
 export const runtime = 'nodejs';
 
@@ -48,9 +50,15 @@ export async function POST(req: NextRequest) {
         )
       : undefined;
 
-    // Execute Cascading Swarm Evaluation under Persistent Scenario Condition
+    // Execute Cascading Swarm Evaluation anchored strictly to SSOT Live Market Feed
     const coordinator = new SwarmCoordinator();
-    const result = coordinator.runConsensus(pair, timeframe, candlesInput, scenarioInput);
+    const authoritativeSpot = LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
+    const activeCandles = (candlesInput && candlesInput.length > 0)
+      ? candlesInput
+      : LiveMarketFeedManager.getCanonicalCandles(pair, timeframe);
+
+    let result = coordinator.runConsensus(pair, timeframe, activeCandles, scenarioInput);
+    result = LiveMarketFeedManager.calibrateSwarmConsensus(result, authoritativeSpot);
 
     return NextResponse.json({
       success: true,

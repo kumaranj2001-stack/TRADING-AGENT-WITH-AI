@@ -15,6 +15,7 @@ import {
 import { CurrencyPair, Candle } from '@/lib/types';
 import { visionSystemLogger, VisionLogEntry } from '@/lib/visionSystemLogger';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 import { BASE_PRICES } from '@/lib/marketData';
 
 export interface StructureTimelineBottomProps {
@@ -46,7 +47,7 @@ export const StructureTimelineBottom: React.FC<StructureTimelineBottomProps> = (
   }, []);
 
   const decimals = pair.includes('JPY') ? 3 : (pair === 'XAU/USD' || pair.includes('NIFTY')) ? 2 : 5;
-  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || BASE_PRICES[pair] || 3538.20;
+  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
   const activeCandles = (propCandles && propCandles.length >= 5) 
     ? propCandles 
     : LiveMarketFeedManager.getCanonicalCandles(pair, timeframe as any);

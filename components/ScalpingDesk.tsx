@@ -50,6 +50,7 @@ import {
 import { scalpingEngine } from '@/lib/scalpingEngine';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
 import { ssotPriceSyncEngine, ImmutableEventRecord } from '@/lib/ssotPriceSyncEngine';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 import { BASE_PRICES, PIP_VALUES } from '@/lib/marketData';
 
 export interface ScalpingDeskProps {
@@ -84,7 +85,7 @@ export const ScalpingDesk: React.FC<ScalpingDeskProps> = ({
   const [currentLivePrice, setCurrentLivePrice] = useState<number>(
     livePrice && livePrice > 0 
       ? livePrice 
-      : (initialPair === 'XAU/USD' ? 3787.37 : (BASE_PRICES[initialPair] || 1.0))
+      : (LiveMarketFeedManager.getCanonicalPrice(initialPair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(initialPair))
   );
   const [ssotSeqId, setSsotSeqId] = useState<number>(ssotPriceSyncEngine.getLatestSequenceId());
   const [ssotTraceId, setSsotTraceId] = useState<string>(`00-ssot-${initialPair.toLowerCase().replace('/', '')}-${Date.now().toString(16)}-01`);

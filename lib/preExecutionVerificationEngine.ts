@@ -10,6 +10,7 @@ import { MarketSessionManager } from './marketSessionManager';
 import { PIP_VALUES } from './marketData';
 import { diagnosticReasoningEngine } from './diagnosticReasoningEngine';
 import { automatedSignalValidationModule } from './automatedSignalValidationModule';
+import { liveMarketAnchorConstraintEngine } from './liveMarketAnchorConstraintEngine';
 
 export class PreExecutionVerificationEngine {
   private static instance: PreExecutionVerificationEngine;
@@ -161,10 +162,10 @@ export class PreExecutionVerificationEngine {
     }
 
     // 6. Zero-Veto Decoupled Execution Guardrails:
-    // Permanent removal of hard vetoes: trades are never aborted due to friction, R:R filters, or slippage.
-    // Enforce 10-pip maximum entry bound: if signal price is > 10 pips from live fill, snap directly to liveFillPrice.
+    // Enforce tight variance constraint: if signal price exceeds maxEntryVariancePips from live fill, clamp directly to liveFillPrice.
+    const spec = liveMarketAnchorConstraintEngine.getTightVarianceSpec(pair);
     let effectiveSignalPrice = signalPrice;
-    if (slippagePips > 10.0) {
+    if (slippagePips > spec.maxEntryVariancePips) {
       effectiveSignalPrice = liveFillPrice;
     }
 

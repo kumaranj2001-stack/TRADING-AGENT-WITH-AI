@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { CurrencyPair } from '@/lib/types';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 import { BASE_PRICES } from '@/lib/marketData';
 
 export interface QuantumVisionDrawerProps {
@@ -52,7 +53,7 @@ export const QuantumVisionDrawer: React.FC<QuantumVisionDrawerProps> = ({
   const isJpy = pair?.includes('JPY');
   const isIndian = pair === 'NIFTY 50' || pair === 'BANK NIFTY';
   const decimals = isJpy ? 3 : (isGold || isIndian) ? 2 : 5;
-  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || BASE_PRICES[pair] || 3538.20;
+  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
   const keySupport = (activePrice * 0.996).toFixed(decimals);
   const keyResistance = (activePrice * 1.004).toFixed(decimals);
   const breakoutThreshold = (activePrice * 1.006).toFixed(decimals);

@@ -10,6 +10,7 @@ import { BASE_PRICES, generateCandles, getMarketSegmentForSymbol } from './marke
 import { MarketSessionManager } from './marketSessionManager';
 import { stateLatchingEngine } from './stateLatchingEngine';
 import { LiveMarketFeedManager } from './liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from './liveMarketAnchorConstraintEngine';
 import { AutonomousSwarmEngine } from './autonomousSwarmEngine';
 import { BrowserStorageManager } from './browserStorage';
 
@@ -51,7 +52,7 @@ class TradingStoreImpl {
 
     // Initial safe candles
     const initialCandles = generateCandles(defaultPair, defaultTf, 60);
-    const initialPrice = initialCandles[initialCandles.length - 1]?.close || BASE_PRICES[defaultPair] || 3538.20;
+    const initialPrice = initialCandles[initialCandles.length - 1]?.close || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(defaultPair);
 
     LiveMarketFeedManager.setCanonicalFeed(defaultPair, defaultTf, initialCandles);
 

@@ -54,6 +54,8 @@ import {
   ExecutionLogRecord 
 } from '@/lib/executionTelemetryEngine';
 import { SevenStagePipelineResult } from '@/lib/types';
+import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 
 const executionTelemetryEngine = ExecutionTelemetryEngine.getInstance();
 
@@ -182,36 +184,41 @@ export const AgentDebateFeed: React.FC<AgentDebateFeedProps> = ({
     }
   };
 
-  // Safe fallback thresholds (Strictly bound to definitive bias)
+  // Safe fallback thresholds (Strictly bound to definitive bias & SSOT live price)
   const thresholds: DebatePriceThresholds = useMemo(() => {
     if (synthesis?.priceThresholds) {
       return synthesis.priceThresholds;
     }
-    const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 1.0850;
+    const currentPrice = (candles.length > 0 && candles[candles.length - 1]?.close > 0)
+      ? candles[candles.length - 1].close 
+      : (LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair));
     const isSellBias = (synthesis?.definitiveBias || '').includes('SELL');
 
+    const plan = liveMarketAnchorConstraintEngine.enforceTightVarianceConstraint({
+      symbol: pair,
+      direction: isSellBias ? 'SELL' : 'BUY',
+      proposedEntry: currentPrice,
+      customSpotPrice: currentPrice,
+    });
+
     return {
-      entryPrice: currentPrice,
-      takeProfit: isSellBias 
-        ? Number((currentPrice * 0.992).toFixed(5)) 
-        : Number((currentPrice * 1.008).toFixed(5)),
-      stopLoss: isSellBias 
-        ? Number((currentPrice * 1.004).toFixed(5)) 
-        : Number((currentPrice * 0.996).toFixed(5)),
-      riskRewardRatio: 2.2,
+      entryPrice: plan.entryPrice,
+      takeProfit: plan.takeProfit1,
+      stopLoss: plan.stopLoss,
+      riskRewardRatio: plan.riskRewardRatio,
       positionSizeLots: 0.11,
       maxLossUsd: 150,
       projectedGainUsd: 330,
       invalidationCriteria: `${timeframe.toUpperCase()} candle close beyond stop loss level`,
       trajectoryHorizonBars: 16,
-      projectedPriceMove: isSellBias 
-        ? Number((currentPrice * -0.008).toFixed(5)) 
-        : Number((currentPrice * 0.008).toFixed(5)),
+      projectedPriceMove: Number((plan.takeProfit1 - plan.entryPrice).toFixed(4)),
     };
-  }, [synthesis, candles, timeframe]);
+  }, [synthesis, candles, timeframe, pair]);
 
-  // Current live market price
-  const livePrice = candles.length > 0 ? candles[candles.length - 1].close : (thresholds.entryPrice || 1.0850);
+  // Current live market price strictly grounded in canonical feed
+  const livePrice = (candles.length > 0 && candles[candles.length - 1]?.close > 0)
+    ? candles[candles.length - 1].close 
+    : (thresholds.entryPrice || LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair));
 
   // Volatility adjusted position size
   const volatilitySizing = useMemo(() => {

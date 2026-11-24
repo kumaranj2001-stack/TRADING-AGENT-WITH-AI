@@ -12,6 +12,7 @@ import {
 import { BASE_PRICES, FOREX_PAIRS, METALS_COMMODITIES, INDIAN_MARKET_ASSETS, PIP_VALUES } from './marketData';
 import { LiveMarketFeedManager } from './liveMarketFeed';
 import { ssotPriceSyncEngine } from './ssotPriceSyncEngine';
+import { liveMarketAnchorConstraintEngine } from './liveMarketAnchorConstraintEngine';
 
 export interface ScalpingEngineFilterParams {
   minGrade?: 'A+' | 'A' | 'B';
@@ -251,18 +252,12 @@ export class ScalpingEngine {
     const now = Date.now();
 
     pairsToScan.forEach((pair, index) => {
-      // 1. Strictly anchor to canonical Terminal price via SSOT Engine or passed live parameter
-      let canonicalPrice = (params?.activePair === pair && params?.currentLivePrice && params.currentLivePrice > 0)
+      // 1. Strictly anchor to authoritative canonical Terminal price via SSOT Engine or passed live parameter
+      const canonicalPrice = (params?.activePair === pair && params?.currentLivePrice && params.currentLivePrice > 0)
         ? params.currentLivePrice
         : (params?.livePrices && params.livePrices[pair])
         ? params.livePrices[pair]!
-        : ssotPriceSyncEngine.getCanonicalPrice(pair) || LiveMarketFeedManager.getCanonicalPrice(pair) || BASE_PRICES[pair] || 4005.0;
-
-      // Special fallback if pair is XAU/USD and price is somehow default or unset, ensure 3787.37 parity
-      if (pair === 'XAU/USD' && (!canonicalPrice || canonicalPrice === 4005.0 || canonicalPrice === 3538.2)) {
-        const liveCandlePrice = LiveMarketFeedManager.getCanonicalPrice('XAU/USD');
-        canonicalPrice = (liveCandlePrice && liveCandlePrice !== 3538.2) ? liveCandlePrice : 3787.37;
-      }
+        : LiveMarketFeedManager.getCanonicalPrice(pair) || ssotPriceSyncEngine.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
 
       const isGold = pair === 'XAU/USD';
       const isJpy = pair.includes('JPY');
@@ -276,9 +271,6 @@ export class ScalpingEngine {
       const maxPermissibleSpread = isGold ? 0.35 : isJpy ? 1.4 : isIndian ? 2.5 : 1.5;
       const spreadPassed = spread <= maxPermissibleSpread;
 
-      // Deterministic setup proximity: 0.6 to 2.4 pips away
-      const distancePips = Number((0.6 + (index * 0.3) % 2.2).toFixed(1));
-
       // Direction: if active pair has consensus direction, use it; otherwise alternate
       let direction: 'BUY' | 'SELL' = (params?.activePair === pair && params?.consensusDirection)
         ? params.consensusDirection
@@ -286,24 +278,21 @@ export class ScalpingEngine {
 
       const grade: 'A+' | 'A' | 'B' = index === 0 ? 'A+' : index === 1 ? 'A' : index % 3 === 0 ? 'A' : 'B';
 
-      // Compact Take Profit & Stop Loss tailored for rapid scalping
-      const tpPips = isGold ? 35 : 5.5;
-      const slPips = isGold ? 15 : 2.5;
-      const riskRewardRatio = Number((tpPips / slPips).toFixed(2));
+      // Calibrate scalp setup with strict micro-variance (0.5 - 2.2 pips from live spot)
+      const calibrated = liveMarketAnchorConstraintEngine.calibrateScalpSetup({
+        symbol: pair,
+        direction,
+        liveSpotPrice: canonicalPrice,
+        subIndex: index,
+      });
 
-      // In a SELL: entry is at/near market; Stop Loss is ABOVE entry, Take Profit is BELOW entry!
-      // In a BUY: entry is at/near market; Stop Loss is BELOW entry, Take Profit is ABOVE entry!
-      const entryPrice = direction === 'BUY'
-        ? Number((canonicalPrice + (distancePips * 0.1) * pipMultiplier).toFixed(decimals))
-        : Number((canonicalPrice - (distancePips * 0.1) * pipMultiplier).toFixed(decimals));
-
-      const takeProfit = direction === 'BUY'
-        ? Number((entryPrice + tpPips * pipMultiplier).toFixed(decimals))
-        : Number((entryPrice - tpPips * pipMultiplier).toFixed(decimals));
-
-      const stopLoss = direction === 'BUY'
-        ? Number((entryPrice - slPips * pipMultiplier).toFixed(decimals))
-        : Number((entryPrice + slPips * pipMultiplier).toFixed(decimals));
+      const entryPrice = calibrated.entryPrice;
+      const takeProfit = calibrated.takeProfit;
+      const stopLoss = calibrated.stopLoss;
+      const distancePips = calibrated.distancePips;
+      const riskRewardRatio = calibrated.riskRewardRatio;
+      const tpPips = calibrated.tpPips;
+      const slPips = calibrated.slPips;
 
       // Machine Learning Pattern Recognition
       const patternTypes = [

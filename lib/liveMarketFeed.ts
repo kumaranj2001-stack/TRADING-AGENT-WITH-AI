@@ -2,6 +2,7 @@ import { Candle, CurrencyPair, EntryProximityFilterResult, LatchedTradeState, Ma
 import { BASE_PRICES, PIP_VALUES, getMarketSegmentForSymbol, generateCandles } from './marketData';
 import { MarketSessionManager } from './marketSessionManager';
 import { stateLatchingEngine, RECALIBRATION_INTERVAL_SECONDS } from './stateLatchingEngine';
+import { liveMarketAnchorConstraintEngine } from './liveMarketAnchorConstraintEngine';
 
 export interface MarketFeedTickEvent {
   pair: CurrencyPair;
@@ -80,7 +81,15 @@ export class LiveMarketFeedManager {
    */
   public static getCanonicalCandles(pair: CurrencyPair = this.currentPair, timeframe: TimeFrame = this.currentTimeframe): Candle[] {
     const key = `${pair}_${timeframe}`;
-    return this.canonicalCandles.get(key) || [];
+    let candles = this.canonicalCandles.get(key);
+    if (!candles || candles.length === 0) {
+      candles = generateCandles(pair, timeframe, 60);
+      this.canonicalCandles.set(key, candles);
+      if (candles.length > 0) {
+        this.canonicalPrices.set(pair, candles[candles.length - 1].close);
+      }
+    }
+    return candles;
   }
 
   /**
@@ -482,32 +491,23 @@ export class LiveMarketFeedManager {
     const isBuy = direction === 'BUY';
     const targetOrderType: 'SELL_MARKET' | 'BUY_MARKET' | 'NONE' = isSell ? 'SELL_MARKET' : isBuy ? 'BUY_MARKET' : 'NONE';
 
-    // 🌊 DYNAMIC REAL-TIME ENTRY & LEVEL PARITY:
-    // Candidate entry tracks the authoritative live feed quote without delay or stale caching.
-    const liveEntryPrice = Number(livePrice.toFixed(decimals));
+    // 🌊 UNIVERSAL REAL-TIME TIGHT-VARIANCE CONSTRAINT PROTOCOL:
+    // Candidate entry, stop loss, and profit targets are strictly bound to live spot price.
+    const constrainedPlan = liveMarketAnchorConstraintEngine.enforceTightVarianceConstraint({
+      symbol: pair,
+      direction: isSell ? 'SELL' : 'BUY',
+      proposedEntry: livePrice,
+      proposedStopLoss: latched.anchoredStopLoss,
+      proposedTakeProfit1: latched.anchoredTakeProfit,
+      customSpotPrice: livePrice,
+    });
 
-    // Calculate verified structural stop and target distances anchored by the swarm
-    // Mandatory 10-pip maximum entry bound and 10-pip target execution capability
-    const max10PipDistance = pipMultiplier * 10;
-    const effectiveStopDist = Math.min(
-      Math.abs(latched.anchoredEntryPrice - latched.anchoredStopLoss) || (pipMultiplier * 8),
-      max10PipDistance
-    );
-    let effectiveTargetDist = Math.abs(latched.anchoredTakeProfit - latched.anchoredEntryPrice);
-    if (!effectiveTargetDist || effectiveTargetDist > 60 * pipMultiplier || effectiveTargetDist < effectiveStopDist * 1.2) {
-      effectiveTargetDist = effectiveStopDist * 1.8;
-    }
-
-    // Calculate dynamic Stop Loss and Take Profit strictly aligned to liveEntryPrice
-    const dynamicStopLoss = isSell
-      ? Number((liveEntryPrice + effectiveStopDist).toFixed(decimals))
-      : Number((liveEntryPrice - effectiveStopDist).toFixed(decimals));
-
-    const dynamicTakeProfit = isSell
-      ? Number((liveEntryPrice - effectiveTargetDist).toFixed(decimals))
-      : Number((liveEntryPrice + effectiveTargetDist).toFixed(decimals));
-
-    const anchoredRiskReward = Number((effectiveTargetDist / effectiveStopDist).toFixed(2));
+    const liveEntryPrice = constrainedPlan.entryPrice;
+    const dynamicStopLoss = constrainedPlan.stopLoss;
+    const dynamicTakeProfit = constrainedPlan.takeProfit1;
+    const anchoredRiskReward = constrainedPlan.riskRewardRatio;
+    const effectiveStopDist = constrainedPlan.stopLossDistancePoints;
+    const effectiveTargetDist = constrainedPlan.takeProfit1DistancePoints;
     const safeLots = Math.max(0.01, latched.anchoredLots || 0.02);
     const anchoredGrade = latched.anchoredGrade || 'A';
 

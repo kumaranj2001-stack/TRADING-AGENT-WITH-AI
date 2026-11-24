@@ -14,6 +14,7 @@ import { VisionAtlasLabSidebar } from './VisionAtlasLabSidebar';
 import { StructureTimelineBottom } from './StructureTimelineBottom';
 import { BASE_PRICES } from '@/lib/marketData';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 import { MarketSessionManager } from '@/lib/marketSessionManager';
 import { visionSystemLogger } from '@/lib/visionSystemLogger';
 import { VisionAtlasWebSocketClient } from '@/lib/visionAtlasWebSocket';
@@ -76,7 +77,7 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
     return LiveMarketFeedManager.getCanonicalCandles(initialPair, initialTf);
   });
   const [livePrice, setLivePrice] = useState<number>(() => {
-    return LiveMarketFeedManager.getCanonicalPrice(initialPair) || BASE_PRICES[initialPair] || 4074.90;
+    return LiveMarketFeedManager.getCanonicalPrice(initialPair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(initialPair);
   });
   const [liveChangePercent, setLiveChangePercent] = useState<number>(-0.06);
   const [liveTimestamp, setLiveTimestamp] = useState<number>(Date.now());
@@ -296,7 +297,7 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
     LiveMarketFeedManager.startLiveFeed(p, selectedTf, 1500);
     const pCandles = LiveMarketFeedManager.getCanonicalCandles(p, selectedTf);
     if (pCandles && pCandles.length > 0) setLiveCandles(pCandles);
-    const pPrice = LiveMarketFeedManager.getCanonicalPrice(p);
+    const pPrice = LiveMarketFeedManager.getCanonicalPrice(p) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(p);
     if (pPrice) setLivePrice(pPrice);
 
     if (onSelectPair) onSelectPair(p);

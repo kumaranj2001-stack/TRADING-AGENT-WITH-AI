@@ -8,6 +8,7 @@
 import { AssetClass, DiscoveryBrief, LocalizedPricing, VolumeBenchmarks, VolatilityBenchmarks, MacroeconomicBenchmarks } from './types';
 import { BASE_PRICES } from '@/lib/marketData';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 import { CurrencyPair } from '@/lib/types';
 
 export class DiscoveryBriefCompiler {
@@ -98,8 +99,8 @@ export class DiscoveryBriefCompiler {
 
     // Check LiveMarketFeedManager canonical price
     try {
-      const canonicalPrice = LiveMarketFeedManager.getCanonicalPrice(cleanSym as CurrencyPair);
-      if (canonicalPrice && canonicalPrice > 0 && BASE_PRICES[cleanSym as CurrencyPair]) {
+      const canonicalPrice = LiveMarketFeedManager.getCanonicalPrice(cleanSym as CurrencyPair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(cleanSym as CurrencyPair);
+      if (canonicalPrice && canonicalPrice > 0) {
         basePrice = canonicalPrice;
       }
     } catch {

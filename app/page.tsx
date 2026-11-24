@@ -51,6 +51,7 @@ import { SevenStagePipelineVisualizer } from '@/components/SevenStagePipelineVis
 import { JournalStorageManager } from '@/lib/journalStorage';
 import { getMarketSegmentForSymbol, PIP_VALUES, generateCandles } from '@/lib/marketData';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 import { MarketSessionInfo, TradeHistoryItem } from '@/lib/types';
 import { MarketSessionManager } from '@/lib/marketSessionManager';
 import { MarketCloseFreezeBanner } from '@/components/MarketCloseFreezeBanner';
@@ -1499,7 +1500,7 @@ export default function Home() {
           <ScalpingDesk
             isFullPage={true}
             pair={selectedPair}
-            livePrice={LiveMarketFeedManager.getCanonicalPrice(selectedPair) || (candles && candles.length > 0 ? candles[candles.length - 1]?.close : undefined) || (selectedPair === 'XAU/USD' ? 3787.37 : undefined)}
+            livePrice={LiveMarketFeedManager.getCanonicalPrice(selectedPair) || (candles && candles.length > 0 ? candles[candles.length - 1]?.close : undefined) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(selectedPair)}
             consensus={consensus}
             onSelectPair={(pair) => {
               handleSelectPair(pair);

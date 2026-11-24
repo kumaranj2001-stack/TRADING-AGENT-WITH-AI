@@ -37,6 +37,7 @@ import {
 } from 'lightweight-charts';
 import { Candle, CurrencyPair, TimeFrame } from '@/lib/types';
 import { calculateEMA } from '@/lib/indicators';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 
 export interface InfinityVisionChartProps {
   candles: Candle[];
@@ -150,8 +151,8 @@ export const InfinityVisionChart: React.FC<InfinityVisionChartProps> = ({
       return dedup.slice(-120);
     }
 
-    // High-fidelity fallback centered around pair price
-    const base = pair.includes('XAU') ? 4005.0 : pair.includes('JPY') ? 152.5 : pair.includes('NIFTY') ? 24500 : 1.0850;
+    // High-fidelity fallback strictly anchored to authoritative live spot price
+    const base = liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair as CurrencyPair);
     const count = 45;
     const list: Candle[] = [];
     let cur = base;
@@ -178,11 +179,12 @@ export const InfinityVisionChart: React.FC<InfinityVisionChartProps> = ({
     return list;
   }, [candles, pair]);
 
+  const fallbackSpot = liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair as CurrencyPair);
   const lastCandle = safeCandles[safeCandles.length - 1] || { 
-    open: 4005.0, 
-    high: 4007.0, 
-    low: 3998.0, 
-    close: 4005.0, 
+    open: fallbackSpot, 
+    high: fallbackSpot + fallbackSpot * 0.0005, 
+    low: fallbackSpot - fallbackSpot * 0.0005, 
+    close: fallbackSpot, 
     volume: 1000, 
     timestamp: Date.now(), 
     time: new Date().toISOString() 

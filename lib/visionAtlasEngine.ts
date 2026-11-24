@@ -21,6 +21,7 @@ import {
 } from './types';
 import { BASE_PRICES } from './marketData';
 import { LiveMarketFeedManager } from './liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from './liveMarketAnchorConstraintEngine';
 import { computeTechnicalIndicators, calculateEMA, calculateRSI, calculateATR } from './indicators';
 import { realTimeNewsEngine } from './newsEngine';
 import { TECHNICAL_KNOWLEDGE_BASE } from './knowledge/technicalKnowledge';
@@ -57,7 +58,7 @@ export class VisionAtlasLabEngine {
       : LiveMarketFeedManager.getCanonicalCandles(symbol, timeframe);
     const livePrice = (canonicalCandles && canonicalCandles.length > 0)
       ? canonicalCandles[canonicalCandles.length - 1].close
-      : (LiveMarketFeedManager.getCanonicalPrice(symbol) || BASE_PRICES[symbol] || 3538.20);
+      : liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(symbol);
     const safeCandles = canonicalCandles && canonicalCandles.length >= 10 
       ? canonicalCandles 
       : this.generateBaselineCandles(symbol, livePrice, 60);
@@ -851,29 +852,30 @@ export class VisionAtlasLabEngine {
 
     const targetMultiple = grade === 'A+' ? 3.5 : grade === 'A' ? 3.0 : 2.5;
 
-    if (isBuy) {
-      entryZoneMin = Number((livePrice - atr * 0.3).toFixed(decimals));
-      entryZoneMax = Number((livePrice + atr * 0.2).toFixed(decimals));
-      recommendedEntry = livePrice;
-      const calculatedSl = demandOb ? demandOb.distal - atr * 0.2 : livePrice - atr * 1.0;
-      hardStopLoss = Number(calculatedSl.toFixed(decimals));
-      const effectiveSlDist = Math.max(0.0001, recommendedEntry - hardStopLoss);
-      takeProfit1 = Number((livePrice + effectiveSlDist * 1.5).toFixed(decimals));
-      takeProfit2 = Number((livePrice + effectiveSlDist * targetMultiple).toFixed(decimals));
-      takeProfit3 = Number((livePrice + effectiveSlDist * (targetMultiple + 1.5)).toFixed(decimals));
-      riskRewardRatio = Number(((takeProfit2 - recommendedEntry) / effectiveSlDist).toFixed(2));
-    } else {
-      entryZoneMin = Number((livePrice - atr * 0.2).toFixed(decimals));
-      entryZoneMax = Number((livePrice + atr * 0.3).toFixed(decimals));
-      recommendedEntry = livePrice;
-      const calculatedSl = supplyOb ? supplyOb.distal + atr * 0.2 : livePrice + atr * 1.0;
-      hardStopLoss = Number(calculatedSl.toFixed(decimals));
-      const effectiveSlDist = Math.max(0.0001, hardStopLoss - recommendedEntry);
-      takeProfit1 = Number((livePrice - effectiveSlDist * 1.5).toFixed(decimals));
-      takeProfit2 = Number((livePrice - effectiveSlDist * targetMultiple).toFixed(decimals));
-      takeProfit3 = Number((livePrice - effectiveSlDist * (targetMultiple + 1.5)).toFixed(decimals));
-      riskRewardRatio = Number(((recommendedEntry - takeProfit2) / effectiveSlDist).toFixed(2));
-    }
+    // Enforce strict live market feed parity & tight variance bounds
+    const initialSl = isBuy
+      ? (demandOb ? demandOb.distal - atr * 0.2 : livePrice - atr * 1.0)
+      : (supplyOb ? supplyOb.distal + atr * 0.2 : livePrice + atr * 1.0);
+
+    const constrained = liveMarketAnchorConstraintEngine.enforceTightVarianceConstraint({
+      symbol,
+      direction: isBuy ? 'BUY' : 'SELL',
+      proposedEntry: livePrice,
+      proposedStopLoss: initialSl,
+      customSpotPrice: livePrice,
+    });
+
+    entryZoneMin = constrained.entryZoneMin;
+    entryZoneMax = constrained.entryZoneMax;
+    recommendedEntry = constrained.entryPrice;
+    hardStopLoss = constrained.stopLoss;
+    takeProfit1 = constrained.takeProfit1;
+    takeProfit2 = constrained.takeProfit2;
+    const effectiveSlDist = constrained.stopLossDistancePoints;
+    takeProfit3 = isBuy
+      ? Number((livePrice + effectiveSlDist * (targetMultiple + 1.5)).toFixed(decimals))
+      : Number((livePrice - effectiveSlDist * (targetMultiple + 1.5)).toFixed(decimals));
+    riskRewardRatio = constrained.riskRewardRatio;
 
     const dynamicSizing = riskRatioController.calculateDynamicLotSize(grade, 25000, 30, false);
     const tierParams = riskRatioController.getTierParameters(grade);

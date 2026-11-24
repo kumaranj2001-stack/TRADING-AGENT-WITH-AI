@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CurrencyPair, OrderFlowAnalysisReport, FootprintPriceLevel } from '@/lib/types';
 import { BASE_PRICES } from '@/lib/marketData';
+import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 import { 
   Activity, 
   ArrowLeft, 
@@ -54,8 +56,15 @@ export const OrderFlowDesk: React.FC<OrderFlowDeskProps> = ({
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [techWeight, setTechWeight] = useState<number>(50); // 50%
   const [liveTicksCount, setLiveTicksCount] = useState<number>(0);
-  const [liveBid, setLiveBid] = useState<number>(BASE_PRICES[initialPair] || 3538.20);
-  const [liveAsk, setLiveAsk] = useState<number>((BASE_PRICES[initialPair] || 3538.20) + 0.25);
+  const [liveBid, setLiveBid] = useState<number>(() => {
+    const spot = LiveMarketFeedManager.getCanonicalPrice(initialPair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(initialPair);
+    return spot;
+  });
+  const [liveAsk, setLiveAsk] = useState<number>(() => {
+    const spot = LiveMarketFeedManager.getCanonicalPrice(initialPair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(initialPair);
+    const spec = liveMarketAnchorConstraintEngine.getTightVarianceSpec(initialPair);
+    return Number((spot + spec.pipMultiplier * 1.5).toFixed(spec.decimals));
+  });
   const [liveCvd, setLiveCvd] = useState<number>(420);
   const [liveBuyingPct, setLiveBuyingPct] = useState<number>(62.4);
 

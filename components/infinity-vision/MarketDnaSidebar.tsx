@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { CurrencyPair } from '@/lib/types';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 import { BASE_PRICES } from '@/lib/marketData';
 
 export interface MarketDnaSidebarProps {
@@ -38,7 +39,7 @@ export const MarketDnaSidebar: React.FC<MarketDnaSidebarProps> = ({
   const isJpy = pair.includes('JPY');
   const isIndian = pair === 'NIFTY 50' || pair === 'BANK NIFTY';
   const decimals = isJpy ? 3 : (isXau || isIndian) ? 2 : 5;
-  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || BASE_PRICES[pair] || 3538.20;
+  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'twins' | 'entry' | 'stats' | 'confirmation' | 'replay'>('overview');
   const [patternLength, setPatternLength] = useState<number>(40);
   const [outcomeLength, setOutcomeLength] = useState<number>(20);

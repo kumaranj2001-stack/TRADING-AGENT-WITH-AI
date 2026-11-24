@@ -3,6 +3,7 @@
 import { CurrencyPair, TimeFrame, Candle } from './types';
 import { BASE_PRICES, PIP_VALUES } from './marketData';
 import { LiveMarketFeedManager } from './liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from './liveMarketAnchorConstraintEngine';
 import { MarketSessionManager } from './marketSessionManager';
 
 export interface VisionAtlasTickPacket {
@@ -72,7 +73,7 @@ export class VisionAtlasWebSocketClient {
   private constructor(pair: CurrencyPair = 'XAU/USD', timeframe: TimeFrame = '1h') {
     this.pair = pair;
     this.timeframe = timeframe;
-    this.currentPrice = LiveMarketFeedManager.getCanonicalPrice(pair) || BASE_PRICES[pair] || 3538.20;
+    this.currentPrice = LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
     this.currentCandles = LiveMarketFeedManager.getCanonicalCandles(pair, timeframe);
     this.connect();
   }
@@ -90,7 +91,7 @@ export class VisionAtlasWebSocketClient {
     this.pair = pair;
     this.timeframe = timeframe;
     this.reconnectAttempts = 0;
-    this.currentPrice = LiveMarketFeedManager.getCanonicalPrice(pair) || BASE_PRICES[pair] || 3538.20;
+    this.currentPrice = LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
     this.currentCandles = LiveMarketFeedManager.getCanonicalCandles(pair, timeframe);
     this.reconnect();
   }

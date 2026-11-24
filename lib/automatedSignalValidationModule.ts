@@ -7,6 +7,7 @@ import {
 } from './types';
 import { multiAssetIngestionEngine } from './multiAssetIngestionEngine';
 import { PIP_VALUES } from './marketData';
+import { liveMarketAnchorConstraintEngine } from './liveMarketAnchorConstraintEngine';
 
 export interface AutomatedSignalValidationResult {
   isFullyValidated: boolean;
@@ -73,25 +74,30 @@ export class AutomatedSignalValidationModule {
     else if (isCopper) decimals = 4;
 
     const pipMultiplier = PIP_VALUES[symbol] || (isJpy ? 0.01 : isGold ? 0.10 : 0.0001);
-    const pipDistance = Number((Math.abs(proposedEntry - livePrice) / pipMultiplier).toFixed(2));
-
-    // Notice: 50-pip upper restriction is permanently removed to allow unlimited profit potential
-    const isBelowMin = pipDistance < minBandPips && pipDistance > 0.5; // only flag if slightly off without being pure market execution
-    const passed = true; // Unlimited profit setups are approved for execution
-
-    let status: EntryProximityFilterResult['status'] = 'APPROVED_UNLIMITED_PROFIT';
-    let rejectionReason: string | undefined;
-
-    if (pipDistance > 50) {
-      status = 'APPROVED_UNLIMITED_PROFIT';
-    } else {
-      status = 'APPROVED_WITHIN_BAND';
+    const spec = liveMarketAnchorConstraintEngine.getTightVarianceSpec(symbol);
+    const isSell = direction === 'SELL';
+    
+    // Strict live tick variance constraint: clamp any large pip deviations
+    let candidateEntry = proposedEntry;
+    let isClamped = false;
+    let rawDistance = Number((Math.abs(proposedEntry - livePrice) / pipMultiplier).toFixed(2));
+    
+    if (rawDistance > spec.maxEntryVariancePips) {
+      isClamped = true;
+      candidateEntry = isSell
+        ? Number((livePrice - spec.maxEntryVariancePoints * 0.4).toFixed(decimals))
+        : Number((livePrice + spec.maxEntryVariancePoints * 0.4).toFixed(decimals));
     }
 
-    const toleranceBandDescription = `Unified High-Conviction Profit Framework Active. Single high-confidence target aligned to verified liquidity wall. Live variance: ${pipDistance} pips. Single-ticket execution engaged.`;
+    const pipDistance = Number((Math.abs(candidateEntry - livePrice) / pipMultiplier).toFixed(2));
+    const passed = true;
+    const status: EntryProximityFilterResult['status'] = isClamped ? 'APPROVED_WITHIN_BAND' : 'APPROVED_WITHIN_BAND';
+
+    const toleranceBandDescription = isClamped
+      ? `Live Market Feed Synchronized. Proposed entry clamped to tight variance of ${pipDistance} pips from spot ${livePrice}. Zero large pip deviations.`
+      : `Strict Live Market Feed Parity Active. Entry anchored within ${pipDistance} pips of live spot ${livePrice}. Execution authorized.`;
 
     // Multi-tier expansion target projections strictly aligned to trade direction and immediate analytical zones
-    const isSell = direction === 'SELL';
     const expansionTargets = {
       tp1: Number((isSell ? livePrice - 12 * pipMultiplier : livePrice + 12 * pipMultiplier).toFixed(decimals)),
       tp2: Number((isSell ? livePrice - 24 * pipMultiplier : livePrice + 24 * pipMultiplier).toFixed(decimals)),
@@ -102,13 +108,13 @@ export class AutomatedSignalValidationModule {
     return {
       passed,
       symbol,
-      proposedEntry,
+      proposedEntry: candidateEntry,
       livePrice,
       pipDistance,
       minBandPips,
-      maxBandPips: undefined, // 50-pip restriction removed
+      maxBandPips: spec.maxEntryVariancePips,
       status,
-      rejectionReason,
+      rejectionReason: undefined,
       toleranceBandDescription,
       unlimitedProfitPotential: true,
       profitCapEnforced: false,

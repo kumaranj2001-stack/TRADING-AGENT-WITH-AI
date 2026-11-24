@@ -23,6 +23,8 @@ import {
 } from './types';
 import { BASE_PRICES } from './marketData';
 import { realTimeNewsEngine } from './newsEngine';
+import { LiveMarketFeedManager } from './liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from './liveMarketAnchorConstraintEngine';
 
 export class OrderFlowEngine {
   private static instance: OrderFlowEngine;
@@ -429,7 +431,7 @@ export class OrderFlowEngine {
    */
   public analyzeOrderFlow(symbol: CurrencyPair): OrderFlowAnalysisReport {
     const startTime = performance.now();
-    const currentPrice = BASE_PRICES[symbol] || 3538.20;
+    const currentPrice = LiveMarketFeedManager.getCanonicalPrice(symbol) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(symbol);
 
     // Track tick counter
     this.tickCounter[symbol] = (this.tickCounter[symbol] || 0) + 1;
@@ -524,7 +526,7 @@ export class OrderFlowEngine {
     timeframe: string = '5m',
     candles: Array<{ time: number | string; open: number; high: number; low: number; close: number; volume?: number }> = []
   ): import('./types').OrderFlowSessionAnalysis {
-    const basePrice = BASE_PRICES[symbol] || 3538.20;
+    const basePrice = LiveMarketFeedManager.getCanonicalPrice(symbol) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(symbol);
     const isGold = symbol === 'XAU/USD';
     const isSilver = symbol === 'XAG/USD';
     const isPlatinum = symbol === 'XPT/USD';

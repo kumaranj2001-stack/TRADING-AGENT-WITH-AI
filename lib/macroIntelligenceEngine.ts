@@ -7,6 +7,8 @@ import {
   ConvergenceStatus 
 } from './types';
 import { BASE_PRICES } from './marketData';
+import { LiveMarketFeedManager } from './liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from './liveMarketAnchorConstraintEngine';
 import { realTimeNewsEngine } from './newsEngine';
 import { macroTelemetryBridge } from './macroTelemetryBridge';
 import { dynamicTieredSourceDirectory } from './dynamicTieredSourceDirectory';
@@ -412,7 +414,7 @@ export class EventDrivenMacroIntelligenceEngine {
     symbol: CurrencyPair
   ): MacroIntelligenceReport {
     const catalyst = HIGH_IMPACT_MACRO_CATALYSTS.find(c => c.id === eventId) || HIGH_IMPACT_MACRO_CATALYSTS[0];
-    const livePrice = BASE_PRICES[symbol] || 3538.20;
+    const livePrice = LiveMarketFeedManager.getCanonicalPrice(symbol) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(symbol);
 
     // 1. Cross-verify feeds
     const convergence = this.executeBidirectionalCrossVerification(catalyst, symbol);

@@ -4,6 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { X, Minimize2, Maximize2, Droplets, Info } from 'lucide-react';
 import { CurrencyPair } from '@/lib/types';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 import { BASE_PRICES } from '@/lib/marketData';
 
 export interface LiquidityHeatmapModalProps {
@@ -30,7 +31,7 @@ export const LiquidityHeatmapModal: React.FC<LiquidityHeatmapModalProps> = ({
   const isJpy = pair.includes('JPY');
   const isIndian = pair === 'NIFTY 50' || pair === 'BANK NIFTY';
   const decimals = isJpy ? 3 : (isGold || isIndian) ? 2 : 5;
-  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || BASE_PRICES[pair] || 3538.20;
+  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
   const spreadPts = isGold ? 0.17 : isIndian ? 1.5 : isJpy ? 0.015 : 0.00015;
   const bidVal = (activePrice - spreadPts / 2).toFixed(decimals);
   const askVal = (activePrice + spreadPts / 2).toFixed(decimals);

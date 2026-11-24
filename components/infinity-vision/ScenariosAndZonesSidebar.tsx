@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { CurrencyPair, Candle } from '@/lib/types';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 import { visionSystemLogger } from '@/lib/visionSystemLogger';
 import { BASE_PRICES } from '@/lib/marketData';
 
@@ -49,7 +50,7 @@ export const ScenariosAndZonesSidebar: React.FC<ScenariosAndZonesSidebarProps> =
   const priceDecimals = pair.includes('JPY') ? 3 : (pair.includes('USD') && !isXau) ? 5 : (pair.includes('NIFTY') || isXau) ? 2 : 4;
   
   // Real-time authoritative price from terminal feed or prop
-  const activePrice = currentPrice || LiveMarketFeedManager.getCanonicalPrice(pair) || BASE_PRICES[pair] || 3538.20;
+  const activePrice = currentPrice || LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
   const recentLogs = visionSystemLogger.getRecentLogs();
   const latestLog = recentLogs.find(l => l.pair === pair) || recentLogs[recentLogs.length - 1];
 

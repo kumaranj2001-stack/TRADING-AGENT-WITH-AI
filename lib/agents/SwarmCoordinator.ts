@@ -42,6 +42,8 @@ import { hardwareKillSwitch } from '../governance/HardwareKillSwitch';
 import { institutionalBrokerBridge } from '../execution/InstitutionalBrokerBridge';
 import { activeTradeLifecycleManager } from '../execution/ActiveTradeLifecycleManager';
 import { continuousFineTuningPipeline } from '../memory/ContinuousFineTuningPipeline';
+import { LiveMarketFeedManager } from '../liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from '../liveMarketAnchorConstraintEngine';
 
 export class SwarmCoordinator {
   private technicalAnalyst: TechnicalAnalystAgent;
@@ -84,8 +86,18 @@ export class SwarmCoordinator {
     scenarioInput?: DebateScenarioContext | string
   ): Promise<SwarmConsensusResult> {
     const startTime = performance.now();
-    const marketCandles = candles && candles.length > 0 ? candles : generateCandles(pair, timeframe, 60);
-    const currentPrice = marketCandles[marketCandles.length - 1].close;
+    const authoritativeSpot = LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
+    const rawCandles = (candles && candles.length > 0)
+      ? candles 
+      : LiveMarketFeedManager.getCanonicalCandles(pair, timeframe);
+    const marketCandles = (rawCandles && rawCandles.length > 0)
+      ? rawCandles
+      : generateCandles(pair, timeframe, 60);
+    const spec = liveMarketAnchorConstraintEngine.getTightVarianceSpec(pair);
+    const lastCandleClose = marketCandles && marketCandles.length > 0 ? marketCandles[marketCandles.length - 1].close : authoritativeSpot;
+    const currentPrice = (lastCandleClose && Math.abs(lastCandleClose - authoritativeSpot) <= spec.maxPermissibleDeviationFromSpot)
+      ? lastCandleClose
+      : authoritativeSpot;
 
     // Simultaneous Asynchronous Execution across Desks 1-6 (including Order Flow & Candlestick Pattern)
     const [technical, fundamental, forex, news, orderFlow, candlestick] = await Promise.all([
@@ -166,8 +178,18 @@ export class SwarmCoordinator {
     scenarioInput?: DebateScenarioContext | string
   ): SwarmConsensusResult {
     const startTime = performance.now();
-    const marketCandles = candles && candles.length > 0 ? candles : generateCandles(pair, timeframe, 60);
-    const currentPrice = marketCandles[marketCandles.length - 1].close;
+    const authoritativeSpot = LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
+    const rawCandles = (candles && candles.length > 0)
+      ? candles 
+      : LiveMarketFeedManager.getCanonicalCandles(pair, timeframe);
+    const marketCandles = (rawCandles && rawCandles.length > 0)
+      ? rawCandles
+      : generateCandles(pair, timeframe, 60);
+    const spec = liveMarketAnchorConstraintEngine.getTightVarianceSpec(pair);
+    const lastCandleClose = marketCandles && marketCandles.length > 0 ? marketCandles[marketCandles.length - 1].close : authoritativeSpot;
+    const currentPrice = (lastCandleClose && Math.abs(lastCandleClose - authoritativeSpot) <= spec.maxPermissibleDeviationFromSpot)
+      ? lastCandleClose
+      : authoritativeSpot;
 
     const technical = this.technicalAnalyst.analyze(pair, timeframe, marketCandles);
     const fundamental = this.fundamentalAnalyst.analyze(pair);
@@ -613,17 +635,11 @@ export class SwarmCoordinator {
     const pipMultiplier = PIP_VALUES[pair] || (isGold ? 0.10 : isJpy ? 0.01 : 0.0001);
     let calculatedEntry = existingLatched?.anchoredEntryPrice || risk.parameters.entryPrice;
 
-    // Remove the artificial 50-pip profit cap to allow unlimited profit potential
-    // Maintain minimum 10-pip buffer against noisy spread slippage
-    const currentEntryPips = Math.abs(calculatedEntry - currentPrice) / pipMultiplier;
-    if (currentEntryPips < 10 && currentEntryPips > 0.5) {
-      // Calibrate institutional order block entry threshold to 18.5 pips into the structure
-      const entryBufferPips = 18.5;
-      if (activeDirection === 'BUY') {
-        calculatedEntry = Number((currentPrice - entryBufferPips * pipMultiplier).toFixed(decimals));
-      } else {
-        calculatedEntry = Number((currentPrice + entryBufferPips * pipMultiplier).toFixed(decimals));
-      }
+    // 🌊 Enforce tight variance constraint on proposed entry against live spot price
+    const tightSpec = liveMarketAnchorConstraintEngine.getTightVarianceSpec(pair);
+    const entryDeviation = Math.abs(calculatedEntry - currentPrice);
+    if (entryDeviation > tightSpec.maxEntryVariancePoints) {
+      calculatedEntry = currentPrice;
     }
 
     // 🛡️ Absolute Capital Preservation Gating & Order Book Liquidity Wall Anchoring
@@ -650,6 +666,20 @@ export class SwarmCoordinator {
       finalTakeProfit = exhaustiveCorpus.unifiedProfitableSetup.singleHighConfidenceTarget;
       finalRiskReward = exhaustiveCorpus.unifiedProfitableSetup.riskRewardRatio;
     }
+
+    // 🌊 Enforce Strict Tight Variance on final execution parameters against authoritative spot price
+    const tightExecutionPlan = liveMarketAnchorConstraintEngine.enforceTightVarianceConstraint({
+      symbol: pair,
+      direction: activeDirection,
+      proposedEntry: calculatedEntry,
+      proposedStopLoss: finalStopLoss,
+      proposedTakeProfit1: finalTakeProfit,
+      customSpotPrice: currentPrice,
+    });
+    calculatedEntry = tightExecutionPlan.entryPrice;
+    finalStopLoss = tightExecutionPlan.stopLoss;
+    finalTakeProfit = tightExecutionPlan.takeProfit1;
+    finalRiskReward = tightExecutionPlan.riskRewardRatio;
 
     // 🔬 Strict Automated Signal Validation Module Reconciliation:
     // Reconciles live multi-asset stream against technical/fundamental engines,
@@ -1024,26 +1054,18 @@ export class SwarmCoordinator {
       }
     }
 
-    // Strict Mathematical Invariant: Ensure Stop Loss and Target are on the correct side of price
-    if (dominantSide === 'SELL') {
-      if (debatedStopLoss <= price) {
-        const dist = Math.abs(price - debatedStopLoss) || (22 * pipMultiplier);
-        debatedStopLoss = Number((price + dist).toFixed(decimals));
-      }
-      if (debatedTakeProfit >= price) {
-        const dist = Math.abs(debatedTakeProfit - price) || (22 * pipMultiplier * 2.2);
-        debatedTakeProfit = Number((price - dist).toFixed(decimals));
-      }
-    } else if (dominantSide === 'BUY') {
-      if (debatedStopLoss >= price) {
-        const dist = Math.abs(price - debatedStopLoss) || (22 * pipMultiplier);
-        debatedStopLoss = Number((price - dist).toFixed(decimals));
-      }
-      if (debatedTakeProfit <= price) {
-        const dist = Math.abs(debatedTakeProfit - price) || (22 * pipMultiplier * 2.2);
-        debatedTakeProfit = Number((price + dist).toFixed(decimals));
-      }
-    }
+    // Strict Mathematical Invariant & Tight Variance Enforcement via SSOT Anchor
+    const tightDebatePlan = liveMarketAnchorConstraintEngine.enforceTightVarianceConstraint({
+      symbol: pair,
+      direction: dominantSide,
+      proposedEntry: price,
+      proposedStopLoss: debatedStopLoss,
+      proposedTakeProfit1: debatedTakeProfit,
+      customSpotPrice: price,
+    });
+    debatedStopLoss = tightDebatePlan.stopLoss;
+    debatedTakeProfit = tightDebatePlan.takeProfit1;
+    debatedRiskReward = tightDebatePlan.riskRewardRatio;
 
     const confidenceDelta = scenarioContext ? (debatedConfidence - baselineConfidence) : 0;
     const riskRewardDelta = scenarioContext ? Number((debatedRiskReward - baselineRiskReward).toFixed(2)) : 0;

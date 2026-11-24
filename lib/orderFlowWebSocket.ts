@@ -2,6 +2,8 @@
 
 import { CurrencyPair, FootprintPriceLevel, OrderFlowTapePrint } from './types';
 import { BASE_PRICES } from './marketData';
+import { LiveMarketFeedManager } from './liveMarketFeed';
+import { liveMarketAnchorConstraintEngine } from './liveMarketAnchorConstraintEngine';
 
 export interface OrderFlowTickPacket {
   symbol: CurrencyPair;
@@ -42,13 +44,13 @@ export class IsolatedOrderFlowWebSocketClient {
 
   constructor(symbol: CurrencyPair = 'XAU/USD') {
     this.symbol = symbol;
-    this.currentPrice = BASE_PRICES[symbol] || 3538.20;
+    this.currentPrice = LiveMarketFeedManager.getCanonicalPrice(symbol) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(symbol);
   }
 
   public setSymbol(newSymbol: CurrencyPair) {
     if (this.symbol === newSymbol) return;
     this.symbol = newSymbol;
-    this.currentPrice = BASE_PRICES[newSymbol] || 3538.20;
+    this.currentPrice = LiveMarketFeedManager.getCanonicalPrice(newSymbol) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(newSymbol);
     this.reconnect();
   }
 

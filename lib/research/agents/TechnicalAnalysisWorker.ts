@@ -6,6 +6,7 @@
  */
 
 import { DiscoveryBrief, TechnicalAgentResult, PriceLevel, RealisticTradePlan } from '../types';
+import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 
 export class TechnicalAnalysisWorker {
   public async analyze(brief: DiscoveryBrief): Promise<TechnicalAgentResult> {
@@ -106,38 +107,51 @@ export class TechnicalAnalysisWorker {
       fib100: swingLow,
     };
 
-    // 6. Realistic Trade Plan in Immediate Proximity
+    // 6. Realistic Trade Plan in Immediate Proximity strictly anchored to SSOT live market feed
     const stopDistance = Math.max(atr * 1.1, price * 0.015);
-    const stopLossPrice = Math.round((isBullishBias ? price - stopDistance : price + stopDistance) * 100) / 100;
-    const riskPercent = Math.round((Math.abs(price - stopLossPrice) / price) * 10000) / 100;
+    const candidateStopLoss = Math.round((isBullishBias ? price - stopDistance : price + stopDistance) * 100) / 100;
+    const candidateTarget1 = Math.round((isBullishBias ? price + stopDistance * 1.8 : price - stopDistance * 1.8) * 100) / 100;
+    const candidateTarget2 = Math.round((isBullishBias ? price + stopDistance * 3.2 : price - stopDistance * 3.2) * 100) / 100;
 
-    const target1Price = Math.round((isBullishBias ? price + stopDistance * 1.8 : price - stopDistance * 1.8) * 100) / 100;
-    const target2Price = Math.round((isBullishBias ? price + stopDistance * 3.2 : price - stopDistance * 3.2) * 100) / 100;
+    const constrained = liveMarketAnchorConstraintEngine.enforceTightVarianceConstraint({
+      symbol: brief.symbol,
+      direction: isBullishBias ? 'BUY' : 'SELL',
+      proposedEntry: price,
+      proposedStopLoss: candidateStopLoss,
+      proposedTakeProfit1: candidateTarget1,
+      proposedTakeProfit2: candidateTarget2,
+      customSpotPrice: price,
+    });
+
+    const stopLossPrice = constrained.stopLoss;
+    const riskPercent = Math.round((Math.abs(price - stopLossPrice) / price) * 10000) / 100;
+    const target1Price = constrained.takeProfit1;
+    const target2Price = constrained.takeProfit2;
 
     const tradePlan: RealisticTradePlan = {
       entryZone: {
-        min: Math.round((isBullishBias ? price - atr * 0.35 : price) * 100) / 100,
-        max: Math.round((isBullishBias ? price + atr * 0.20 : price + atr * 0.35) * 100) / 100,
-        note: `Immediate proximity zone anchored around EMA-20 (${brief.pricing.currency} ${ema20.toFixed(2)}) and VWAP support.`,
+        min: constrained.entryZoneMin,
+        max: constrained.entryZoneMax,
+        note: `Immediate proximity zone anchored around EMA-20 (${brief.pricing.currency} ${ema20.toFixed(2)}) and VWAP support (Variance: ${constrained.varianceFromSpotPips} pips).`,
       },
       stopLoss: {
         price: stopLossPrice,
-        distancePoints: Math.round(Math.abs(price - stopLossPrice) * 100) / 100,
+        distancePoints: constrained.stopLossDistancePoints,
         riskPercent,
         rationale: 'Placed below confluent Support Level 1 and 61.8% Golden Pocket invalidation.',
       },
       target1: {
         price: target1Price,
-        distancePoints: Math.round(Math.abs(target1Price - price) * 100) / 100,
+        distancePoints: constrained.takeProfit1DistancePoints,
         rewardPercent: Math.round((Math.abs(target1Price - price) / price) * 10000) / 100,
-        riskRewardRatio: 1.8,
+        riskRewardRatio: constrained.riskRewardRatio,
         rationale: 'Primary liquidity pool test at Resistance 1; scales out 50% and moves SL to Break-Even.',
       },
       target2: {
         price: target2Price,
         distancePoints: Math.round(Math.abs(target2Price - price) * 100) / 100,
         rewardPercent: Math.round((Math.abs(target2Price - price) / price) * 10000) / 100,
-        riskRewardRatio: 3.2,
+        riskRewardRatio: Number(((Math.abs(target2Price - price)) / Math.max(constrained.stopLossDistancePoints, 0.0001)).toFixed(2)),
         rationale: 'Macro runner target at Resistance 3 / 1.272 Fibonacci expansion.',
       },
     };
