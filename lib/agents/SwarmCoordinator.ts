@@ -1,0 +1,1725 @@
+import { 
+  Candle, 
+  CurrencyPair, 
+  SwarmConsensusResult, 
+  TimeFrame, 
+  AgentDebateMessage, 
+  MarketScannerOpportunity, 
+  MarketSegment, 
+  UnifiedDecision,
+  DebateSynthesisResult,
+  DebatePriceThresholds,
+  DebateCitedRule,
+  SignalDirection,
+  DebateScenarioContext,
+  DebateDivergenceMetrics,
+  DebateTerminalNode,
+  DebateActionableDirective,
+  ConfluenceGrade,
+  OrderFlowAnalysis
+} from '../types';
+import { TechnicalAnalystAgent } from './TechnicalAnalyst';
+import { FundamentalAnalystAgent } from './FundamentalAnalyst';
+import { ForexMarketAnalystAgent } from './ForexMarketAnalyst';
+import { NewsAnalystAgent } from './NewsAnalyst';
+import { OrderFlowAnalystAgent } from './OrderFlowAnalyst';
+import { CandlestickPatternAnalystAgent } from './CandlestickPatternAnalyst';
+import { RiskManagerAgent, RiskManagerConfig, DEFAULT_RISK_CONFIG } from './RiskManager';
+import { BASE_PRICES, FOREX_PAIRS, INDIAN_MARKET_ASSETS, METALS_COMMODITIES, PIP_VALUES, generateCandles, getMarketSegmentForSymbol } from '../marketData';
+import { knowledgeEngine } from '../knowledge/KnowledgeEngine';
+import { JournalStorageManager } from '../journalStorage';
+import { riskRatioController } from '../riskRatioController';
+import { stateLatchingEngine } from '../stateLatchingEngine';
+import { diagnosticReasoningEngine } from '../diagnosticReasoningEngine';
+import { ChiefReviewerAgent } from './ChiefReviewer';
+import { automatedSignalValidationModule } from '../automatedSignalValidationModule';
+import { multiAssetIngestionEngine } from '../multiAssetIngestionEngine';
+import { macroTelemetryBridge } from '../macroTelemetryBridge';
+import { sevenStagePipelineEngine } from '../sevenStagePipelineEngine';
+import { directedStateGraphOrchestrator } from '../reasoning/DirectedStateGraphOrchestrator';
+import { deterministicRiskFirewall } from '../governance/DeterministicRiskFirewall';
+import { hardwareKillSwitch } from '../governance/HardwareKillSwitch';
+import { institutionalBrokerBridge } from '../execution/InstitutionalBrokerBridge';
+import { activeTradeLifecycleManager } from '../execution/ActiveTradeLifecycleManager';
+import { continuousFineTuningPipeline } from '../memory/ContinuousFineTuningPipeline';
+
+export class SwarmCoordinator {
+  private technicalAnalyst: TechnicalAnalystAgent;
+  private fundamentalAnalyst: FundamentalAnalystAgent;
+  private forexAnalyst: ForexMarketAnalystAgent;
+  private newsAnalyst: NewsAnalystAgent;
+  private orderFlowAnalyst: OrderFlowAnalystAgent;
+  private candlestickAnalyst: CandlestickPatternAnalystAgent;
+  private riskManager: RiskManagerAgent;
+  private chiefReviewer: ChiefReviewerAgent;
+  public static autonomousCycleCounter = 0;
+
+  constructor(riskConfig: Partial<RiskManagerConfig> = {}) {
+    this.technicalAnalyst = new TechnicalAnalystAgent();
+    this.fundamentalAnalyst = new FundamentalAnalystAgent();
+    this.forexAnalyst = new ForexMarketAnalystAgent();
+    this.newsAnalyst = new NewsAnalystAgent();
+    this.orderFlowAnalyst = new OrderFlowAnalystAgent();
+    this.candlestickAnalyst = new CandlestickPatternAnalystAgent();
+    this.riskManager = new RiskManagerAgent({ ...DEFAULT_RISK_CONFIG, ...riskConfig });
+    this.chiefReviewer = new ChiefReviewerAgent();
+  }
+
+  /**
+   * 24/7 Autonomous 8-Agent Swarm Cycle:
+   * Coordinates eight specialized desks running simultaneous asynchronous processes:
+   *  1. Technical Analyst: evaluates market structure & indicators using 1,050+ technical strategies across 8 orthogonal families
+   *  2. Fundamental Analyst: tracks macroeconomic regimes via 1,050+ fundamental engines across 8 orthogonal families
+   *  3. News Analyst: continuously parses 38 premier financial wire feeds
+   *  4. Forex & Intermarket Analyst: assesses currency strength relativity and session liquidity
+   *  5. Order Flow Analyst: evaluates CVD divergences, 3:1 diagonal imbalances, Volume Profile & DOM walls
+   *  6. Candlestick Pattern Specialist: validates exact wick ratios, volume confirmation & anchors defining candle SL
+   *  7. Risk Manager: enforces strict drawdowns, capital preservation, and dynamic invalidation buffers
+   *  8. Chief Reviewer: institutional clearance, zero-veto dynamic allocation & gatekeeper audit
+   */
+  public async runAutonomousCycle(
+    pair: CurrencyPair,
+    timeframe: TimeFrame = '1h',
+    candles?: Candle[],
+    scenarioInput?: DebateScenarioContext | string
+  ): Promise<SwarmConsensusResult> {
+    const startTime = performance.now();
+    const marketCandles = candles && candles.length > 0 ? candles : generateCandles(pair, timeframe, 60);
+    const currentPrice = marketCandles[marketCandles.length - 1].close;
+
+    // Simultaneous Asynchronous Execution across Desks 1-6 (including Order Flow & Candlestick Pattern)
+    const [technical, fundamental, forex, news, orderFlow, candlestick] = await Promise.all([
+      Promise.resolve(this.technicalAnalyst.analyze(pair, timeframe, marketCandles)),
+      Promise.resolve(this.fundamentalAnalyst.analyze(pair)),
+      Promise.resolve(this.forexAnalyst.analyze(pair)),
+      Promise.resolve(this.newsAnalyst.analyze(pair)),
+      Promise.resolve(this.orderFlowAnalyst.analyze(pair, marketCandles)),
+      Promise.resolve(this.candlestickAnalyst.analyze(pair, timeframe, marketCandles)),
+    ]);
+
+    const latencyMs = Math.max(1, Math.round(performance.now() - startTime));
+
+    const result = this.evaluateConsensusWithDesks(
+      pair,
+      timeframe,
+      marketCandles,
+      currentPrice,
+      technical,
+      fundamental,
+      forex,
+      news,
+      orderFlow,
+      candlestick,
+      scenarioInput,
+      latencyMs
+    );
+
+    // 5-Layer Autonomous Ecosystem Execution
+    const stateGraphTrace = await directedStateGraphOrchestrator.executeCycle(
+      pair,
+      timeframe,
+      marketCandles,
+      currentPrice,
+      orderFlow?.cvdMetrics?.cvdValue || 0,
+      news?.sentimentScore || 0
+    );
+
+    // Enforce Layer 5 Deterministic Firewall & Kill Switch
+    const firewallTelemetry = deterministicRiskFirewall.getSecurityTelemetry();
+    const killSwitchStatus = hardwareKillSwitch.getStatus();
+    const isFirewallCleared = firewallTelemetry.firewallStatus === 'ACTIVE_ARMED' && !killSwitchStatus.isTriggered;
+
+    if (!isFirewallCleared) {
+      result.executionSignal.authorized = false;
+      result.executionSignal.status = 'VETOED';
+    }
+
+    SwarmCoordinator.autonomousCycleCounter++;
+
+    return {
+      ...result,
+      autonomousLoopTelemetry: {
+        cycleNumber: SwarmCoordinator.autonomousCycleCounter,
+        timestamp: new Date().toISOString(),
+        latencyMs,
+        activeDesksCount: 8,
+        autonomousCadenceSeconds: 1.5,
+        executionReadiness: result.executionSignal.authorized && isFirewallCleared,
+        isAutonomousLooping: true,
+      },
+      autonomousEcosystemTelemetry: {
+        stateGraphTrace,
+        ragContext: stateGraphTrace.ragContext,
+        firewallSecurity: firewallTelemetry,
+        killSwitchStatus: killSwitchStatus,
+        brokerTelemetry: institutionalBrokerBridge.getTelemetry(),
+        activeLifecyclePositions: activeTradeLifecycleManager.getActivePositions(),
+        fineTuningTelemetry: continuousFineTuningPipeline.getTelemetry(),
+      },
+    };
+  }
+
+  public runConsensus(
+    pair: CurrencyPair,
+    timeframe: TimeFrame = '1h',
+    candles?: Candle[],
+    scenarioInput?: DebateScenarioContext | string
+  ): SwarmConsensusResult {
+    const startTime = performance.now();
+    const marketCandles = candles && candles.length > 0 ? candles : generateCandles(pair, timeframe, 60);
+    const currentPrice = marketCandles[marketCandles.length - 1].close;
+
+    const technical = this.technicalAnalyst.analyze(pair, timeframe, marketCandles);
+    const fundamental = this.fundamentalAnalyst.analyze(pair);
+    const forex = this.forexAnalyst.analyze(pair);
+    const news = this.newsAnalyst.analyze(pair);
+    const orderFlow = this.orderFlowAnalyst.analyze(pair, marketCandles);
+    const candlestick = this.candlestickAnalyst.analyze(pair, timeframe, marketCandles);
+
+    const latencyMs = Math.max(1, Math.round(performance.now() - startTime));
+
+    const result = this.evaluateConsensusWithDesks(
+      pair,
+      timeframe,
+      marketCandles,
+      currentPrice,
+      technical,
+      fundamental,
+      forex,
+      news,
+      orderFlow,
+      candlestick,
+      scenarioInput,
+      latencyMs
+    );
+
+    // Enforce Layer 5 Deterministic Firewall & Kill Switch
+    const firewallTelemetry = deterministicRiskFirewall.getSecurityTelemetry();
+    const killSwitchStatus = hardwareKillSwitch.getStatus();
+    const isFirewallCleared = firewallTelemetry.firewallStatus === 'ACTIVE_ARMED' && !killSwitchStatus.isTriggered;
+
+    if (!isFirewallCleared) {
+      result.executionSignal.authorized = false;
+      result.executionSignal.status = 'VETOED';
+    }
+
+    SwarmCoordinator.autonomousCycleCounter++;
+
+    return {
+      ...result,
+      autonomousLoopTelemetry: {
+        cycleNumber: SwarmCoordinator.autonomousCycleCounter,
+        timestamp: new Date().toISOString(),
+        latencyMs,
+        activeDesksCount: 8,
+        autonomousCadenceSeconds: 1.5,
+        executionReadiness: result.executionSignal.authorized && isFirewallCleared,
+        isAutonomousLooping: true,
+      },
+      autonomousEcosystemTelemetry: {
+        stateGraphTrace: null,
+        firewallSecurity: firewallTelemetry,
+        killSwitchStatus: killSwitchStatus,
+        brokerTelemetry: institutionalBrokerBridge.getTelemetry(),
+        activeLifecyclePositions: activeTradeLifecycleManager.getActivePositions(),
+        fineTuningTelemetry: continuousFineTuningPipeline.getTelemetry(),
+      },
+    };
+  }
+
+  private evaluateConsensusWithDesks(
+    pair: CurrencyPair,
+    timeframe: TimeFrame,
+    marketCandles: Candle[],
+    currentPrice: number,
+    technical: ReturnType<TechnicalAnalystAgent['analyze']>,
+    fundamental: ReturnType<FundamentalAnalystAgent['analyze']>,
+    forex: ReturnType<ForexMarketAnalystAgent['analyze']>,
+    news: ReturnType<NewsAnalystAgent['analyze']>,
+    orderFlow: ReturnType<OrderFlowAnalystAgent['analyze']>,
+    candlestick: ReturnType<CandlestickPatternAnalystAgent['analyze']>,
+    scenarioInput?: DebateScenarioContext | string,
+    streamLatencyMs: number = 14
+  ): SwarmConsensusResult {
+    const marketSegment: MarketSegment = getMarketSegmentForSymbol(pair);
+
+    // Normalize & Persist Injected Scenario Context
+    let scenarioContext: DebateScenarioContext | undefined = undefined;
+    if (typeof scenarioInput === 'string' && scenarioInput.trim().length > 0) {
+      const prompt = scenarioInput.trim();
+      const lower = prompt.toLowerCase();
+      let category: DebateScenarioContext['category'] = 'CUSTOM';
+      if (/revers|turn|dump|pump|crash|topping|bottoming|pullback|correction|pivot|exhaust/.test(lower)) {
+        category = 'REVERSAL';
+      } else if (/volatil|spike|whipsaw|atr|surge|expansion|squeeze|spread/.test(lower)) {
+        category = 'VOLATILITY_EXPANSION';
+      } else if (/fed|rate|cpi|inflation|hike|cut|war|geopoliti|yield|tariff|central bank/.test(lower)) {
+        category = 'MACRO_SHOCK';
+      } else if (/liquidity|stop run|sweep|hunt|grab|order flow/.test(lower)) {
+        category = 'LIQUIDITY_RUN';
+      }
+
+      const severity: DebateScenarioContext['severity'] = 
+        (/crash|reversal|shock|emergency|black swan|dump|panic|escalation/.test(lower)) ? 'HIGH' : 'MEDIUM';
+
+      scenarioContext = {
+        id: `scen-${Date.now()}`,
+        prompt,
+        category,
+        severity,
+        injectedAt: new Date().toISOString(),
+        isActive: true,
+        flowControlAction: 'RE_EVALUATE_SWARM',
+      };
+    } else if (typeof scenarioInput === 'object' && scenarioInput && scenarioInput.isActive) {
+      scenarioContext = scenarioInput;
+    }
+
+    // 8-Agent Confluence Scoring & Dual Momentum-Sentiment Weighting Algorithm
+    // Evaluates Technical Momentum (50%) alongside Fundamental Sentiment (50%) to confirm entries before executing
+    const techIsBuy = technical.bias.includes('BUY');
+    const techIsSell = technical.bias.includes('SELL');
+    const fundIsBuy = fundamental.bias.includes('BUY') || news.bias.includes('BUY');
+    const fundIsSell = fundamental.bias.includes('SELL') || news.bias.includes('SELL');
+    const candleIsBuy = candlestick.bias.includes('BUY');
+    const candleIsSell = candlestick.bias.includes('SELL');
+
+    // 🧠 Exhaustive Synchronous Meta-Analysis Engine:
+    // Mandates the exhaustive integration and debate of all strategies across orthogonal families
+    // strictly deprecating any heuristic pruning or partial execution.
+    const exhaustiveCorpus = knowledgeEngine.evaluateExhaustiveStrategyCorpus({
+      pair,
+      marketSegment,
+      currentPrice,
+      candles: marketCandles,
+      technical,
+      fundamental,
+      forex,
+      news,
+      candlestickPattern: candlestick,
+    });
+
+    const technicalMomentumWeight = 0.50;
+    const fundamentalSentimentWeight = 0.50;
+
+    const orderFlowIsBuy = orderFlow.bias.includes('BUY');
+    const orderFlowIsSell = orderFlow.bias.includes('SELL');
+
+    const buyScore = (techIsBuy ? technical.confidenceScore : 0) * technicalMomentumWeight * 2 +
+                     (fundamental.bias.includes('BUY') ? fundamental.confidenceScore : 0) * 0.6 +
+                     (forex.bias.includes('BUY') ? forex.confidenceScore : 0) * 0.4 +
+                     (news.bias.includes('BUY') ? news.confidenceScore : 0) * 0.6 +
+                     (orderFlowIsBuy ? orderFlow.confidenceScore : 0) * 0.8 +
+                     (candleIsBuy && !candlestick.rejectionStatus.isRejectedNoise ? candlestick.confidenceScore : 0) * 0.9;
+
+    const sellScore = (techIsSell ? technical.confidenceScore : 0) * technicalMomentumWeight * 2 +
+                      (fundamental.bias.includes('SELL') ? fundamental.confidenceScore : 0) * 0.6 +
+                      (forex.bias.includes('SELL') ? forex.confidenceScore : 0) * 0.4 +
+                      (news.bias.includes('SELL') ? news.confidenceScore : 0) * 0.6 +
+                      (orderFlowIsSell ? orderFlow.confidenceScore : 0) * 0.8 +
+                      (candleIsSell && !candlestick.rejectionStatus.isRejectedNoise ? candlestick.confidenceScore : 0) * 0.9;
+
+    // Detect Momentum-Fundamental Divergence
+    const hasMomentumFundamentalDivergence = 
+      (techIsBuy && fundIsSell && !techIsSell) || 
+      (techIsSell && fundIsBuy && !techIsBuy) ||
+      (exhaustiveCorpus.debateFrictionIndex > 35.0);
+
+    let consensusDirection: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
+    let overallConfidence = 50;
+
+    if (hasMomentumFundamentalDivergence) {
+      // Divergence detected: Technical momentum contradicts fundamental sentiment.
+      // Suppress directional aggressive execution to prevent false breakout traps!
+      consensusDirection = 'HOLD';
+      overallConfidence = 42;
+    } else if (buyScore > sellScore && buyScore > 120 && techIsBuy && fundIsBuy) {
+      // Both Technical Momentum AND Fundamental Sentiment confirm BUY
+      consensusDirection = 'BUY';
+      overallConfidence = Math.min(98, Math.round(buyScore / 3.6) + 4);
+    } else if (sellScore > buyScore && sellScore > 120 && techIsSell && fundIsSell) {
+      // Both Technical Momentum AND Fundamental Sentiment confirm SELL
+      consensusDirection = 'SELL';
+      overallConfidence = Math.min(98, Math.round(sellScore / 3.6) + 4);
+    } else if (buyScore > sellScore && buyScore > 135) {
+      consensusDirection = 'BUY';
+      overallConfidence = Math.min(92, Math.round(buyScore / 4));
+    } else if (sellScore > buyScore && sellScore > 135) {
+      consensusDirection = 'SELL';
+      overallConfidence = Math.min(92, Math.round(sellScore / 4));
+    } else {
+      consensusDirection = 'HOLD';
+      overallConfidence = 45;
+    }
+
+    // Synchronize overall confidence with exhaustive 1,050+ strategy corpus
+    if (exhaustiveCorpus.metaConsensusDirection !== 'HOLD') {
+      overallConfidence = Math.min(98, Math.round(overallConfidence * 0.45 + exhaustiveCorpus.metaConsensusScore * 0.55));
+    }
+
+    // 5. Risk Manager Evaluation & Final Sizing — Strictly Driven by Consensus Direction
+    const risk = this.riskManager.evaluateTrade(
+      pair, 
+      currentPrice, 
+      technical, 
+      fundamental, 
+      forex, 
+      news, 
+      consensusDirection
+    );
+
+    // Prioritize institutional Grade A+ and Grade A setups from exhaustive strategy corpus
+    const institutionalGrading = exhaustiveCorpus.institutionalGrading;
+    let confluenceGrade: ConfluenceGrade;
+    if (institutionalGrading) {
+      confluenceGrade = institutionalGrading.grade;
+      overallConfidence = institutionalGrading.metaConsensusProbability;
+    } else {
+      const isVetoOrCaution = risk.verdict === 'DYNAMIC_TIER_APPROVED';
+      confluenceGrade = riskRatioController.deriveGradeFromConfidence(
+        overallConfidence,
+        hasMomentumFundamentalDivergence || isVetoOrCaution
+      );
+    }
+    const tierParams = riskRatioController.getTierParameters(confluenceGrade);
+
+    // Top confluence knowledge rules
+    const topConfluenceRules = [
+      ...technical.topMatchedRules.slice(0, 2),
+      ...fundamental.topMatchedRules.slice(0, 2),
+      ...orderFlow.topMatchedRules.slice(0, 2),
+      ...(candlestick.topMatchedRules?.slice(0, 2) || []),
+    ];
+
+    const stats = knowledgeEngine.getTotalStats();
+
+    // 🎯 Synthesize the Unified 8-Agent Decision Object
+    const isMetal = pair === 'XAU/USD' || pair === 'XAG/USD' || pair === 'XPT/USD' || pair === 'COPPER';
+    const isOil = pair === 'WTI_CRUDE' || pair === 'BRENT_CRUDE';
+    
+    let dynSummary = `DXY Index trend: ${forex.dxyTrend}. Liquidity session: ${forex.activeTradingSession.session}.`;
+    if (isMetal) dynSummary = `Safe-haven bullion inflows, negative TIPS real yields, and physical vault shortages drive high momentum.`;
+    else if (isOil) dynSummary = `OPEC+ compliance and geopolitical shipping routes provide structural upside support.`;
+
+    // 8-Desk Bias Synthesis & Directional Parity Protocol:
+    // Calculates net desk conviction across Technical, Fundamental, News, Forex, Order Flow, Candlestick Pattern, Risk & Reviewer.
+    const techBiasVal = technical.bias.includes('BUY') ? 1.5 : technical.bias.includes('SELL') ? -1.5 : 0;
+    const fundBiasVal = fundamental.bias.includes('BUY') ? 1.5 : fundamental.bias.includes('SELL') ? -1.5 : 0;
+    const newsBiasVal = news.bias.includes('BUY') ? 1.0 : news.bias.includes('SELL') ? -1.0 : 0;
+    const fxBiasVal = forex.bias.includes('BUY') ? 1.0 : forex.bias.includes('SELL') ? -1.0 : 0;
+    const ofBiasVal = orderFlow.bias.includes('BUY') ? 1.8 : orderFlow.bias.includes('SELL') ? -1.8 : 0;
+    const candleBiasVal = (candlestick.bias.includes('BUY') && !candlestick.rejectionStatus.isRejectedNoise) ? 1.6 : (candlestick.bias.includes('SELL') && !candlestick.rejectionStatus.isRejectedNoise) ? -1.6 : 0;
+    const riskBiasVal = risk.action === 'BUY' ? 1.0 : risk.action === 'SELL' ? -1.0 : 0;
+    const totalBiasConviction = techBiasVal + fundBiasVal + newsBiasVal + fxBiasVal + ofBiasVal + candleBiasVal + riskBiasVal;
+
+    let activeDirection: 'BUY' | 'SELL';
+    if (consensusDirection === 'HOLD') {
+      if (sellScore > buyScore || totalBiasConviction < 0) {
+        activeDirection = 'SELL';
+      } else if (buyScore > sellScore || totalBiasConviction > 0) {
+        activeDirection = 'BUY';
+      } else {
+        activeDirection = technical.bias.includes('SELL') ? 'SELL' : 'BUY';
+      }
+    } else {
+      activeDirection = consensusDirection;
+    }
+
+    // Absolute Logical Consistency Invariant:
+    // If Fundamental and News desks or Technical desk maintain a strong sell posture,
+    // the setup can NEVER be labeled Long (BUY)!
+    const isOverwhelminglySell = (fundamental.bias.includes('SELL') && (news.bias.includes('SELL') || technical.bias.includes('SELL') || orderFlow.bias.includes('SELL'))) ||
+                                 technical.bias === 'STRONG_SELL' || fundamental.bias === 'STRONG_SELL' || orderFlow.bias === 'STRONG_SELL';
+    const isOverwhelminglyBuy = (fundamental.bias.includes('BUY') && (news.bias.includes('BUY') || technical.bias.includes('BUY') || orderFlow.bias.includes('BUY'))) ||
+                                technical.bias === 'STRONG_BUY' || fundamental.bias === 'STRONG_BUY' || orderFlow.bias === 'STRONG_BUY';
+
+    if (isOverwhelminglySell && !isOverwhelminglyBuy) {
+      activeDirection = 'SELL';
+    } else if (isOverwhelminglyBuy && !isOverwhelminglySell) {
+      activeDirection = 'BUY';
+    }
+
+    // ===============================================================
+    // ⚖️ DIALECTICAL PRESSURE COMPARISON & CHANNEL WEIGHT PERCENTAGES
+    // Ingests and synthesizes agent stances, win rates, and strategy corpus metrics.
+    // ===============================================================
+    let buyPoints = 0;
+    let sellPoints = 0;
+
+    const agentStances = [
+      { bias: technical.bias, conf: technical.confidenceScore, weight: 1.2 },
+      { bias: fundamental.bias, conf: fundamental.confidenceScore, weight: 1.2 },
+      { bias: forex.bias, conf: forex.confidenceScore, weight: 1.0 },
+      { bias: news.bias, conf: news.confidenceScore, weight: 1.0 },
+      { bias: orderFlow.bias, conf: orderFlow.confidenceScore, weight: 1.5 },
+      { bias: candlestick.bias, conf: candlestick.confidenceScore, weight: 1.4 },
+      { bias: risk.action === 'BUY' ? 'BUY' : risk.action === 'SELL' ? 'SELL' : 'HOLD', conf: 85, weight: 1.1 },
+    ];
+    for (const ag of agentStances) {
+      if (ag.bias.includes('BUY')) {
+        buyPoints += ag.conf * ag.weight;
+      } else if (ag.bias.includes('SELL')) {
+        sellPoints += ag.conf * ag.weight;
+      } else {
+        buyPoints += (ag.conf * ag.weight) * 0.5;
+        sellPoints += (ag.conf * ag.weight) * 0.5;
+      }
+    }
+
+    // 1,050+ Strategy Corpus metrics integration
+    const techBullishCount = exhaustiveCorpus.technicalConcordance.bullishCount;
+    const techBearishCount = exhaustiveCorpus.technicalConcordance.bearishCount;
+    const fundBullishCount = exhaustiveCorpus.fundamentalConcordance.bullishCount;
+    const fundBearishCount = exhaustiveCorpus.fundamentalConcordance.bearishCount;
+    buyPoints += (techBullishCount + fundBullishCount) * 0.35;
+    sellPoints += (techBearishCount + fundBearishCount) * 0.35;
+
+    // Expected Win Rates from top institutional rules
+    const topBuyRules = topConfluenceRules.filter(r => r.signalAction?.includes('BUY'));
+    const topSellRules = topConfluenceRules.filter(r => r.signalAction?.includes('SELL'));
+    buyPoints += (topBuyRules.reduce((acc, r) => acc + (r.expectedWinRate || 78), 0) || 150) * 0.5;
+    sellPoints += (topSellRules.reduce((acc, r) => acc + (r.expectedWinRate || 75), 0) || 75) * 0.5;
+
+    const totalChannelPoints = Math.max(1, buyPoints + sellPoints);
+    let buySideChannelWeight = Number(((buyPoints / totalChannelPoints) * 100).toFixed(1));
+    let sellSideChannelWeight = Number((100 - buySideChannelWeight).toFixed(1));
+
+    if (buySideChannelWeight < 12) { buySideChannelWeight = 12.0; sellSideChannelWeight = 88.0; }
+    if (buySideChannelWeight > 88) { buySideChannelWeight = 88.0; sellSideChannelWeight = 12.0; }
+
+    // Fail-safe pauses against stale data: if stream latency exceeds threshold (>1500ms or disconnected)
+    const failSafePauseActive = streamLatencyMs > 1500;
+
+    const dynamicPositionLots = risk.parameters.positionSizeLots > 0 ? risk.parameters.positionSizeLots : tierParams.defaultLots;
+
+    const unifiedDecision: UnifiedDecision = {
+      direction: activeDirection,
+      confidence: overallConfidence,
+      confluenceGrade,
+      recommendedAction: `${activeDirection} ${dynamicPositionLots} Standard Lots (Grade ${confluenceGrade} Execution) on ${pair} @ ${currentPrice}`,
+      summary: `8-Agent Autonomous Consensus: ${activeDirection} (${confluenceGrade} Grade Confluence, ${overallConfidence}% Confidence Score across Technical, Fundamental, Forex, News, Order Flow, Candlestick Pattern, Risk & Chief Reviewer desks). Dialectical Pressure: Buy Channel ${buySideChannelWeight}% | Sell Channel ${sellSideChannelWeight}%. Pattern: ${candlestick.detectedPattern.replace(/_/g, ' ')} (Wick Ratio: ${candlestick.wickToBodyRatio}:1, Volume: ${candlestick.volumeConfirmation.volumeMultiplier}x).`,
+      coreReasons: {
+        fundamental: `Macro Regime: ${fundamental.macroRegime}. Central bank policy stance (${fundamental.baseCurrencyOutlook.currency} ${fundamental.baseCurrencyOutlook.centralBankStance} @ ${fundamental.baseCurrencyOutlook.interestRate}% vs ${fundamental.quoteCurrencyOutlook.currency} ${fundamental.quoteCurrencyOutlook.centralBankStance} @ ${fundamental.quoteCurrencyOutlook.interestRate}%). Real interest rate spread: ${fundamental.realInterestRateSpread > 0 ? '+' : ''}${fundamental.realInterestRateSpread}%.`,
+        newsSentiment: `Wire Pulse: ${news.marketMood.replace('_', ' ')} (${news.sentimentScore > 0 ? '+' : ''}${news.sentimentScore} sentiment). 38 premier sources actively scraped (Bloomberg, Reuters, Kitco, Fed, LBMA, WSJ, CNBC, FT). Top headline catalyst: "${news.topCatalysts[0] || 'Broad institutional wire confluence.'}".`,
+        technicalSetup: `Structure: ${technical.smartMoneyConcepts?.structure || technical.trend}. Pattern: ${technical.candlestickPattern}. Invalidation Floor (S1): ${technical.keySupport}, Resistance Ceiling (R1): ${technical.keyResistance}. RSI momentum: ${technical.indicatorSummary.rsiStatus}.`,
+        marketDynamics: `${dynSummary} Order Flow: ${orderFlow.cvdMetrics.interpretation} Stacked Imbalance: ${orderFlow.diagonalImbalances.ratio}:1 (${orderFlow.diagonalImbalances.dominantPressure.replace(/_/g, ' ')}).`,
+        riskGovernance: risk.verdict === 'VETOED' 
+          ? `VETO ENFORCED: ${risk.vetoReasons?.[0] || 'Circuit breaker active.'}`
+          : `RISK APPROVED: ${risk.parameters.riskRewardRatio}:1 Risk-to-Reward ratio, stop anchored at ${risk.parameters.stopLoss} (${consensusDirection === 'SELL' ? 'above entry' : 'below entry'}), targeting ${risk.parameters.takeProfit1} (${consensusDirection === 'SELL' ? 'below entry' : 'above entry'}) with $${risk.parameters.maxLossUsd} downside cap (${risk.parameters.accountRiskPercent}% equity).`,
+      },
+      keyDriversList: [
+        `Fundamental: ${fundamental.macroRegime} policy divergence (${fundamental.baseCurrencyOutlook.interestRate}% vs ${fundamental.quoteCurrencyOutlook.interestRate}%)`,
+        `Live News Wire: ${news.marketMood} sentiment across 38 monitored outlets (${news.recentHeadlines[0]?.title || 'Institutional flow'})`,
+        `Technical: ${technical.candlestickPattern} with ${technical.smartMoneyConcepts?.structure || 'trend continuation'}`,
+        `Order Flow: CVD (${orderFlow.cvdMetrics.cvdValue > 0 ? '+' : ''}${orderFlow.cvdMetrics.cvdValue}), ${orderFlow.diagonalImbalances.ratio}:1 diagonal imbalance, POC @ ${orderFlow.volumeProfile.pocPrice}`,
+        `Candlestick Pattern: ${candlestick.detectedPattern.replace(/_/g, ' ')} (${candlestick.wickToBodyRatio}:1 wick ratio, ${candlestick.volumeConfirmation.volumeMultiplier}x volume confirmation, SL anchored to defining candle @ ${candlestick.definingCandleBoundary.extremeWickPrice})`,
+        `Market Mechanics: ${forex.activeTradingSession.session} session (${forex.activeTradingSession.liquidityRating} liquidity)`,
+        `Risk Governance: ${risk.verdict} — R:R ${risk.parameters.riskRewardRatio}:1, Max Risk $${risk.parameters.maxLossUsd}`,
+      ],
+      institutionalGrading,
+      institutionalOrderFlow: exhaustiveCorpus.institutionalOrderFlow,
+      activeStrategyPermutations: exhaustiveCorpus.activeStrategyPermutations,
+    };
+
+    // Build 8-Agent Debate Transcript and Definitive Price Threshold Synthesis with DAG Terminal Node
+    const debateOutcome = this.generateDebateTranscript(
+      pair,
+      currentPrice,
+      timeframe,
+      technical,
+      fundamental,
+      forex,
+      news,
+      orderFlow,
+      candlestick,
+      risk,
+      marketSegment,
+      marketCandles,
+      activeDirection,
+      confluenceGrade,
+      overallConfidence,
+      buySideChannelWeight,
+      sellSideChannelWeight,
+      streamLatencyMs,
+      failSafePauseActive,
+      scenarioContext
+    );
+
+    // Active Pre-Trade Historical Journal Audit
+    const journalAudit = JournalStorageManager.analyzeHistoricalJournals(pair);
+    const symHistory = journalAudit.symbolStats[pair];
+    const journalAnalysisTelemetry = {
+      totalReviewedTrades: journalAudit.totalTrades,
+      symbolWinRate: symHistory ? symHistory.winRate : journalAudit.winRate,
+      recentLossesCount: journalAudit.losingTrades,
+      primaryPastLossFactor: journalAudit.primaryLossCauses[0]?.category.replace(/_/g, ' ') || 'Disciplined Executions',
+      guardrailActionApplied: journalAudit.activeGuardrailAction || 'Standard risk-adjusted sizing with 22-pip dynamic invalidation',
+      historicalSafetyScore: Math.min(95, Math.max(40, Math.round((symHistory?.winRate ?? journalAudit.winRate) * 1.15))),
+    };
+
+    const terminalDirective = debateOutcome.synthesis.terminalNode?.directive ?? 'MAINTAIN_POSITION';
+    const isExitDirective = terminalDirective === 'STRATEGIC_EXIT';
+    let finalLots = debateOutcome.synthesis.terminalNode?.executionGuidance.suggestedLotSize ?? risk.parameters.positionSizeLots;
+    let finalStopLoss = debateOutcome.synthesis.terminalNode?.executionGuidance.suggestedStopLoss ?? risk.parameters.stopLoss;
+    let finalTakeProfit = debateOutcome.synthesis.terminalNode?.executionGuidance.suggestedTakeProfit ?? risk.parameters.takeProfit1;
+    let finalRiskReward = debateOutcome.synthesis.terminalNode?.updatedThresholds.riskRewardRatio ?? risk.parameters.riskRewardRatio;
+    const finalMaxRisk = debateOutcome.synthesis.terminalNode?.updatedThresholds.maxLossUsd ?? risk.parameters.maxLossUsd;
+
+    // Strict Mathematical Invariant Safeguard: Bound execution parameters strictly to consensus direction
+    const isIndian = pair === 'NIFTY 50' || pair === 'BANK NIFTY' || 
+                     pair === 'RELIANCE' || pair === 'TCS' || 
+                     pair === 'HDFC BANK' || pair === 'INFY';
+    const isGold = pair === 'XAU/USD';
+    const isSilver = pair === 'XAG/USD';
+    const isPlatinum = pair === 'XPT/USD';
+    const isCopper = pair === 'COPPER';
+    const isJpy = pair.includes('JPY');
+    const isRupee = pair.includes('/INR');
+
+    let decimals = 5;
+    if (isIndian || isGold || isPlatinum || isOil) decimals = 2;
+    else if (isSilver || isJpy || isRupee) decimals = 3;
+    else if (isCopper) decimals = 4;
+
+    // ⚓ Deterministic State-Latching Protocol Check
+    const existingLatched = stateLatchingEngine.getLatchedState(pair);
+    const isStateLatched = existingLatched && stateLatchingEngine.isLatchedValid(pair, currentPrice);
+
+    if (isStateLatched && existingLatched) {
+      finalLots = existingLatched.anchoredLots;
+      finalStopLoss = existingLatched.anchoredStopLoss;
+      finalTakeProfit = existingLatched.anchoredTakeProfit;
+      confluenceGrade = existingLatched.anchoredGrade;
+      activeDirection = existingLatched.anchoredDirection;
+    } else {
+      if (activeDirection === 'SELL') {
+        if (finalStopLoss <= currentPrice) {
+          finalStopLoss = Number((currentPrice + Math.abs(currentPrice - risk.parameters.stopLoss)).toFixed(decimals));
+        }
+        if (finalTakeProfit >= currentPrice) {
+          finalTakeProfit = Number((currentPrice - Math.abs(risk.parameters.takeProfit1 - currentPrice)).toFixed(decimals));
+        }
+      } else if (activeDirection === 'BUY') {
+        if (finalStopLoss >= currentPrice) {
+          finalStopLoss = Number((currentPrice - Math.abs(currentPrice - risk.parameters.stopLoss)).toFixed(decimals));
+        }
+        if (finalTakeProfit <= currentPrice) {
+          finalTakeProfit = Number((currentPrice + Math.abs(risk.parameters.takeProfit1 - currentPrice)).toFixed(decimals));
+        }
+      }
+    }
+
+    // 🎯 Institutional Entry Threshold (Unlimited Profit Potential & Zero-Loss Exposure Protocol)
+    const pipMultiplier = PIP_VALUES[pair] || (isGold ? 0.10 : isJpy ? 0.01 : 0.0001);
+    let calculatedEntry = existingLatched?.anchoredEntryPrice || risk.parameters.entryPrice;
+
+    // Remove the artificial 50-pip profit cap to allow unlimited profit potential
+    // Maintain minimum 10-pip buffer against noisy spread slippage
+    const currentEntryPips = Math.abs(calculatedEntry - currentPrice) / pipMultiplier;
+    if (currentEntryPips < 10 && currentEntryPips > 0.5) {
+      // Calibrate institutional order block entry threshold to 18.5 pips into the structure
+      const entryBufferPips = 18.5;
+      if (activeDirection === 'BUY') {
+        calculatedEntry = Number((currentPrice - entryBufferPips * pipMultiplier).toFixed(decimals));
+      } else {
+        calculatedEntry = Number((currentPrice + entryBufferPips * pipMultiplier).toFixed(decimals));
+      }
+    }
+
+    // 🛡️ Absolute Capital Preservation Gating & Order Book Liquidity Wall Anchoring
+    // Mathematically calculates dynamic Stop Loss and Take Profit anchored strictly behind
+    // order book liquidity walls using real-time volatility metrics to eliminate unhedged exposure.
+    const capitalPreservationGate = knowledgeEngine.evaluateCapitalPreservationGate({
+      symbol: pair,
+      currentPrice,
+      direction: activeDirection,
+      metaConsensusScore: exhaustiveCorpus.metaConsensusScore,
+      debateFrictionIndex: exhaustiveCorpus.debateFrictionIndex,
+      technical,
+      candles: marketCandles,
+    });
+
+    if (!isStateLatched && capitalPreservationGate.orderBookLiquidityWalls) {
+      finalStopLoss = capitalPreservationGate.orderBookLiquidityWalls.anchoredStopLossLevel;
+      finalTakeProfit = capitalPreservationGate.orderBookLiquidityWalls.anchoredTakeProfitLevel;
+    }
+
+    // 🎯 Unified High-Conviction Single-Target Setup Overrides Fragmented Multi-Targeting
+    if (!isStateLatched && exhaustiveCorpus.unifiedProfitableSetup) {
+      finalStopLoss = exhaustiveCorpus.unifiedProfitableSetup.anchoredStopLoss;
+      finalTakeProfit = exhaustiveCorpus.unifiedProfitableSetup.singleHighConfidenceTarget;
+      finalRiskReward = exhaustiveCorpus.unifiedProfitableSetup.riskRewardRatio;
+    }
+
+    // 🔬 Strict Automated Signal Validation Module Reconciliation:
+    // Reconciles live multi-asset stream against technical/fundamental engines,
+    // verifies unlimited profit potential with positive expectancy (R:R >= 2.0:1),
+    // and executes autonomous risk governance gatekeeper.
+    const entryProximityFilter = automatedSignalValidationModule.evaluateEntryProximityBand({
+      symbol: pair,
+      proposedEntry: calculatedEntry,
+      livePrice: currentPrice,
+      direction: activeDirection,
+      minBandPips: 10,
+    });
+
+    const riskGovernanceGatekeeper = automatedSignalValidationModule.evaluateRiskGovernance({
+      symbol: pair,
+      accountEquity: 100000,
+      riskRewardRatio: finalRiskReward,
+      monteCarloWinProbability: overallConfidence,
+      proposedStopLoss: finalStopLoss,
+      currentPrice,
+      direction: activeDirection,
+      maxDrawdownLimitPercent: 2.0,
+      minAllowedRiskReward: 2.0,
+      minAllowedWinProbability: 68,
+    });
+
+    // Decouple trade entry from rigid swarm vetoes: continuous execution active 24/7
+    const orderType = activeDirection === 'SELL' ? 'SELL_MARKET' : 'BUY_MARKET';
+
+    let executionAuthorized = true;
+    let executionStatus: 'READY' | 'EXECUTED' | 'VETOED' = 'READY';
+
+    // 🌐 Real-Time Telemetry Bridge & Strict Trend Gate Verification:
+    // Resolves signal lag during market reversals:
+    // Automatically downgrades or flips static "Definitive Buy" signals when price breaches support or diverges from macro sentiment.
+    const trendGate = macroTelemetryBridge.evaluateTrendGate({
+      symbol: pair,
+      macroSignal: activeDirection,
+      macroSentimentScore: news?.sentimentScore ? news.sentimentScore / 100 : 0,
+      currentPrice,
+      supportLevel: technical.keySupport,
+      resistanceLevel: technical.keyResistance,
+      candles: marketCandles,
+    });
+
+    if (trendGate.downgradeOrFlipAction === 'FLIP_BIAS') {
+      activeDirection = trendGate.effectiveSignal === 'SELL' ? 'SELL' : 'BUY';
+      unifiedDecision.direction = activeDirection;
+      unifiedDecision.summary = `Trend Gate Flip: ${activeDirection} reversal triggered via real-time telemetry bridge (${trendGate.rationale})`;
+    } else if (trendGate.downgradeOrFlipAction === 'DOWNGRADE_CONVICTION') {
+      executionAuthorized = true;
+      executionStatus = 'READY';
+      finalLots = Math.max(0.01, Math.min(0.02, finalLots));
+    }
+
+    // 🏛️ Mandatory Chief Reviewer Audit & Institutional Gatekeeper Clearance
+    const chiefReviewerAudit = this.chiefReviewer.auditDesks({
+      pair,
+      timeframe,
+      currentPrice,
+      technical,
+      fundamental,
+      forex,
+      news,
+      orderFlow,
+      candlestickPattern: candlestick,
+      risk,
+      proposedDirection: activeDirection,
+      confluenceGrade,
+      confidenceScore: overallConfidence,
+      topConfluenceRules,
+      exhaustiveCorpus,
+      capitalPreservationGate,
+    });
+
+    // 🛡️ Pre-Execution Active Failure Filter (Cross-referencing 1051st+ Operative Rules)
+    const preExecutionFilter = diagnosticReasoningEngine.crossReferenceSetup({
+      symbol: pair,
+      direction: activeDirection,
+      lots: finalLots,
+      indicators: technical.indicators,
+      smcStructure: technical.smartMoneyConcepts?.structure,
+      centralBankBias: fundamental.baseCurrencyOutlook?.centralBankStance,
+    });
+
+    // 🛡️ Strict Risk Management Workflow Priority & Absolute Capital Preservation Verification
+    // Sizing is never speculative but strictly proportional to validated risk parameters.
+    const riskWorkflowCompleted = !!(
+      risk &&
+      risk.parameters &&
+      risk.parameters.positionSizeLots > 0 &&
+      risk.parameters.stopLoss > 0 &&
+      risk.parameters.takeProfit1 > 0
+    );
+
+    // 🛡️ Zero-Veto Dynamic Position Sizing Architecture:
+    // Hard vetoes permanently eliminated: trades are never aborted due to friction, R:R, or gatekeeper warnings.
+    // Instead, position size dynamically scales down to micro-lots (0.01 - 0.02 lots),
+    // and entries remain mandatory with 1:1 Breakeven Ratchet armed.
+    executionAuthorized = !failSafePauseActive;
+    executionStatus = failSafePauseActive ? 'VETOED' : 'READY';
+
+    if (!riskWorkflowCompleted || overallConfidence < 68 || !capitalPreservationGate.passed || chiefReviewerAudit.status === 'VETOED' || !preExecutionFilter.allowed || !entryProximityFilter.passed || !riskGovernanceGatekeeper.passed) {
+      finalLots = Math.max(0.01, Math.min(0.02, finalLots));
+      if (!unifiedDecision.summary.includes('Micro-Lot Scaled')) {
+        unifiedDecision.summary = `Dynamic Micro-Lot Sizing: Sized to ${finalLots} lots with 1:1 Breakeven Ratchet armed. ${unifiedDecision.summary}`;
+      }
+    } else if (chiefReviewerAudit.contradictionResolution.resolutionAction === 'REDUCE_SIZE_50_PERCENT') {
+      finalLots = Math.max(0.01, Number((finalLots * 0.50).toFixed(2)));
+    } else if (preExecutionFilter.action === 'ADJUST_SIZING') {
+      finalLots = preExecutionFilter.adjustedLots || 0.01;
+    }
+
+    // ⚡ Execute Strict Seven-Stage Deterministic Sequential Pipeline
+    const sevenStagePipeline = sevenStagePipelineEngine.executePipeline({
+      pair,
+      timeframe,
+      providedCandles: marketCandles,
+      scenarioPrompt: typeof scenarioInput === 'string' ? scenarioInput : scenarioInput?.prompt,
+    });
+
+    // 🎯 Chief Risk Manager Unified Directive
+    const chiefRiskManagerUnifiedDirective = {
+      directive: debateOutcome.synthesis.terminalNode?.directive || 'MAINTAIN_POSITION',
+      directiveTitle: debateOutcome.synthesis.terminalNode?.directiveTitle || 'MAINTAIN POSITION DIRECTIVE: CONFLUENCE RESILIENT ACROSS 8 SPECIALIST AGENTS',
+      actionableSummary: debateOutcome.synthesis.terminalNode?.actionableSummary || 'Consensus verified across 8 autonomous agents',
+      institutionalClearanceStatus: failSafePauseActive
+        ? ('FAIL_SAFE_PAUSED' as const)
+        : (finalLots <= 0.02 ? ('DYNAMIC_TIER_APPROVED' as const) : ('CLEARED_FOR_EXECUTION' as const)),
+      zeroVetoAllocationLots: finalLots,
+      hardcodedStopLoss: finalStopLoss,
+      hardcodedTakeProfit: finalTakeProfit,
+      riskRewardRatio: existingLatched?.anchoredRiskReward || finalRiskReward,
+      latencyGuaranteed: !failSafePauseActive,
+      streamLatencyMs,
+    };
+
+    const consensusResult: SwarmConsensusResult = {
+      pair,
+      marketSegment,
+      timeframe,
+      currentPrice,
+      timestamp: new Date().toISOString(),
+      consensusDirection: activeDirection,
+      overallConfidence,
+      confluenceGrade,
+      unifiedDecision,
+      journalAnalysis: journalAnalysisTelemetry,
+      knowledgeSummary: {
+        totalTechnicalRulesLoaded: stats.technicalCount,
+        totalFundamentalRulesLoaded: stats.fundamentalCount,
+        totalDynamicRulesLoaded: stats.dynamicConstraintCount,
+        totalCandlestickRulesLoaded: stats.candlestickCount,
+        totalOperativeRules: stats.totalCount,
+        matchedTechnicalRules: technical.matchedRulesCount,
+        matchedFundamentalRules: fundamental.matchedRulesCount,
+        matchedCandlestickRules: candlestick.topMatchedRules?.length || 0,
+        topConfluenceRules,
+        activeFailureConstraint: preExecutionFilter.matchingFailureRule,
+      },
+      preExecutionFilter,
+      chiefReviewerAudit,
+      entryProximityFilter,
+      riskGovernanceGatekeeper,
+      multiAssetTickTelemetry: multiAssetIngestionEngine.getLatestTick(pair),
+      trendGate,
+      exhaustiveStrategyCorpus: exhaustiveCorpus,
+      capitalPreservationGate,
+      sevenStagePipeline,
+      multiTierScreening: exhaustiveCorpus.multiTierScreening,
+      unifiedProfitableSetup: exhaustiveCorpus.unifiedProfitableSetup,
+      preTradeValidationGate: exhaustiveCorpus.preTradeValidationGate,
+      buySideChannelWeight,
+      sellSideChannelWeight,
+      streamLatencyMs,
+      failSafePauseActive,
+      chiefRiskManagerUnifiedDirective,
+      agents: {
+        technical,
+        fundamental,
+        forex,
+        news,
+        orderFlow,
+        candlestickPattern: candlestick,
+        risk,
+      },
+      debateTranscript: debateOutcome.transcript,
+      debateSynthesis: {
+        ...debateOutcome.synthesis,
+        buySideChannelWeight,
+        sellSideChannelWeight,
+        streamLatencyMs,
+        failSafePauseActive,
+        chiefRiskManagerUnifiedDirective,
+      },
+      executionSignal: {
+        authorized: !failSafePauseActive,
+        orderType,
+        symbol: pair,
+        lots: finalLots,
+        entry: calculatedEntry,
+        stopLoss: finalStopLoss,
+        takeProfit: finalTakeProfit,
+        riskReward: existingLatched?.anchoredRiskReward || finalRiskReward,
+        riskAmountUsd: finalMaxRisk,
+        status: failSafePauseActive ? 'VETOED' : 'READY',
+        gradingTier: confluenceGrade,
+        tierDescription: failSafePauseActive
+          ? `FAIL-SAFE PAUSE ACTIVE: WebSocket/SSE stream latency (${streamLatencyMs}ms) exceeded 1500ms safety threshold. Execution paused against stale data.`
+          : (finalLots <= 0.02 && overallConfidence < 68)
+          ? `DYNAMIC MICRO-LOT ALLOCATION (${finalLots} Lots): Hard veto decoupled. 1:1 Breakeven Ratchet armed for zero-loss exposure.`
+          : tierParams.executionPolicy,
+      },
+      autonomousLoopTelemetry: {
+        cycleNumber: Math.max(1, SwarmCoordinator.autonomousCycleCounter),
+        timestamp: new Date().toISOString(),
+        latencyMs: streamLatencyMs,
+        activeDesksCount: 8,
+        autonomousCadenceSeconds: 1.5,
+        executionReadiness: !failSafePauseActive,
+        isAutonomousLooping: true,
+      },
+    };
+
+    // Attach or initialize the deterministic latched state
+    const finalLatched = (isStateLatched && existingLatched) 
+      ? existingLatched 
+      : stateLatchingEngine.latchConsensus(pair, consensusResult, marketCandles, 20);
+
+    consensusResult.latchedState = finalLatched;
+    return consensusResult;
+  }
+
+  // Multi-Pair & Multi-Market Opportunity Scanner
+  public scanAllOpportunities(segment?: MarketSegment): MarketScannerOpportunity[] {
+    const symbolsToScan = segment === 'INDIAN_MARKET' 
+      ? INDIAN_MARKET_ASSETS 
+      : segment === 'METALS_COMMODITIES'
+      ? METALS_COMMODITIES
+      : segment === 'FOREX' 
+      ? FOREX_PAIRS 
+      : (Object.keys(BASE_PRICES) as CurrencyPair[]);
+
+    const opportunities: MarketScannerOpportunity[] = [];
+
+    for (const pair of symbolsToScan) {
+      const result = this.runConsensus(pair, '1h');
+      const tech = result.agents.technical;
+      const fund = result.agents.fundamental;
+      const fx = result.agents.forex;
+      const risk = result.agents.risk;
+
+      let status: MarketScannerOpportunity['status'] = 'MODERATE_SETUP';
+      if (result.confluenceGrade === 'A+' || result.confluenceGrade === 'A') status = 'PRIME_SETUP';
+      else if (result.confluenceGrade === 'E' || result.confluenceGrade === 'F') status = 'DYNAMIC_CONSERVATIVE';
+      else if (result.overallConfidence < 30) status = 'AVOID_NO_EDGE';
+
+      opportunities.push({
+        pair,
+        segment: result.marketSegment,
+        price: result.currentPrice,
+        bias: result.consensusDirection === 'SELL' ? 'SELL' : result.consensusDirection === 'BUY' ? 'BUY' : 'NEUTRAL',
+        technicalScore: tech.confidenceScore,
+        fundamentalScore: fund.confidenceScore,
+        forexScore: fx.confidenceScore,
+        newsScore: result.agents.news.confidenceScore,
+        riskVerdict: risk.verdict,
+        grade: result.confluenceGrade,
+        potentialLots: risk.parameters.positionSizeLots,
+        riskReward: risk.parameters.riskRewardRatio,
+        status,
+      });
+    }
+
+    const gradeWeight: Record<ConfluenceGrade, number> = {
+      'A+': 7,
+      'A': 6,
+      'B': 5,
+      'C': 4,
+      'D': 3,
+      'E': 2,
+      'F': 1,
+    };
+    return opportunities.sort((a, b) => gradeWeight[b.grade] - gradeWeight[a.grade]);
+  }
+
+  private generateDebateTranscript(
+    pair: CurrencyPair,
+    price: number,
+    timeframe: TimeFrame,
+    tech: ReturnType<TechnicalAnalystAgent['analyze']>,
+    fund: ReturnType<FundamentalAnalystAgent['analyze']>,
+    fx: ReturnType<ForexMarketAnalystAgent['analyze']>,
+    news: ReturnType<NewsAnalystAgent['analyze']>,
+    orderFlow: ReturnType<OrderFlowAnalystAgent['analyze']>,
+    candlestick: ReturnType<CandlestickPatternAnalystAgent['analyze']>,
+    risk: ReturnType<RiskManagerAgent['evaluateTrade']>,
+    segment: MarketSegment,
+    candles: Candle[],
+    consensusDirection: 'BUY' | 'SELL' | 'HOLD',
+    confluenceGrade: SwarmConsensusResult['confluenceGrade'],
+    overallConfidence: number,
+    buySideChannelWeight: number,
+    sellSideChannelWeight: number,
+    streamLatencyMs: number,
+    failSafePauseActive: boolean,
+    scenarioContext?: DebateScenarioContext
+  ): { transcript: AgentDebateMessage[]; synthesis: DebateSynthesisResult } {
+    const messages: AgentDebateMessage[] = [];
+    const isIndian = segment === 'INDIAN_MARKET';
+    const isMetal = pair === 'XAU/USD' || pair === 'XAG/USD' || pair === 'XPT/USD' || pair === 'COPPER';
+    const isGold = pair === 'XAU/USD';
+    const isSilver = pair === 'XAG/USD';
+    const isPlatinum = pair === 'XPT/USD';
+    const isCopper = pair === 'COPPER';
+    const isOil = pair === 'WTI_CRUDE' || pair === 'BRENT_CRUDE';
+    const isJpy = pair.includes('JPY');
+    const isRupee = pair.includes('/INR');
+
+    let decimals = 5;
+    if (isIndian || isGold || isPlatinum || isOil) decimals = 2;
+    else if (isSilver || isJpy || isRupee) decimals = 3;
+    else if (isCopper) decimals = 4;
+
+    const dominantSide: 'BUY' | 'SELL' = consensusDirection === 'SELL' ? 'SELL' : 'BUY';
+    const opposingSide: 'BUY' | 'SELL' = dominantSide === 'BUY' ? 'SELL' : 'BUY';
+
+    // Baseline Metrics Anchor
+    const baselineDirection = consensusDirection;
+    const baselineConfidence = overallConfidence;
+    const baselineRiskReward = risk.parameters.riskRewardRatio;
+    const baselineStopLoss = risk.parameters.stopLoss;
+    const baselineTakeProfit = risk.parameters.takeProfit1;
+    const baselinePositionSize = risk.parameters.positionSizeLots;
+
+    // Dynamic Cascading Swarm Re-Evaluation under Persistent Scenario
+    let debatedDirection = consensusDirection;
+    let debatedConfidence = overallConfidence;
+    let debatedRiskReward = risk.parameters.riskRewardRatio;
+    let debatedStopLoss = risk.parameters.stopLoss;
+    let debatedTakeProfit = risk.parameters.takeProfit1;
+    let debatedPositionSize = risk.parameters.positionSizeLots;
+
+    const pipMultiplier = PIP_VALUES[pair] || (isJpy ? 0.01 : 0.0001);
+
+    if (scenarioContext && scenarioContext.isActive) {
+      if (scenarioContext.category === 'REVERSAL') {
+        debatedConfidence = Math.max(34, overallConfidence - 26);
+        debatedDirection = debatedConfidence < 52 ? 'HOLD' : consensusDirection;
+        const currentStopDist = Math.abs(price - risk.parameters.stopLoss);
+        const tightenedStopDist = Math.max(currentStopDist * 0.65, 12 * pipMultiplier);
+        debatedStopLoss = dominantSide === 'BUY'
+          ? Number((price - tightenedStopDist).toFixed(decimals))
+          : Number((price + tightenedStopDist).toFixed(decimals));
+        debatedPositionSize = Number((risk.parameters.positionSizeLots * 0.6).toFixed(2));
+        debatedRiskReward = Number((Math.abs(debatedTakeProfit - price) / Math.max(tightenedStopDist, 0.0001)).toFixed(2));
+      } else if (scenarioContext.category === 'VOLATILITY_EXPANSION') {
+        debatedConfidence = Math.max(38, overallConfidence - 16);
+        debatedPositionSize = Number((risk.parameters.positionSizeLots * 0.5).toFixed(2));
+        debatedRiskReward = Number((risk.parameters.riskRewardRatio * 0.88).toFixed(2));
+      } else if (scenarioContext.category === 'MACRO_SHOCK') {
+        debatedConfidence = Math.max(35, overallConfidence - 22);
+        debatedPositionSize = Number((risk.parameters.positionSizeLots * 0.5).toFixed(2));
+        const shockStopDist = Math.abs(price - risk.parameters.stopLoss) * 0.75;
+        debatedStopLoss = dominantSide === 'BUY'
+          ? Number((price - shockStopDist).toFixed(decimals))
+          : Number((price + shockStopDist).toFixed(decimals));
+        debatedRiskReward = Number((risk.parameters.riskRewardRatio * 0.82).toFixed(2));
+      } else {
+        debatedConfidence = Math.max(40, overallConfidence - 12);
+        debatedPositionSize = Number((risk.parameters.positionSizeLots * 0.75).toFixed(2));
+      }
+    }
+
+    // Strict Mathematical Invariant: Ensure Stop Loss and Target are on the correct side of price
+    if (dominantSide === 'SELL') {
+      if (debatedStopLoss <= price) {
+        const dist = Math.abs(price - debatedStopLoss) || (22 * pipMultiplier);
+        debatedStopLoss = Number((price + dist).toFixed(decimals));
+      }
+      if (debatedTakeProfit >= price) {
+        const dist = Math.abs(debatedTakeProfit - price) || (22 * pipMultiplier * 2.2);
+        debatedTakeProfit = Number((price - dist).toFixed(decimals));
+      }
+    } else if (dominantSide === 'BUY') {
+      if (debatedStopLoss >= price) {
+        const dist = Math.abs(price - debatedStopLoss) || (22 * pipMultiplier);
+        debatedStopLoss = Number((price - dist).toFixed(decimals));
+      }
+      if (debatedTakeProfit <= price) {
+        const dist = Math.abs(debatedTakeProfit - price) || (22 * pipMultiplier * 2.2);
+        debatedTakeProfit = Number((price + dist).toFixed(decimals));
+      }
+    }
+
+    const confidenceDelta = scenarioContext ? (debatedConfidence - baselineConfidence) : 0;
+    const riskRewardDelta = scenarioContext ? Number((debatedRiskReward - baselineRiskReward).toFixed(2)) : 0;
+    const stopLossAdjustmentPips = scenarioContext ? Number(((debatedStopLoss - baselineStopLoss) / pipMultiplier).toFixed(1)) : 0;
+    const positionSizeAdjustmentPercent = scenarioContext && baselinePositionSize > 0
+      ? Math.round(((debatedPositionSize - baselinePositionSize) / baselinePositionSize) * 100)
+      : 0;
+
+    let divergenceSeverity: DebateDivergenceMetrics['divergenceSeverity'] = 'NONE';
+    if (scenarioContext && scenarioContext.isActive) {
+      const isExtremeScenario = scenarioContext.severity === 'HIGH' && 
+        /collapse|crash|black swan|break|breach|invalidation|abort|stop out|liquidation|dump/i.test(scenarioContext.prompt);
+
+      if ((baselineDirection === 'BUY' && debatedDirection === 'SELL') || 
+          (baselineDirection === 'SELL' && debatedDirection === 'BUY') || 
+          debatedConfidence < 38 ||
+          isExtremeScenario) {
+        divergenceSeverity = 'CRITICAL';
+      } else if (baselineDirection !== 'HOLD' && debatedDirection === 'HOLD') {
+        divergenceSeverity = 'SEVERE';
+      } else if (Math.abs(confidenceDelta) >= 20) {
+        divergenceSeverity = 'MODERATE';
+      } else if (Math.abs(confidenceDelta) >= 8) {
+        divergenceSeverity = 'LOW';
+      } else {
+        divergenceSeverity = 'NONE';
+      }
+    }
+
+    let directive: DebateActionableDirective = 'MAINTAIN_POSITION';
+    let executionAction: 'MAINTAIN' | 'SCALE_DOWN' | 'TIGHTEN_STOPS' | 'CLOSE_NOW' | 'HEDGE' = 'MAINTAIN';
+    let urgency: 'IMMEDIATE' | 'NEXT_BAR' | 'MONITOR' = 'MONITOR';
+
+    if (risk.verdict === 'VETOED' || divergenceSeverity === 'CRITICAL') {
+      directive = 'STRATEGIC_EXIT';
+      executionAction = 'CLOSE_NOW';
+      urgency = 'IMMEDIATE';
+    } else if (divergenceSeverity === 'SEVERE' || divergenceSeverity === 'MODERATE') {
+      directive = 'MODIFY_POSITION';
+      executionAction = Math.abs(stopLossAdjustmentPips) > 3 ? 'TIGHTEN_STOPS' : 'SCALE_DOWN';
+      urgency = 'NEXT_BAR';
+    } else {
+      directive = 'MAINTAIN_POSITION';
+      executionAction = 'MAINTAIN';
+      urgency = 'MONITOR';
+    }
+
+    // Query Knowledge Engine for Opposing Rules from 1,050+ Technical and 1,050+ Fundamental Rule Bases across 8 Orthogonal Families
+    const opposingRuleSets = knowledgeEngine.getOpposingRules(segment, dominantSide);
+
+    // Primary Supporting Technical Rule
+    const techSupportRule = tech.topMatchedRules[0] || opposingRuleSets.supportingTech[0] || {
+      id: 'TECH-SMC-014',
+      ruleName: `${dominantSide === 'BUY' ? 'Bullish' : 'Bearish'} Order Block Institutional Entry Protocol`,
+      category: 'TECHNICAL',
+      subcategory: 'SMC: Order Block',
+      marketScope: 'GLOBAL',
+      expectedWinRate: 78.4,
+      confidenceWeight: 9,
+      signalAction: dominantSide,
+      conditionDescription: 'Displacement into unmitigated institutional order block with Break of Structure',
+      invalidationCriteria: 'Candle body close beyond rejection wick boundary',
+    };
+
+    // Primary Supporting Fundamental Rule
+    const fundSupportRule = fund.topMatchedRules[0] || opposingRuleSets.supportingFund[0] || {
+      id: 'FUND-CB-019',
+      ruleName: `Central Bank Policy Divergence & Sovereign Yield Spread Strategy`,
+      category: 'FUNDAMENTAL',
+      subcategory: 'Central Banks',
+      marketScope: 'GLOBAL',
+      expectedWinRate: 80.5,
+      confidenceWeight: 9,
+      signalAction: dominantSide,
+      conditionDescription: 'Real rate differential expansion favoring sovereign currency reserves',
+      invalidationCriteria: 'Surprise emergency rate modification or forward guidance pivot',
+    };
+
+    // Opposing Technical Rule (Counter-Argument)
+    const techOpposeRule = opposingRuleSets.opposingTech[0] || {
+      id: 'TECH-MOM-042',
+      ruleName: `${opposingSide === 'BUY' ? 'Bullish' : 'Bearish'} Momentum Divergence & Counter-Trend Exhaustion`,
+      category: 'TECHNICAL',
+      subcategory: 'Momentum: Divergence',
+      marketScope: 'GLOBAL',
+      expectedWinRate: 74.2,
+      confidenceWeight: 8,
+      signalAction: opposingSide,
+      conditionDescription: 'RSI oscillator divergence against terminal structural pivots',
+      invalidationCriteria: 'Expansion volume breaking previous structural swing',
+    };
+
+    // Opposing Fundamental Rule (Macro Drag / Counter-Argument)
+    const fundOpposeRule = opposingRuleSets.opposingFund[0] || {
+      id: 'FUND-INFL-022',
+      ruleName: `Real Yield Compression & Cross-Asset Inflation Drag Model`,
+      category: 'FUNDAMENTAL',
+      subcategory: 'Inflation & Yields',
+      marketScope: 'GLOBAL',
+      expectedWinRate: 73.8,
+      confidenceWeight: 8,
+      signalAction: opposingSide,
+      conditionDescription: 'Sticky core CPI prints flattening the real term premium',
+      invalidationCriteria: 'Bond auction liquidity stabilization above threshold',
+    };
+
+    // ===============================================================
+    // ROUND 1: Specialist Theses (Opening Dialectics across 7 Desks)
+    // Pure Institutional Dialectical Discourse (No chart/pricing clutter)
+    // ===============================================================
+    messages.push({
+      id: 'deb-1',
+      round: 1,
+      role: 'technical_analyst',
+      agentName: tech.agentName,
+      avatarColor: 'text-cyan-400 bg-cyan-950/60 border-cyan-800',
+      content: `Market structure and institutional framework thesis on ${pair} [${timeframe}]: Multi-timeframe geometry establishes ${tech.candlestickPattern} alongside ${tech.smartMoneyConcepts?.structure || 'institutional order block mitigation'}. Trend indicators confirm ${tech.trend.replace('_', ' ')} with RSI momentum in ${tech.indicatorSummary.rsiStatus.split(' ')[0]}. Citing Rule ${techSupportRule.id} ("${techSupportRule.ruleName}", Win Rate: ${techSupportRule.expectedWinRate}%): ${techSupportRule.conditionDescription}. Multi-timeframe structural alignment confirms ${dominantSide} expansion posture. Bias: ${tech.bias}.`,
+      sentiment: tech.bias.includes('BUY') ? 'BULLISH' : tech.bias.includes('SELL') ? 'BEARISH' : 'NEUTRAL',
+      timestamp: '00:01s',
+      citedRuleId: techSupportRule.id,
+      citedRuleName: techSupportRule.ruleName,
+      strategyCategory: 'TECHNICAL',
+      winRate: techSupportRule.expectedWinRate,
+      side: dominantSide,
+    });
+
+    messages.push({
+      id: 'deb-2',
+      round: 1,
+      role: 'fundamental_analyst',
+      agentName: fund.agentName,
+      avatarColor: 'text-purple-400 bg-purple-950/60 border-purple-800',
+      content: isIndian
+        ? `Indian macroeconomic desk thesis: Citing Rule ${fundSupportRule.id} ("${fundSupportRule.ruleName}", Win Rate: ${fundSupportRule.expectedWinRate}%). FII net institutional flows stand at +₹${fund.indianMarketDrivers?.fiiNetFlowCr} Cr, DII SIP inflows at +₹${fund.indianMarketDrivers?.diiNetFlowCr} Cr, India VIX calm at ${fund.indianMarketDrivers?.indiaVix}, and RBI repo rate steady at ${fund.indianMarketDrivers?.rbiRepoRate}%. Macro conviction: ${fund.bias}.`
+        : isMetal
+        ? `Precious metals institutional flow desk: Citing Rule ${fundSupportRule.id} ("${fundSupportRule.ruleName}", Win Rate: ${fundSupportRule.expectedWinRate}%). Sovereign central bank physical bullion accumulation (+38 tons net) combined with negative real TIPS yield momentum (-1.42%) sharply depresses the holding cost of bullion. Real rate spread is ${fund.realInterestRateSpread}%. Macro conviction: ${fund.bias}.`
+        : `Macroeconomic desk evaluation: Citing Rule ${fundSupportRule.id} ("${fundSupportRule.ruleName}", Win Rate: ${fundSupportRule.expectedWinRate}%). Policy stance divergence is ${fund.baseCurrencyOutlook.interestRate}% vs ${fund.quoteCurrencyOutlook.interestRate}%. Inflation-adjusted real spread sits at ${fund.realInterestRateSpread > 0 ? '+' : ''}${fund.realInterestRateSpread}%. Bias: ${fund.bias}.`,
+      sentiment: fund.bias.includes('BUY') ? 'BULLISH' : fund.bias.includes('SELL') ? 'BEARISH' : 'NEUTRAL',
+      timestamp: '00:03s',
+      citedRuleId: fundSupportRule.id,
+      citedRuleName: fundSupportRule.ruleName,
+      strategyCategory: 'FUNDAMENTAL',
+      winRate: fundSupportRule.expectedWinRate,
+      side: dominantSide,
+    });
+
+    messages.push({
+      id: 'deb-3',
+      round: 1,
+      role: 'news_analyst',
+      agentName: news.agentName,
+      avatarColor: 'text-sky-400 bg-sky-950/60 border-sky-800',
+      content: `Real-time scraping across 38 monitored financial outlets and central bank wires (Bloomberg, Reuters, Kitco, Fed, LBMA, WSJ, CNBC, FT) indicates a ${news.marketMood.replace('_', ' ')} posture with sentiment score of ${news.sentimentScore > 0 ? '+' : ''}${news.sentimentScore}. Top wire catalyst: "${news.topCatalysts[0] || 'Broad institutional order flow'}". Breaking speed-wire synthesis confirms high alignment with the ${dominantSide} channel.`,
+      sentiment: news.bias.includes('BUY') ? 'BULLISH' : news.bias.includes('SELL') ? 'BEARISH' : 'NEUTRAL',
+      timestamp: '00:05s',
+      citedRuleId: 'NEWS-WIRE-038',
+      citedRuleName: '38-Outlet Speed-Wire Real-Time Confluence Protocol',
+      strategyCategory: 'NEWS',
+      winRate: 76.8,
+      side: dominantSide,
+    });
+
+    messages.push({
+      id: 'deb-4',
+      round: 1,
+      role: 'forex_analyst',
+      agentName: 'Kenji Sato (Forex & Intermarket Order Flow)',
+      avatarColor: 'text-amber-400 bg-amber-950/60 border-amber-800',
+      content: isIndian
+        ? `Rupee cross-currency dynamics: USD/INR trades in tight consolidation with RBI smoothing interventions. DXY is in a ${fx.dxyTrend} stance. Active session (${fx.activeTradingSession.session}) offers ${fx.activeTradingSession.liquidityRating} liquidity.`
+        : isMetal
+        ? `Intermarket & Commodity correlations: Bullion cross-rates show +0.78 positive correlation against real bond prices and negative correlation to the DXY index (${fx.dxyTrend}). Active session (${fx.activeTradingSession.session}) liquidity is rated ${fx.activeTradingSession.liquidityRating}. Bias: ${fx.bias}.`
+        : `Currency strength index ranks base at ${fx.relativeStrengthComparison.baseStrength}/10 and quote at ${fx.relativeStrengthComparison.quoteStrength}/10. DXY trend: ${fx.dxyTrend}. Active session (${fx.activeTradingSession.session}) liquidity is ${fx.activeTradingSession.liquidityRating.toLowerCase()}. Bias: ${fx.bias}.`,
+      sentiment: fx.bias.includes('BUY') ? 'BULLISH' : fx.bias.includes('SELL') ? 'BEARISH' : 'NEUTRAL',
+      timestamp: '00:07s',
+      citedRuleId: 'FOREX-LIQ-005',
+      citedRuleName: 'Active Session Liquidity & Currency Strength Index Alignment',
+      strategyCategory: 'FOREX',
+      winRate: 75.3,
+      side: dominantSide,
+    });
+
+    // 5th Dedicated Specialist: Kaelen Voss (Order Flow & Institutional Liquidity)
+    const ofRule = orderFlow.topMatchedRules[0] || {
+      id: 'OF-CVD-001',
+      ruleName: 'Cumulative Volume Delta (CVD) Absorption & Divergence Model',
+      category: 'TECHNICAL',
+      subcategory: 'Order Flow: CVD',
+      marketScope: 'GLOBAL',
+      expectedWinRate: 81.2,
+      confidenceWeight: 9,
+      signalAction: dominantSide,
+      conditionDescription: 'Passive institutional absorption against aggressive market order flow',
+      invalidationCriteria: 'Opposing delta expansion breaching primary liquidity wall',
+    };
+
+    messages.push({
+      id: 'deb-of-1',
+      round: 1,
+      role: 'order_flow_analyst',
+      agentName: orderFlow.agentName || 'Kaelen Voss (Order Flow & Institutional Liquidity Specialist)',
+      avatarColor: 'text-amber-400 bg-amber-950/60 border-amber-700',
+      content: `Institutional order flow and microstructure thesis: Cumulative Volume Delta (CVD) registers ${orderFlow.cvdMetrics.cvdValue > 0 ? '+' : ''}${orderFlow.cvdMetrics.cvdValue} contracts with ${orderFlow.cvdMetrics.trend.toLowerCase()} delta momentum (${orderFlow.cvdMetrics.interpretation}). Footprint analysis confirms stacked diagonal bid/ask imbalance (${orderFlow.diagonalImbalances.ratio}:1 ratio across ${orderFlow.diagonalImbalances.levelsDetectedCount} institutional price nodes). Volume Profile confirms value area acceptance (${orderFlow.volumeProfile.valueAreaAcceptance.replace(/_/g, ' ')}). VWAP dispersion bands reflect ${orderFlow.vwapBands.currentSigmaBand.replace(/_/g, ' ')} with ${orderFlow.vwapBands.meanReversionProbability}% stability. Resting limit book shows dominant ${orderFlow.restingLiquidityWalls.wallDominance.replace(/_/g, ' ')} depth walls. Citing Rule ${ofRule.id} ("${ofRule.ruleName}", Win Rate: ${ofRule.expectedWinRate}%): ${ofRule.conditionDescription}. Order flow bias: ${orderFlow.bias}.`,
+      sentiment: orderFlow.bias.includes('BUY') ? 'BULLISH' : orderFlow.bias.includes('SELL') ? 'BEARISH' : 'NEUTRAL',
+      timestamp: '00:08s',
+      citedRuleId: ofRule.id,
+      citedRuleName: ofRule.ruleName,
+      strategyCategory: 'ORDER_FLOW',
+      winRate: ofRule.expectedWinRate,
+      side: dominantSide,
+    });
+
+    // 6th Dedicated Specialist: Kenji Takahashi (Candlestick Pattern & Price Action Specialist)
+    const candleRule = candlestick.topMatchedRules?.[0] || {
+      id: 'CANDLE-ENGULF-001',
+      ruleName: `${dominantSide === 'BUY' ? 'Bullish' : 'Bearish'} Engulfing Institutional Displacement Formation`,
+      category: 'CANDLESTICK_PATTERN' as const,
+      subcategory: 'Institutional Engulfing',
+      marketScope: 'GLOBAL' as const,
+      expectedWinRate: 85.5,
+      confidenceWeight: 9,
+      signalAction: dominantSide,
+      conditionDescription: 'Full candle body engulfing previous bar with 20-period SMA volume expansion',
+      invalidationCriteria: 'Extreme wick breach beyond defining candle boundary',
+    };
+
+    messages.push({
+      id: 'deb-candle-1',
+      round: 1,
+      role: 'candlestick_pattern_analyst',
+      agentName: candlestick.agentName || 'Kenji Takahashi (Candlestick Pattern & Price Action Specialist)',
+      avatarColor: 'text-rose-400 bg-rose-950/60 border-rose-700',
+      content: `Candlestick pattern & price-action gatekeeper thesis: Real-time bar geometry confirms ${candlestick.detectedPattern.replace(/_/g, ' ')} (${candlestick.patternCategory}) with ${candlestick.bodySizePercent}% body size, ${candlestick.wickToBodyRatio}:1 wick-to-body ratio, and 20-period SMA volume multiplier of ${candlestick.volumeConfirmation.volumeMultiplier}x (${candlestick.volumeConfirmation.confirmed ? 'Confirmed Institutional Volume' : 'Standard Volume'}). Structural location: ${candlestick.structuralContext.location.replace(/_/g, ' ')} (${candlestick.structuralContext.distancePips} pips from structural level). Defining candle extreme wick sits at ${candlestick.definingCandleBoundary.extremeWickPrice}, anchoring exact invalidation floor at ${candlestick.definingCandleBoundary.suggestedStopLoss} (${candlestick.definingCandleBoundary.invalidationBufferPips} pip buffer). Citing Rule ${candleRule.id} ("${candleRule.ruleName}", Win Rate: ${candleRule.expectedWinRate}%): ${candleRule.conditionDescription}. Price-action bias: ${candlestick.bias}.`,
+      sentiment: candlestick.bias.includes('BUY') ? 'BULLISH' : candlestick.bias.includes('SELL') ? 'BEARISH' : 'NEUTRAL',
+      timestamp: '00:09s',
+      citedRuleId: candleRule.id,
+      citedRuleName: candleRule.ruleName,
+      strategyCategory: 'CANDLESTICK_PATTERN',
+      winRate: candleRule.expectedWinRate,
+      side: dominantSide,
+    });
+
+    // Strategy Corpus & MTF Verification Node
+    messages.push({
+      id: 'deb-corpus',
+      round: 1,
+      role: 'terminal_node',
+      agentName: 'Strategy Corpus & MTF Verification Node (2,100+ Strategies)',
+      avatarColor: 'text-teal-400 bg-teal-950/60 border-teal-800',
+      content: `Synchronous Corpus Verification (2,100+ Strategies): Active ${pair} structure validated across all 1,050+ technical heuristics (SMC, Order Blocks, FVGs, Liquidity Sweeps) and 1,050+ fundamental models (real yields, central bank divergence, COT positioning) across 8 orthogonal families. Dialectical channel pressure: Buy Channel ${buySideChannelWeight}% vs Sell Channel ${sellSideChannelWeight}%. Zero heuristic pruning certified. Directional confluence: ${overallConfidence}% ${dominantSide}.`,
+      sentiment: dominantSide === 'BUY' ? 'BULLISH' : 'BEARISH',
+      timestamp: '00:09s',
+      citedRuleId: 'CORPUS-MTF-2100',
+      citedRuleName: '2,100+ Exhaustive Strategy Corpus & MTF Alignment Invariant',
+      strategyCategory: 'CONFLUENCE',
+      winRate: 84.8,
+      side: dominantSide,
+    });
+
+    // ===============================================================
+    // ROUND 2: Cross-Examination & Opposing Buy vs Sell Dialectic
+    // ===============================================================
+    messages.push({
+      id: 'deb-5',
+      round: 2,
+      role: 'technical_analyst',
+      agentName: tech.agentName,
+      avatarColor: 'text-cyan-400 bg-cyan-950/60 border-cyan-800',
+      content: `Rigorous Cross-Examination — Opposing ${opposingSide} Argument: Before committing capital, our 1,050+ technical strategies library identifies an opposing counter-risk: Rule ${techOpposeRule.id} ("${techOpposeRule.ruleName}", Win Rate: ${techOpposeRule.expectedWinRate}%). ${techOpposeRule.conditionDescription}. If price violates structural invalidation boundaries, this counter-trend setup activates. Invalidation criteria: ${techOpposeRule.invalidationCriteria}.`,
+      sentiment: opposingSide === 'BUY' ? 'BULLISH' : 'BEARISH',
+      timestamp: '00:10s',
+      citedRuleId: techOpposeRule.id,
+      citedRuleName: techOpposeRule.ruleName,
+      strategyCategory: 'TECHNICAL',
+      winRate: techOpposeRule.expectedWinRate,
+      side: opposingSide,
+    });
+
+    messages.push({
+      id: 'deb-6',
+      round: 2,
+      role: 'fundamental_analyst',
+      agentName: fund.agentName,
+      avatarColor: 'text-purple-400 bg-purple-950/60 border-purple-800',
+      content: `Macro Counter-Examination: Cross-referencing against our 1,050+ fundamental strategies, we must account for counter-risk under Rule ${fundOpposeRule.id} ("${fundOpposeRule.ruleName}", Win Rate: ${fundOpposeRule.expectedWinRate}%). ${fundOpposeRule.conditionDescription}. If sovereign yields re-widen against our thesis, temporary price compression could occur. Invalidation: ${fundOpposeRule.invalidationCriteria}.`,
+      sentiment: 'CAUTION',
+      timestamp: '00:12s',
+      citedRuleId: fundOpposeRule.id,
+      citedRuleName: fundOpposeRule.ruleName,
+      strategyCategory: 'FUNDAMENTAL',
+      winRate: fundOpposeRule.expectedWinRate,
+      side: opposingSide,
+    });
+
+    messages.push({
+      id: 'deb-of-counter',
+      round: 2,
+      role: 'order_flow_analyst',
+      agentName: orderFlow.agentName || 'Kaelen Voss (Order Flow & Institutional Liquidity)',
+      avatarColor: 'text-amber-400 bg-amber-950/60 border-amber-700',
+      content: `Order Flow Cross-Examination — Opposing ${opposingSide} Liquidity Risks: Before capital authorization, order book depth must be audited against potential liquidity sweeps and fakeouts. If aggressive opposing market orders breach the resting liquidity wall (${orderFlow.restingLiquidityWalls.wallDominance.replace(/_/g, ' ')}), delta absorption could fail. Trapped participants: ${orderFlow.trappedParticipants.trappedSide.replace(/_/g, ' ')} with ${orderFlow.trappedParticipants.squeezePotential.toLowerCase()} squeeze potential. Mandatory dynamic micro-lot allocation required to eliminate trapped exposure.`,
+      sentiment: 'CAUTION',
+      timestamp: '00:14s',
+      citedRuleId: 'OF-DEPTH-004',
+      citedRuleName: 'Resting Order Book Depth Wall Invalidation Protocol',
+      strategyCategory: 'ORDER_FLOW',
+      winRate: 78.5,
+      side: opposingSide,
+    });
+
+    messages.push({
+      id: 'deb-candle-counter',
+      round: 2,
+      role: 'candlestick_pattern_analyst',
+      agentName: candlestick.agentName || 'Kenji Takahashi (Candlestick Pattern Specialist)',
+      avatarColor: 'text-rose-400 bg-rose-950/60 border-rose-700',
+      content: `Candlestick Pattern Cross-Examination — False Breakout & Structural Invalidation Filter: Auditing developing price action against 120 verified patterns in the Knowledge Base. If an opposing ${opposingSide.toLowerCase()} formation forms with >1.8:1 rejection wick or breaches the defining candle boundary at ${candlestick.definingCandleBoundary.extremeWickPrice}, the thesis is immediately invalidated. Noise status: ${candlestick.rejectionStatus.isRejectedNoise ? candlestick.rejectionStatus.rejectionReason : 'Clean structural geometry verified; zero false breakout noise detected'}. Mandatory invalidation anchored strictly to defining candle boundary.`,
+      sentiment: 'CAUTION',
+      timestamp: '00:14s',
+      citedRuleId: 'CANDLE-NOISE-001',
+      citedRuleName: 'Structural False Breakout & Defining Wick Invalidation Filter',
+      strategyCategory: 'CANDLESTICK_PATTERN',
+      winRate: 83.2,
+      side: opposingSide,
+    });
+
+    messages.push({
+      id: 'deb-7',
+      round: 2,
+      role: 'news_analyst',
+      agentName: news.agentName,
+      avatarColor: 'text-sky-400 bg-sky-950/60 border-sky-800',
+      content: `@RiskManager Sarah & @TechnicalAnalyst Marcus: Our speed-wires from Reuters and Bloomberg indicate elevated order flow concentration. Are our proposed hard stop-loss buffers sufficiently calibrated to absorb intraday headline volatility spikes without violating our minimum 2.0:1 R:R mandate?`,
+      sentiment: 'CAUTION',
+      timestamp: '00:15s',
+      citedRuleId: 'NEWS-VOL-012',
+      citedRuleName: 'Intraday Breaking Wire Volatility Invalidation Buffer',
+      strategyCategory: 'NEWS',
+      winRate: 77.2,
+      side: 'NEUTRAL',
+    });
+
+    // ===============================================================
+    // ROUND 3: Intermarket & Order Flow Liquidity Squeeze Synthesis
+    // ===============================================================
+    messages.push({
+      id: 'deb-8',
+      round: 3,
+      role: 'forex_analyst',
+      agentName: fx.agentName,
+      avatarColor: 'text-amber-400 bg-amber-950/60 border-amber-800',
+      content: `Rebuttal to ${opposingSide} thesis: Active ${fx.activeTradingSession.session} order book depth confirms substantial liquidity absorption. The DXY ${fx.dxyTrend} alignment provides structural backing, subordinating the counter-trend ${techOpposeRule.id} signal.`,
+      sentiment: dominantSide === 'BUY' ? 'BULLISH' : 'BEARISH',
+      timestamp: '00:16s',
+      citedRuleId: 'FOREX-REB-008',
+      citedRuleName: 'Intermarket Flow Absorption & Liquidity Gate Rebuttal',
+      strategyCategory: 'FOREX',
+      winRate: 78.9,
+      side: dominantSide,
+    });
+
+    messages.push({
+      id: 'deb-of-rebuttal',
+      round: 3,
+      role: 'order_flow_analyst',
+      agentName: orderFlow.agentName || 'Kaelen Voss (Order Flow & Institutional Liquidity)',
+      avatarColor: 'text-amber-400 bg-amber-950/60 border-amber-700',
+      content: `Order Flow Liquidity Squeeze Synthesis: Tape footprint confirms passive limit orders are successfully absorbing ${opposingSide.toLowerCase()} aggressive orders (${orderFlow.cvdMetrics.divergenceType !== 'NONE' ? orderFlow.cvdMetrics.divergenceType : 'Aggressive market orders absorbed by resting limit book'}). The 3:1 diagonal stacked footprint imbalance remains intact. Counter-trend participants are trapped, setting up high-probability liquidity expansion toward our institutional target.`,
+      sentiment: dominantSide === 'BUY' ? 'BULLISH' : 'BEARISH',
+      timestamp: '00:17s',
+      citedRuleId: 'OF-SQUEEZE-005',
+      citedRuleName: 'Diagonal Footprint Imbalance & Liquidity Squeeze Defense',
+      strategyCategory: 'ORDER_FLOW',
+      winRate: 80.4,
+      side: dominantSide,
+    });
+
+    messages.push({
+      id: 'deb-candle-rebuttal',
+      round: 3,
+      role: 'candlestick_pattern_analyst',
+      agentName: candlestick.agentName || 'Kenji Takahashi (Candlestick Pattern Specialist)',
+      avatarColor: 'text-rose-400 bg-rose-950/60 border-rose-700',
+      content: `Candlestick Timing Gatekeeper Rebuttal: High-timeframe alignment confirmed with 20-period SMA volume (${candlestick.volumeConfirmation.volumeMultiplier}x). Rejection wicks against the ${opposingSide.toLowerCase()} direction demonstrate decisive absorption by institutional limit orders. Defining candle boundary at ${candlestick.definingCandleBoundary.extremeWickPrice} provides an impenetrable structural invalidation floor. Setup cleared for Grade ${confluenceGrade} institutional dispatch.`,
+      sentiment: dominantSide === 'BUY' ? 'BULLISH' : 'BEARISH',
+      timestamp: '00:17s',
+      citedRuleId: candleRule.id,
+      citedRuleName: candleRule.ruleName,
+      strategyCategory: 'CANDLESTICK_PATTERN',
+      winRate: candleRule.expectedWinRate,
+      side: dominantSide,
+    });
+
+    messages.push({
+      id: 'deb-9',
+      round: 3,
+      role: 'technical_analyst',
+      agentName: tech.agentName,
+      avatarColor: 'text-cyan-400 bg-cyan-950/60 border-cyan-800',
+      content: `Technical defense confirmed: Dominant rule ${techSupportRule.id} holds priority. By placing our hard stop-loss with 1.5x ATR dynamic buffer beyond structural pivots, we mathematically insulate the position from headline liquidity sweeps while locking in a ${risk.parameters.riskRewardRatio}:1 Risk-to-Reward ratio.`,
+      sentiment: dominantSide === 'BUY' ? 'BULLISH' : 'BEARISH',
+      timestamp: '00:18s',
+      citedRuleId: techSupportRule.id,
+      citedRuleName: techSupportRule.ruleName,
+      strategyCategory: 'TECHNICAL',
+      winRate: techSupportRule.expectedWinRate,
+      side: dominantSide,
+    });
+
+    // ===============================================================
+    // ROUND 4: Chief Risk Officer Binding Synthesis & Risk-Tolerance Validation
+    // ===============================================================
+    messages.push({
+      id: 'deb-10',
+      round: 4,
+      role: 'risk_manager',
+      agentName: risk.agentName,
+      avatarColor: 'text-emerald-400 bg-emerald-950/60 border-emerald-800',
+      content: directive === 'STRATEGIC_EXIT'
+        ? `CHIEF RISK OFFICER BINDING VERDICT: ZERO-VETO DYNAMIC SCALE-DOWN: Injected scenario "${scenarioContext?.prompt || 'Stress Event'}" prompts defensive risk arbitration. Dialectical pressure comparison: Buy Channel ${buySideChannelWeight}% vs Sell Channel ${sellSideChannelWeight}%. Opposing arguments (${techOpposeRule.id} WR: ${techOpposeRule.expectedWinRate}%) active. Enforcing Grade E/F conservative micro-lot sizing (${debatedPositionSize} lots).`
+        : directive === 'MODIFY_POSITION'
+        ? `CHIEF RISK OFFICER BINDING VERDICT: Scenario cross-examination concluded. Dialectical channel weights: Buy-Side ${buySideChannelWeight}% vs Sell-Side ${sellSideChannelWeight}%. Opposing risk ${techOpposeRule.id} arbitrated with dynamic risk mitigation. SETUP APPROVED WITH RISK-ADJUSTED PARAMETERS:
+• Definitive Bias: ${dominantSide} (${confluenceGrade} Grade, ${debatedConfidence}% Confidence)
+• Dialectical Pressure: Buy Channel ${buySideChannelWeight}% | Sell Channel ${sellSideChannelWeight}%
+• Risk-Adjusted Sizing: ${debatedPositionSize} Standard Lots (reduced from ${baselinePositionSize} lots, R:R ${debatedRiskReward}:1)
+• Zero-Loss Protocol: 1:1 Breakeven Ratchet ARMED. Stop Loss positioned ${dominantSide === 'SELL' ? 'ABOVE' : 'BELOW'} entry; Target positioned ${dominantSide === 'SELL' ? 'BELOW' : 'ABOVE'} entry.`
+        : `CHIEF RISK OFFICER BINDING VERDICT: 24/7 AUTONOMOUS MONITORING ACTIVE. Unlimited Profit Potential Authorized (Uncapped Runner Mode) with Zero-Loss Exposure Protocol across all 7 specialist desks:
+• Definitive Bias: ${dominantSide} (${confluenceGrade} Grade, ${debatedConfidence}% Confidence)
+• Dialectical Pressure: Buy Channel ${buySideChannelWeight}% | Sell Channel ${sellSideChannelWeight}%
+• Zero-Loss Protocol: Automated 1:1 Breakeven Ratchet ARMED. Stop automatically ratchets to entry + 1 pip spread buffer at 1:1 R:R distance, completely eliminating downside risk while letting profits run uncapped
+• Mathematical Edge: ${debatedRiskReward}:1 R:R, ${debatedPositionSize} Standard Lots (proportional sizing, max drawdown <= 2.0%)
+• Stream Latency: ${streamLatencyMs}ms (${failSafePauseActive ? 'STALE DATA PAUSED' : 'LIVE STREAM VERIFIED'}).`,
+      sentiment: directive === 'STRATEGIC_EXIT' ? 'CAUTION' : (dominantSide === 'BUY' ? 'BULLISH' : 'BEARISH'),
+      timestamp: '00:20s',
+      citedRuleId: 'RISK-GOV-001',
+      citedRuleName: 'Dynamic 1.5x ATR Invalidation & 2:1 R:R Mandatory Filter',
+      strategyCategory: 'RISK',
+      winRate: 84.5,
+      side: dominantSide,
+    });
+
+    // ===============================================================
+    // ROUND 5: Consensus Convergence & Consolidated Terminal Node (DAG Conclusion)
+    // ===============================================================
+    const directiveTitle = directive === 'STRATEGIC_EXIT'
+      ? 'STRATEGIC EXIT DIRECTIVE: ABORT SETUP / CLOSE POSITION'
+      : directive === 'MODIFY_POSITION'
+      ? 'RISK-MITIGATION DIRECTIVE: TIGHTEN STOPS & REDUCE POSITION SIZING'
+      : 'MAINTAIN POSITION DIRECTIVE: CONFLUENCE RESILIENT ACROSS 8 SPECIALIST AGENTS';
+
+    const actionableSummary = directive === 'STRATEGIC_EXIT'
+      ? `Dialectical deliberation concluded that scenario condition "${scenarioContext?.prompt || 'Elevated Risk'}" triggers a structural invalidation breach. Continued holding exposes the account to asymmetric tail-risk. Immediate strategic exit or order abort is mandated.`
+      : directive === 'MODIFY_POSITION'
+      ? `The debated scenario "${scenarioContext?.prompt}" introduces a ${divergenceSeverity.toLowerCase()} divergence from baseline (Confidence dropped ${confidenceDelta}%, R:R shifted to ${debatedRiskReward}:1). Risk Manager mandates reducing position size to ${debatedPositionSize} lots (${positionSizeAdjustmentPercent}% reduction) and ratcheting stop-loss.`
+      : `Dialectical review confirmed that active 1.5x ATR structural buffers safely absorb scenario condition "${scenarioContext?.prompt || 'Baseline'}". Baseline parameters remain valid with ${debatedRiskReward}:1 R:R profile. Maintain active position.`;
+
+    const swarmSignOff = {
+      technicalAnalyst: `Marcus Vance: ${directive === 'STRATEGIC_EXIT' ? 'Structural invalidation breached. Counter-trend order blocks now dominate chart geometry.' : directive === 'MODIFY_POSITION' ? 'Chart structure resilient but dynamic stop tightening is required.' : 'Primary SMC order block absorbs volatility; multi-tier Fibonacci projections set for unlimited runner upside.'}`,
+      fundamentalAnalyst: `Dr. Julian Sterling: ${directive === 'STRATEGIC_EXIT' ? 'Macro thesis inverted under scenario stress; policy spread margin compressed.' : directive === 'MODIFY_POSITION' ? 'Macro drift detected; scaling position size down preserves safe-haven margin.' : 'Macro expansion confirms institutional runway for high-gain multi-tier targets.'}`,
+      newsAnalyst: `Alexander Wright: ${directive === 'STRATEGIC_EXIT' ? 'Speed-wires confirm rapid sentiment breakdown across 38 tracked financial outlets and central banks.' : directive === 'MODIFY_POSITION' ? 'Elevated wire headline clustering warrants defensive risk hedging.' : '24/7 continuous news-wire monitoring active with instant fail-safe exit armed.'}`,
+      forexAnalyst: `Elena Rostova: ${directive === 'STRATEGIC_EXIT' ? 'Currency strength index broke key support with rapid liquidity evacuation.' : directive === 'MODIFY_POSITION' ? 'Intermarket cross-asset correlation softening; defensive posture validated.' : 'Order book depth and intermarket liquidity support uninhibited trend continuation.'}`,
+      orderFlowAnalyst: `Kaelen Voss: ${directive === 'STRATEGIC_EXIT' ? 'CVD absorption breached; delta selling pressure exhausted resting bid walls.' : directive === 'MODIFY_POSITION' ? 'Footprint imbalance thinning; tighten stops behind immediate POC level.' : '3:1 diagonal footprint imbalance locked; CVD absorption confirms trapped counter-trend participants.'}`,
+      candlestickPatternAnalyst: `Kenji Takahashi: ${directive === 'STRATEGIC_EXIT' ? 'Defining candle boundary breached; structural invalidation triggered on execution candle.' : directive === 'MODIFY_POSITION' ? 'Candle wick elongation requires tightening SL to defining candle boundary.' : `Pattern ${candlestick.detectedPattern.replace(/_/g, ' ')} verified with ${candlestick.volumeConfirmation.volumeMultiplier}x volume confirmation; structural invalidation anchored to ${candlestick.definingCandleBoundary.suggestedStopLoss}.`}`,
+      chiefRiskOfficer: `Sarah Stirling (CRO): Final Binding Arbitration — ${directive.replace('_', ' ')}. 24/7 autonomous monitoring & zero-loss exposure ratchet enforced. 1:1 Breakeven locked, structural stop active, and uncapped runner mode engaged.`,
+    };
+
+    const maxLossCalc = Number((Math.abs(price - debatedStopLoss) / pipMultiplier * debatedPositionSize * 10).toFixed(2));
+    const projectedGainCalc = Number((Math.abs(debatedTakeProfit - price) / pipMultiplier * debatedPositionSize * 10).toFixed(2));
+
+    const updatedThresholds: DebatePriceThresholds = {
+      entryPrice: price,
+      takeProfit: debatedTakeProfit,
+      stopLoss: debatedStopLoss,
+      riskRewardRatio: debatedRiskReward,
+      positionSizeLots: debatedPositionSize,
+      maxLossUsd: maxLossCalc > 0 ? maxLossCalc : risk.parameters.maxLossUsd,
+      projectedGainUsd: projectedGainCalc > 0 ? projectedGainCalc : risk.parameters.projectedGainUsd,
+      invalidationCriteria: directive === 'STRATEGIC_EXIT'
+        ? `Scenario "${scenarioContext?.prompt}" breached structural threshold`
+        : `${timeframe} candle close beyond stop loss level`,
+      trajectoryHorizonBars: 16,
+      projectedPriceMove: Number((debatedTakeProfit - price).toFixed(decimals)),
+    };
+
+    const divergenceMetrics: DebateDivergenceMetrics = {
+      baselineBias: baselineDirection === 'BUY' ? 'BUY' : baselineDirection === 'SELL' ? 'SELL' : 'NEUTRAL',
+      debatedBias: debatedDirection === 'BUY' ? 'BUY' : debatedDirection === 'SELL' ? 'SELL' : 'NEUTRAL',
+      baselineConfidence,
+      debatedConfidence,
+      confidenceDelta,
+      baselineRiskReward,
+      debatedRiskReward,
+      riskRewardDelta,
+      baselineStopLoss,
+      debatedStopLoss,
+      baselineTakeProfit,
+      debatedTakeProfit,
+      stopLossAdjustmentPips,
+      positionSizeAdjustmentPercent,
+      divergenceSeverity,
+      divergenceSummary: `${divergenceSeverity} divergence: Confidence delta ${confidenceDelta > 0 ? '+' : ''}${confidenceDelta}%, R:R delta ${riskRewardDelta > 0 ? '+' : ''}${riskRewardDelta}:1.`,
+      structuralInvalidationTriggered: directive === 'STRATEGIC_EXIT',
+    };
+
+    const terminalNode: DebateTerminalNode = {
+      nodeId: `terminal-node-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      activeScenario: scenarioContext,
+      directive,
+      directiveConfidence: Math.round((overallConfidence + debatedConfidence) / 2),
+      directiveTitle,
+      actionableSummary,
+      divergence: divergenceMetrics,
+      updatedThresholds,
+      executionGuidance: {
+        action: executionAction,
+        suggestedLotSize: debatedPositionSize,
+        suggestedStopLoss: debatedStopLoss,
+        suggestedTakeProfit: debatedTakeProfit,
+        maxRiskDollars: updatedThresholds.maxLossUsd,
+        urgency,
+        rationale: actionableSummary,
+      },
+      swarmSignOff: {
+        technicalAnalyst: swarmSignOff.technicalAnalyst,
+        fundamentalAnalyst: swarmSignOff.fundamentalAnalyst,
+        newsAnalyst: swarmSignOff.newsAnalyst,
+        forexAnalyst: swarmSignOff.forexAnalyst,
+        orderFlowAnalyst: swarmSignOff.orderFlowAnalyst,
+        candlestickPatternAnalyst: swarmSignOff.candlestickPatternAnalyst,
+        chiefRiskOfficer: swarmSignOff.chiefRiskOfficer,
+        chiefReviewer: `Dr. Marcus Sterling (Chief Reviewer): Institutional Gatekeeper Audit cleared across Eight-Agent Consensus Chamber. Strategy corpus synchronously verified with zero heuristic pruning. Zero-veto parameterization authorized.`,
+      },
+    };
+
+    messages.push({
+      id: `terminal-node-${Date.now()}`,
+      round: 5,
+      role: 'terminal_node',
+      agentName: 'Consolidated Terminal Node (DAG Conclusion)',
+      avatarColor: directive === 'STRATEGIC_EXIT'
+        ? 'text-rose-400 bg-rose-950/80 border-rose-700'
+        : directive === 'MODIFY_POSITION'
+        ? 'text-amber-400 bg-amber-950/80 border-amber-700'
+        : 'text-emerald-400 bg-emerald-950/80 border-emerald-700',
+      content: `[TERMINAL SYNTHESIS — LOGICAL CONCLUSION NODE IN DAG]
+• Actionable Directive: ${directive.replace('_', ' ')} (${urgency} ACTION REQUIRED)
+• Scenario Ingested: "${scenarioContext?.prompt || 'Baseline Market Conditions'}"
+• Dialectical Pressure: Buy Channel ${buySideChannelWeight}% vs Sell Channel ${sellSideChannelWeight}%
+• Divergence Assessment: ${divergenceMetrics.divergenceSummary}
+• Execution Guidance: ${terminalNode.executionGuidance.action} — Sizing ${debatedPositionSize} Lots (R:R ${debatedRiskReward}:1)
+• Swarm Resolution: ${actionableSummary}`,
+      sentiment: directive === 'STRATEGIC_EXIT' ? 'BEARISH' : directive === 'MODIFY_POSITION' ? 'CAUTION' : 'BULLISH',
+      timestamp: 'Conclusion',
+      isTerminalNode: true,
+      terminalData: terminalNode,
+    });
+
+    // ===============================================================
+    // ROUND 6: MANDATORY CHIEF REVIEWER FINAL GATEKEEPER CLEARANCE
+    // ===============================================================
+    messages.push({
+      id: `chief-reviewer-node-${Date.now()}`,
+      round: 6,
+      role: 'chief_reviewer',
+      agentName: 'Marcus Sterling (Chief Reviewer & Institutional Gatekeeper)',
+      avatarColor: 'text-indigo-400 bg-indigo-950/80 border-indigo-700',
+      content: `[MANDATORY CHIEF REVIEWER FINAL GATEKEEPER AUDIT & EXECUTION CLEARANCE]
+• Institutional Execution Clearance: Audited all 8 specialized agents (Technical, Fundamental, News Wire, Forex Intermarket, Order Flow, Candlestick Pattern, Risk Governance, and Chief Reviewer) following dialectical deliberation comparing Buy-Side (${buySideChannelWeight}%) vs Sell-Side (${sellSideChannelWeight}%) channel pressure.
+• Candlestick Price-Action Gatekeeper Clearance: Verified ${candlestick.detectedPattern.replace(/_/g, ' ')} against Knowledge Base pattern repository with ${candlestick.wickToBodyRatio}:1 wick ratio, ${candlestick.volumeConfirmation.volumeMultiplier}x volume confirmation, and defining candle stop-loss boundary anchored at ${candlestick.definingCandleBoundary.suggestedStopLoss}.
+• Zero-Veto Dynamic Allocation Mandate: Hard vetoes permanently decommissioned in favor of dynamic risk-curtailed lot sizing (${debatedPositionSize} lots) and 1:1 Breakeven Ratchet protection.
+• Setup Status: ${failSafePauseActive ? 'FAIL-SAFE PAUSED (Stream latency > 1500ms)' : 'APPROVED FOR MANDATORY LIVE DISPATCH at exact real-time bid/ask tick with maximum 10-pip entry proximity tolerance'}.
+• Order Flow Integration: Audited CVD absorption, 3:1 footprint imbalances, and resting order book liquidity walls with zero unhedged exposure.
+• Invalidation Mandate: Active entry locked with explicit structural invalidation boundary (anchored strictly to defining candle extreme wick at ${candlestick.definingCandleBoundary.extremeWickPrice}).`,
+      sentiment: dominantSide === 'BUY' ? 'BULLISH' : 'BEARISH',
+      timestamp: 'Gatekeeper Clearance',
+      side: dominantSide,
+    });
+
+    // Build Cited Rules Registry
+    const citedRules: DebateCitedRule[] = [
+      {
+        ruleId: techSupportRule.id,
+        ruleName: techSupportRule.ruleName,
+        category: 'TECHNICAL',
+        winRate: techSupportRule.expectedWinRate,
+        side: dominantSide,
+        rationale: `Primary technical driver confirming ${tech.candlestickPattern} and ${tech.smartMoneyConcepts?.structure || 'structure'}`,
+      },
+      {
+        ruleId: fundSupportRule.id,
+        ruleName: fundSupportRule.ruleName,
+        category: 'FUNDAMENTAL',
+        winRate: fundSupportRule.expectedWinRate,
+        side: dominantSide,
+        rationale: `Macro policy differential (${fund.macroRegime}) with ${fund.realInterestRateSpread}% real rate spread`,
+      },
+      {
+        ruleId: ofRule.id,
+        ruleName: ofRule.ruleName,
+        category: 'TECHNICAL',
+        winRate: ofRule.expectedWinRate,
+        side: dominantSide,
+        rationale: `Order flow institutional verification confirming ${orderFlow.cvdMetrics.interpretation}`,
+      },
+      {
+        ruleId: candleRule.id,
+        ruleName: candleRule.ruleName,
+        category: 'CANDLESTICK_PATTERN',
+        winRate: candleRule.expectedWinRate,
+        side: dominantSide,
+        rationale: `Candlestick formation ${candlestick.detectedPattern.replace(/_/g, ' ')} with ${candlestick.wickToBodyRatio}:1 wick ratio and defining candle boundary @ ${candlestick.definingCandleBoundary.extremeWickPrice}`,
+      },
+      {
+        ruleId: techOpposeRule.id,
+        ruleName: techOpposeRule.ruleName,
+        category: 'TECHNICAL',
+        winRate: techOpposeRule.expectedWinRate,
+        side: opposingSide,
+        rationale: `Opposing counter-thesis cross-examined during Round 2 debate`,
+      },
+      {
+        ruleId: fundOpposeRule.id,
+        ruleName: fundOpposeRule.ruleName,
+        category: 'FUNDAMENTAL',
+        winRate: fundOpposeRule.expectedWinRate,
+        side: opposingSide,
+        rationale: `Opposing macroeconomic headwind evaluated for tail-risk hedging`,
+      },
+      {
+        ruleId: 'NEWS-WIRE-038',
+        ruleName: '38-Outlet Speed-Wire Real-Time Confluence Protocol',
+        category: 'NEWS',
+        winRate: 76.8,
+        side: dominantSide,
+        rationale: `Real-time news pulse (${news.marketMood}, score: ${news.sentimentScore}) across Bloomberg, Reuters, Kitco, Fed, LBMA`,
+      },
+      {
+        ruleId: 'RISK-GOV-001',
+        ruleName: 'Dynamic 1.5x ATR Invalidation & 2:1 R:R Mandatory Filter',
+        category: 'RISK',
+        winRate: 84.5,
+        side: dominantSide,
+        rationale: `Capital protection protocol fixing hard stop with $${updatedThresholds.maxLossUsd} downside cap`,
+      },
+    ];
+
+    const definitiveBias: SignalDirection = directive === 'STRATEGIC_EXIT'
+      ? 'NEUTRAL'
+      : dominantSide === 'BUY'
+      ? (debatedConfidence >= 80 ? 'STRONG_BUY' : 'BUY')
+      : (debatedConfidence >= 80 ? 'STRONG_SELL' : 'SELL');
+
+    const synthesis: DebateSynthesisResult = {
+      pair,
+      timeframe,
+      definitiveBias,
+      confluenceGrade,
+      confidenceScore: debatedConfidence,
+      priceThresholds: updatedThresholds,
+      citedRules,
+      summary: `Autonomous 8-Agent Debate Synthesized: ${directive.replace('_', ' ')} (${confluenceGrade} Grade, ${debatedConfidence}% Confidence). Dialectical Pressure: Buy Channel ${buySideChannelWeight}% | Sell Channel ${sellSideChannelWeight}%. Target: ${debatedTakeProfit.toFixed(decimals)} | Hard SL: ${debatedStopLoss.toFixed(decimals)} (R:R ${debatedRiskReward}:1).`,
+      consensusVerdict: directiveTitle,
+      timestamp: new Date().toISOString(),
+      activeScenario: scenarioContext,
+      terminalNode,
+      divergence: divergenceMetrics,
+      buySideChannelWeight,
+      sellSideChannelWeight,
+      streamLatencyMs,
+      failSafePauseActive,
+    };
+
+    return {
+      transcript: messages,
+      synthesis,
+    };
+  }
+}

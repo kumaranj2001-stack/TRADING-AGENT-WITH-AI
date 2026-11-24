@@ -1,0 +1,804 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================================
+   UNIVERSAL SANS-SERIF TYPOGRAPHY & FLUID ZOOM RESIZING
+   ======================================================== */
+:root {
+  --background: #090d16;
+  --foreground: #f8fafc;
+  --color-border: #223554;
+  --color-card-bg: #0b1120;
+  --color-subtle-bg: #131e33;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-accent-cyan: #22d3ee;
+  --text-accent-emerald: #34d399;
+  --text-accent-rose: #fb7185;
+  --text-accent-amber: #fbbf24;
+  --text-accent-purple: #c084fc;
+  --text-accent-sky: #38bdf8;
+  --text-accent-indigo: #818cf8;
+}
+
+html {
+  font-size: 100%; /* Fluid scalable browser baseline (16px) */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+/* Enforce Sans-Serif Everywhere with Tabular Numbers */
+html,
+body,
+*,
+*::before,
+*::after,
+code,
+pre,
+kbd,
+samp {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+  font-feature-settings: 'tnum' 1, 'cv05' 1;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  overflow-x: hidden;
+  letter-spacing: -0.011em;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Fluid Typography Resizing: Scalable proportions that prevent container boundary overlap at high zoom */
+.text-\[9px\], [class*="text-[9px]"] {
+  font-size: clamp(0.68rem, 0.72vw, 0.75rem) !important; /* ~11-12px proportional */
+  line-height: 1.35 !important;
+}
+
+.text-\[10px\], [class*="text-[10px]"] {
+  font-size: clamp(0.72rem, 0.78vw, 0.8rem) !important; /* ~11.5-12.8px proportional */
+  line-height: 1.35 !important;
+}
+
+.text-\[11px\], [class*="text-[11px]"] {
+  font-size: clamp(0.78rem, 0.84vw, 0.86rem) !important; /* ~12.5-13.8px proportional */
+  line-height: 1.4 !important;
+}
+
+/* Responsive Zoom Stability & Text Boundary Protection */
+.zoom-container,
+[class*="rounded-xl"],
+[class*="rounded-2xl"],
+[class*="rounded-lg"] {
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-height: -webkit-min-content;
+  min-height: min-content;
+}
+
+/* ========================================================
+   DARK THEME PALETTE REVISION & WCAG AAA CONTRAST OVERHAUL
+   Guarantees maximum legibility on dark backgrounds across all resolutions
+   ======================================================== */
+:root:not(.light) .text-slate-500,
+:root:not(.light) [class*="text-slate-500"] {
+  color: #94a3b8 !important; /* High-contrast silvery slate (>7.2:1 contrast against #090d16) */
+}
+
+:root:not(.light) .text-slate-600,
+:root:not(.light) [class*="text-slate-600"] {
+  color: #cbd5e1 !important; /* Upgraded to high-contrast slate-300 (>9:1 contrast) */
+}
+
+:root:not(.light) .text-slate-400,
+:root:not(.light) [class*="text-slate-400"] {
+  color: #cbd5e1 !important; /* Crisp, accessible silvery slate (>9:1 contrast) */
+}
+
+/* All uppercase data labels, field headers, and indicators: crisp and legible */
+:root:not(.light) span[class*="uppercase"]:not(button *),
+:root:not(.light) label[class*="uppercase"],
+:root:not(.light) div[class*="uppercase"]:not(button *) {
+  color: #cbd5e1 !important;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* Elevated container borders on dark surfaces: crisp layout block definition without gaps */
+:root:not(.light) .border-terminal-border,
+:root:not(.light) [class*="border-terminal-border"] {
+  border-color: #223554 !important; /* Distinct visual boundary definition */
+}
+
+/* ========================================================
+   LIGHT MODE SYSTEM ARCHITECTURE & COHESIVE DESIGN SYSTEM
+   ======================================================== */
+.light {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --color-border: #cbd5e1;
+  --color-card-bg: #ffffff;
+  --color-subtle-bg: #f1f5f9;
+  --text-primary: #0f172a;
+  --text-secondary: #1e293b;
+  --text-muted: #334155;
+  --text-accent-cyan: #0e7490;
+  --text-accent-emerald: #047857;
+  --text-accent-rose: #be123c;
+  --text-accent-amber: #b45309;
+  --text-accent-purple: #6d28d9;
+  --text-accent-sky: #0369a1;
+  --text-accent-indigo: #4338ca;
+}
+
+.light body {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+/* ========================================================
+   LIGHT MODE SURFACE BACKGROUND OVERRIDES
+   ======================================================== */
+.light .bg-terminal-950,
+.light [class*="bg-terminal-950"] {
+  background-color: #f8fafc !important;
+}
+
+.light .bg-terminal-900,
+.light [class*="bg-terminal-900"] {
+  background-color: #ffffff !important;
+}
+
+.light .bg-terminal-850,
+.light [class*="bg-terminal-850"],
+.light .bg-terminal-800,
+.light [class*="bg-terminal-800"] {
+  background-color: #f1f5f9 !important;
+}
+
+.light .bg-terminal-700,
+.light [class*="bg-terminal-700"] {
+  background-color: #e2e8f0 !important;
+}
+
+/* ========================================================
+   LIGHT MODE CONTAINER BORDERS & VISUAL INTEGRITY
+   ======================================================== */
+.light .border-terminal-border,
+.light [class*="border-terminal-border"],
+.light .border-terminal-700,
+.light .border-terminal-800 {
+  border-color: #cbd5e1 !important;
+}
+
+/* Gradient Container Neutralization in Light Mode */
+.light [class*="bg-gradient-to-"][class*="from-terminal-"],
+.light [class*="bg-gradient-to-"][class*="from-cyan-950"],
+.light [class*="bg-gradient-to-"][class*="from-indigo-950"],
+.light [class*="bg-gradient-to-"][class*="from-purple-950"],
+.light [class*="bg-gradient-to-"][class*="from-sky-950"],
+.light [class*="bg-gradient-to-"][class*="from-emerald-950"],
+.light [class*="bg-gradient-to-"][class*="from-rose-950"],
+.light [class*="bg-gradient-to-"][class*="from-amber-950"],
+.light [class*="bg-gradient-to-"][class*="from-slate-900"],
+.light [class*="bg-gradient-to-"][class*="from-slate-950"],
+.light [class*="bg-gradient-to-"][class*="from-black"] {
+  background-image: none !important;
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* ========================================================
+   LIGHT MODE UNIVERSAL HIGH-CONTRAST TYPOGRAPHY OVERHAUL
+   All text automatically transitions to deep, readable tones
+   ======================================================== */
+
+/* Primary Dark Text: Replaces white and light silvery grays with deep slate-900 (>16:1 contrast) */
+.light .text-white,
+.light .text-slate-50,
+.light .text-slate-100,
+.light .text-slate-200,
+.light .text-gray-50,
+.light .text-gray-100,
+.light .text-gray-200,
+.light .text-zinc-50,
+.light .text-zinc-100,
+.light .text-zinc-200,
+.light .text-neutral-50,
+.light .text-neutral-100,
+.light .text-neutral-200 {
+  color: #0f172a !important;
+}
+
+/* Secondary Body & Content Text: Crisp slate-800 (>12.5:1 contrast) */
+.light .text-slate-300,
+.light .text-gray-300,
+.light .text-zinc-300,
+.light .text-neutral-300 {
+  color: #1e293b !important;
+}
+
+/* Subdued Labels, Captions & Muted Elements: High-contrast slate-700 (>8.2:1 contrast) */
+.light .text-slate-400,
+.light .text-slate-500,
+.light .text-slate-600,
+.light .text-gray-400,
+.light .text-gray-500,
+.light .text-gray-600,
+.light .text-zinc-400,
+.light .text-zinc-500,
+.light .text-zinc-600,
+.light .text-neutral-400,
+.light .text-neutral-500 {
+  color: #334155 !important;
+  font-weight: 500;
+}
+
+/* Headings, Strong, Bold & Numerical Indicators in Light Mode */
+.light h1, .light h2, .light h3, .light h4, .light h5, .light h6,
+.light strong, .light b,
+.light .font-bold, .light .font-semibold, .light .font-extrabold, .light .font-black {
+  color: #0f172a !important;
+}
+
+/* Field Labels & Uppercase Structural Headers */
+.light span[class*="uppercase"],
+.light label[class*="uppercase"],
+.light div[class*="uppercase"] {
+  color: #334155 !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.03em;
+}
+
+/* Neutralize Opacity Dimmers in Light Mode (Prevents washed-out gray text) */
+.light [class*="opacity-50"],
+.light [class*="opacity-60"],
+.light [class*="opacity-70"],
+.light [class*="opacity-75"],
+.light [class*="opacity-80"],
+.light .opacity-50,
+.light .opacity-60,
+.light .opacity-70,
+.light .opacity-75,
+.light .opacity-80 {
+  opacity: 0.95 !important;
+}
+
+/* ========================================================
+   ACCESSIBLE HIGH-CONTRAST ACCENT COLORS (WCAG AA/AAA)
+   Automatically maps light/neon tones to rich, deep tones
+   ======================================================== */
+
+/* Cyan & Teal Accents (Mapped to deep cyan-700 & teal-700, >5.2:1 contrast) */
+.light .text-cyan-100,
+.light .text-cyan-200,
+.light .text-cyan-300,
+.light .text-cyan-400,
+.light .text-cyan-500 {
+  color: #0e7490 !important;
+}
+
+.light .text-teal-100,
+.light .text-teal-200,
+.light .text-teal-300,
+.light .text-teal-400,
+.light .text-teal-500 {
+  color: #0f766e !important;
+}
+
+/* Sky & Blue Accents (Mapped to sky-700 & blue-700, >5.3:1 contrast) */
+.light .text-sky-100,
+.light .text-sky-200,
+.light .text-sky-300,
+.light .text-sky-400,
+.light .text-sky-500 {
+  color: #0369a1 !important;
+}
+
+.light .text-blue-100,
+.light .text-blue-200,
+.light .text-blue-300,
+.light .text-blue-400,
+.light .text-blue-500 {
+  color: #1d4ed8 !important;
+}
+
+/* Emerald & Green Accents (Mapped to emerald-700 & green-700, >4.8:1 contrast) */
+.light .text-emerald-100,
+.light .text-emerald-200,
+.light .text-emerald-300,
+.light .text-emerald-400,
+.light .text-emerald-500,
+.light .text-green-100,
+.light .text-green-200,
+.light .text-green-300,
+.light .text-green-400,
+.light .text-green-500 {
+  color: #047857 !important;
+}
+
+/* Rose & Red Accents (Mapped to rose-700 & red-700, >5.5:1 contrast) */
+.light .text-rose-100,
+.light .text-rose-200,
+.light .text-rose-300,
+.light .text-rose-400,
+.light .text-rose-500,
+.light .text-red-100,
+.light .text-red-200,
+.light .text-red-300,
+.light .text-red-400,
+.light .text-red-500 {
+  color: #be123c !important;
+}
+
+/* Amber, Yellow & Orange Accents (Mapped to amber-700, >4.6:1 contrast) */
+.light .text-amber-100,
+.light .text-amber-200,
+.light .text-amber-300,
+.light .text-amber-400,
+.light .text-amber-500,
+.light .text-yellow-100,
+.light .text-yellow-200,
+.light .text-yellow-300,
+.light .text-yellow-400,
+.light .text-yellow-500,
+.light .text-orange-100,
+.light .text-orange-200,
+.light .text-orange-300,
+.light .text-orange-400,
+.light .text-orange-500 {
+  color: #b45309 !important;
+}
+
+/* Purple & Violet Accents (Mapped to purple-700, >5.8:1 contrast) */
+.light .text-purple-100,
+.light .text-purple-200,
+.light .text-purple-300,
+.light .text-purple-400,
+.light .text-purple-500,
+.light .text-violet-100,
+.light .text-violet-200,
+.light .text-violet-300,
+.light .text-violet-400,
+.light .text-violet-500 {
+  color: #6d28d9 !important;
+}
+
+/* Indigo Accents (Mapped to indigo-700, >6.2:1 contrast) */
+.light .text-indigo-100,
+.light .text-indigo-200,
+.light .text-indigo-300,
+.light .text-indigo-400,
+.light .text-indigo-500 {
+  color: #4338ca !important;
+}
+
+/* SVG Icon Contrast in Light Mode */
+.light svg.text-cyan-400, .light svg.text-cyan-300 { color: #0e7490 !important; }
+.light svg.text-emerald-400, .light svg.text-emerald-300 { color: #047857 !important; }
+.light svg.text-rose-400, .light svg.text-rose-300, .light svg.text-red-400 { color: #be123c !important; }
+.light svg.text-amber-400, .light svg.text-amber-300, .light svg.text-yellow-400 { color: #b45309 !important; }
+.light svg.text-indigo-400, .light svg.text-indigo-300 { color: #4338ca !important; }
+.light svg.text-purple-400, .light svg.text-purple-300 { color: #6d28d9 !important; }
+.light svg.text-sky-400, .light svg.text-sky-300 { color: #0369a1 !important; }
+.light svg.text-slate-400, .light svg.text-slate-300 { color: #334155 !important; }
+
+/* ========================================================
+   LIGHT MODE BADGES, PILLS & SOFT TINT CONTAINERS
+   Rich, readable foregrounds on soft pastel backgrounds
+   ======================================================== */
+.light [class*="bg-emerald-950"],
+.light [class*="bg-emerald-900"],
+.light [class*="bg-emerald-500/10"],
+.light [class*="bg-emerald-500/15"],
+.light [class*="bg-emerald-500/20"],
+.light [class*="bg-emerald-500/25"],
+.light [class*="bg-emerald-500/30"],
+.light [class*="bg-green-500/10"],
+.light [class*="bg-green-500/20"] {
+  background-color: #ecfdf5 !important;
+  border-color: #a7f3d0 !important;
+  color: #047857 !important;
+}
+.light [class*="bg-emerald-500/"] *,
+.light [class*="bg-emerald-950"] * {
+  color: #047857 !important;
+}
+
+.light [class*="bg-rose-950"],
+.light [class*="bg-rose-900"],
+.light [class*="bg-rose-500/10"],
+.light [class*="bg-rose-500/15"],
+.light [class*="bg-rose-500/20"],
+.light [class*="bg-rose-500/25"],
+.light [class*="bg-rose-500/30"],
+.light [class*="bg-red-500/10"],
+.light [class*="bg-red-500/20"] {
+  background-color: #fff1f2 !important;
+  border-color: #fecdd3 !important;
+  color: #be123c !important;
+}
+.light [class*="bg-rose-500/"] *,
+.light [class*="bg-rose-950"] * {
+  color: #be123c !important;
+}
+
+.light [class*="bg-amber-950"],
+.light [class*="bg-amber-900"],
+.light [class*="bg-amber-500/10"],
+.light [class*="bg-amber-500/15"],
+.light [class*="bg-amber-500/20"],
+.light [class*="bg-amber-500/25"],
+.light [class*="bg-yellow-500/10"],
+.light [class*="bg-yellow-500/20"],
+.light [class*="bg-orange-500/10"],
+.light [class*="bg-orange-500/20"] {
+  background-color: #fffbeb !important;
+  border-color: #fde68a !important;
+  color: #b45309 !important;
+}
+.light [class*="bg-amber-500/"] *,
+.light [class*="bg-amber-950"] * {
+  color: #b45309 !important;
+}
+
+.light [class*="bg-cyan-950"],
+.light [class*="bg-cyan-900"],
+.light [class*="bg-cyan-500/10"],
+.light [class*="bg-cyan-500/15"],
+.light [class*="bg-cyan-500/20"],
+.light [class*="bg-cyan-500/25"],
+.light [class*="bg-cyan-600/20"],
+.light [class*="bg-cyan-600/25"],
+.light [class*="bg-sky-950"],
+.light [class*="bg-sky-900"],
+.light [class*="bg-sky-500/10"],
+.light [class*="bg-sky-500/15"],
+.light [class*="bg-sky-500/20"],
+.light [class*="bg-teal-500/15"],
+.light [class*="bg-teal-500/20"] {
+  background-color: #f0f9ff !important;
+  border-color: #bae6fd !important;
+  color: #0e7490 !important;
+}
+.light [class*="bg-cyan-500/"] *,
+.light [class*="bg-sky-500/"] *,
+.light [class*="bg-teal-500/"] * {
+  color: #0e7490 !important;
+}
+
+.light [class*="bg-indigo-950"],
+.light [class*="bg-indigo-900"],
+.light [class*="bg-indigo-500/10"],
+.light [class*="bg-indigo-500/15"],
+.light [class*="bg-indigo-500/20"],
+.light [class*="bg-purple-950"],
+.light [class*="bg-purple-900"],
+.light [class*="bg-purple-500/10"],
+.light [class*="bg-purple-500/15"],
+.light [class*="bg-purple-500/20"] {
+  background-color: #f5f3ff !important;
+  border-color: #ddd6fe !important;
+  color: #4338ca !important;
+}
+.light [class*="bg-indigo-500/"] *,
+.light [class*="bg-purple-500/"] * {
+  color: #4338ca !important;
+}
+
+/* ========================================================
+   LIGHT MODE TABLES, HISTORICAL TRADE LOG & DATA ROWS
+   High contrast tabular view with readable headers & cells
+   ======================================================== */
+.light table {
+  color: #0f172a !important;
+}
+
+.light thead,
+.light thead tr,
+.light thead th {
+  background-color: #f1f5f9 !important;
+  color: #1e293b !important;
+  border-color: #cbd5e1 !important;
+  font-weight: 700 !important;
+}
+
+.light thead th span,
+.light thead th div {
+  color: #1e293b !important;
+  font-weight: 700 !important;
+}
+
+.light tbody,
+.light tbody tr {
+  border-color: #e2e8f0 !important;
+}
+
+.light tbody tr:hover {
+  background-color: #f8fafc !important;
+}
+
+.light td {
+  color: #1e293b !important;
+  border-color: #e2e8f0 !important;
+}
+
+.light td strong,
+.light td b,
+.light td .font-bold {
+  color: #0f172a !important;
+}
+
+.light td span.text-slate-300,
+.light td span.text-slate-400,
+.light td span.text-slate-200 {
+  color: #334155 !important;
+}
+
+/* ========================================================
+   LIGHT MODE NAVIGATION DRAWER & HEADER ACCESSIBILITY
+   ======================================================== */
+.light header {
+  background-color: rgba(255, 255, 255, 0.97) !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.07) !important;
+}
+
+.light header select {
+  background-color: transparent !important;
+  color: #0f172a !important;
+}
+
+.light header select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.light nav button {
+  color: #1e293b !important;
+}
+
+.light nav button:hover {
+  background-color: #f1f5f9 !important;
+}
+
+.light nav button span {
+  color: #0f172a !important;
+}
+
+.light nav button p {
+  color: #334155 !important;
+}
+
+.light nav button[class*="active"],
+.light nav button[class*="bg-teal-500/15"],
+.light nav button[class*="bg-cyan-500/15"],
+.light nav button[class*="bg-indigo-500/15"],
+.light nav button[class*="bg-sky-500/15"],
+.light nav button[class*="bg-rose-500/15"],
+.light nav button[class*="bg-emerald-500/15"] {
+  background-color: #f0fdf4 !important;
+  border-color: #86efac !important;
+}
+
+/* ========================================================
+   LIGHT MODE FORM INPUTS, SELECTS & CONTROLS
+   ======================================================== */
+.light input,
+.light select,
+.light textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+.light input::placeholder,
+.light textarea::placeholder {
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+
+.light input:focus,
+.light select:focus,
+.light textarea:focus {
+  border-color: #0e7490 !important;
+  box-shadow: 0 0 0 2px rgba(14, 116, 144, 0.2) !important;
+}
+
+.light select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+/* Light Mode Modals & Overlays */
+.light .bg-black\/80,
+.light .bg-black\/75,
+.light .bg-black\/70 {
+  background-color: rgba(15, 23, 42, 0.45) !important;
+}
+
+.light .shadow-2xl,
+.light .shadow-xl,
+.light .shadow-lg {
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04) !important;
+}
+
+/* ========================================================
+   CRITICAL: PRESERVE SOLID ACTION BUTTONS & PILLS
+   Buttons with solid saturated backgrounds strictly retain
+   crisp #ffffff text & white SVG strokes across light mode
+   ======================================================== */
+.light button[class*="bg-emerald-6"],
+.light button[class*="bg-emerald-7"],
+.light button[class*="bg-green-6"],
+.light button[class*="bg-green-7"],
+.light button[class*="bg-rose-6"],
+.light button[class*="bg-rose-7"],
+.light button[class*="bg-red-6"],
+.light button[class*="bg-red-7"],
+.light button[class*="bg-cyan-6"],
+.light button[class*="bg-cyan-7"],
+.light button[class*="bg-blue-6"],
+.light button[class*="bg-blue-7"],
+.light button[class*="bg-indigo-6"],
+.light button[class*="bg-indigo-7"],
+.light button[class*="bg-purple-6"],
+.light button[class*="bg-violet-6"],
+.light button[class*="bg-orange-6"],
+.light button[class*="bg-gradient-to-r"],
+.light button[class*="bg-gradient-to-tr"],
+.light button[class*="bg-gradient-to-b"],
+.light a[class*="bg-gradient-to-"],
+.light .btn-solid,
+.light .btn-primary {
+  color: #ffffff !important;
+}
+
+.light button[class*="bg-emerald-6"] *,
+.light button[class*="bg-emerald-7"] *,
+.light button[class*="bg-green-6"] *,
+.light button[class*="bg-rose-6"] *,
+.light button[class*="bg-rose-7"] *,
+.light button[class*="bg-red-6"] *,
+.light button[class*="bg-cyan-6"] *,
+.light button[class*="bg-cyan-7"] *,
+.light button[class*="bg-blue-6"] *,
+.light button[class*="bg-blue-7"] *,
+.light button[class*="bg-indigo-6"] *,
+.light button[class*="bg-indigo-7"] *,
+.light button[class*="bg-purple-6"] *,
+.light button[class*="bg-orange-6"] *,
+.light button[class*="bg-gradient-to-r"] *,
+.light button[class*="bg-gradient-to-tr"] *,
+.light button[class*="bg-gradient-to-b"] *,
+.light a[class*="bg-gradient-to-"] *,
+.light .btn-solid *,
+.light .btn-primary * {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+/* Solid Amber Buttons (Metals & Commodities Selector) */
+.light button[class*="bg-amber-400"],
+.light button[class*="bg-amber-500"],
+.light button[class*="bg-yellow-400"],
+.light button[class*="bg-yellow-500"] {
+  color: #000000 !important;
+}
+.light button[class*="bg-amber-400"] *,
+.light button[class*="bg-amber-500"] *,
+.light button[class*="bg-yellow-400"] *,
+.light button[class*="bg-yellow-500"] * {
+  color: #000000 !important;
+}
+
+/* Dark Surface Enclave in Light Mode */
+.dark-surface,
+[data-theme-override="dark"] {
+  background-color: #090d16 !important;
+  color: #f8fafc !important;
+  border-color: #1f2e4d !important;
+}
+
+.dark-surface *,
+[data-theme-override="dark"] * {
+  color: #f8fafc;
+}
+
+/* Mobile & Tablet Viewport Responsive Utilities */
+@media (max-width: 640px) {
+  .modal-responsive {
+    width: 95vw !important;
+    max-height: 92vh !important;
+    margin: auto !important;
+  }
+}
+
+/* ========================================================
+   CUSTOM SCROLLBARS (DARK & LIGHT ADAPTIVE)
+   ======================================================== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+.light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ========================================================
+   RESPONSIVE HOVER NAVIGATION DRAWER & PROXIMITY PULLOUT
+   ======================================================== */
+@keyframes slideRightSmooth {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-right-smooth {
+  animation: slideRightSmooth 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Edge Hover Proximity Trigger Strip */
+.nav-proximity-trigger {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 12px;
+  z-index: 45;
+  background: transparent;
+  transition: background-color 0.2s ease;
+}
+
+.nav-proximity-trigger:hover {
+  background: rgba(6, 182, 212, 0.15);
+}
+
+/* Gaps and Layout Block Structural Integrity across Zoom Levels (80% to 200%) */
+.zoom-block-stable {
+  min-height: min-content;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
