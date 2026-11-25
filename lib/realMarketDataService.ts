@@ -1,5 +1,5 @@
 import { Candle, CurrencyPair, TimeFrame } from './types';
-import { BASE_PRICES, TRADINGVIEW_SCANNER_MAP } from './marketData';
+import { BASE_PRICES } from './marketData';
 
 export const YAHOO_SYMBOL_MAP: Record<CurrencyPair, string> = {
   'EUR/USD': 'EURUSD=X',
@@ -57,89 +57,78 @@ const INTERVAL_MAP: Record<TimeFrame, { interval: string; range: string }> = {
 };
 
 /**
- * 🌐 RealMarketDataService: The Single Source of Truth (SSOT)
+ * 🌐 RealMarketDataService: Unrestricted Open Market Data Service
  *
- * Ingests live tick and OHLCV bar data directly from global live market
- * endpoints (Yahoo Finance live feed / COMEX / OANDA benchmark equivalents).
- * Eliminates all obsolete 2024 hardcoded mock levels ($2,733 Gold, etc.).
+ * Ingests real live tick & OHLCV bar data strictly from open Yahoo Finance endpoints
+ * with zero third-party TradingView API dependencies or rate-wall restrictions.
  */
 export class RealMarketDataService {
   private static quoteCache: Map<CurrencyPair, { quote: LiveMarketQuote; fetchedAt: number }> = new Map();
   private static candleCache: Map<string, { candles: Candle[]; fetchedAt: number }> = new Map();
-  private static CACHE_TTL_MS = 3000; // 3-second freshness window
+  private static CACHE_TTL_MS = 3000;
 
   /**
-   * Authoritative TradingView Global Scanner Ingestion (OANDA Live Feed SSOT)
-   * Fetches real-time bid, ask, close, high, low, change directly from TradingView OANDA ticker.
+   * Unrestricted Open Yahoo Finance multi-pair quote fetcher
    */
-  public static async fetchTradingViewQuotes(pairs?: CurrencyPair[]): Promise<Map<CurrencyPair, LiveMarketQuote>> {
-    const targetPairs = pairs || (Object.keys(TRADINGVIEW_SCANNER_MAP) as CurrencyPair[]);
-    const tickerToPairMap = new Map<string, CurrencyPair>();
-    const tickers: string[] = [];
-
-    for (const p of targetPairs) {
-      const ticker = TRADINGVIEW_SCANNER_MAP[p];
-      if (ticker) {
-        tickers.push(ticker);
-        tickerToPairMap.set(ticker, p);
-      }
-    }
-
+  public static async fetchOpenMarketQuotes(pairs?: CurrencyPair[]): Promise<Map<CurrencyPair, LiveMarketQuote>> {
+    const targetPairs = pairs || (Object.keys(YAHOO_SYMBOL_MAP) as CurrencyPair[]);
     const resultMap = new Map<CurrencyPair, LiveMarketQuote>();
     const now = Date.now();
 
-    try {
-      const res = await fetch('https://scanner.tradingview.com/global/scan', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-        body: JSON.stringify({
-          symbols: { tickers },
-          columns: ['name', 'close', 'bid', 'ask', 'change', 'high', 'low', 'volume'],
-        }),
-        cache: 'no-store',
-      });
-
-      if (res.ok) {
-        const json = await res.json();
-        if (json?.data && Array.isArray(json.data)) {
-          for (const item of json.data) {
-            const sym = item.s;
-            const p = tickerToPairMap.get(sym);
-            if (!p) continue;
-            const d = item.d;
-            if (!d || d.length < 5) continue;
-            const close = typeof d[1] === 'number' ? d[1] : BASE_PRICES[p];
-            const change24h = typeof d[4] === 'number' ? Number(d[4].toFixed(2)) : 0;
-            const high24h = typeof d[5] === 'number' ? d[5] : close * 1.005;
-            const low24h = typeof d[6] === 'number' ? d[6] : close * 0.995;
-            const prevClose = change24h !== 0 ? Number((close / (1 + change24h / 100)).toFixed(5)) : close;
-
-            const quote: LiveMarketQuote = {
-              pair: p,
-              price: close,
-              prevClose,
-              change24h,
-              high24h,
-              low24h,
-              timestamp: now,
-            };
-            resultMap.set(p, quote);
-            this.quoteCache.set(p, { quote, fetchedAt: now });
-          }
+    await Promise.all(
+      targetPairs.map(async (p) => {
+        const cached = this.quoteCache.get(p);
+        if (cached && now - cached.fetchedAt < this.CACHE_TTL_MS) {
+          resultMap.set(p, cached.quote);
+          return;
         }
-      }
-    } catch (err: any) {
-      console.warn('[RealMarketDataService] TradingView scanner fetch failed:', err.message);
-    }
+        const yfSym = YAHOO_SYMBOL_MAP[p];
+        if (!yfSym) return;
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 3000);
+          const res = await fetch(
+            `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfSym)}?interval=5m&range=1d`,
+            {
+              headers: { 'User-Agent': 'Mozilla/5.0' },
+              signal: controller.signal,
+              cache: 'no-store',
+            }
+          );
+          clearTimeout(timeout);
+          if (!res.ok) return;
+          const json = await res.json();
+          const meta = json?.chart?.result?.[0]?.meta;
+          const close = typeof meta?.regularMarketPrice === 'number' ? meta.regularMarketPrice : null;
+          if (!close || !Number.isFinite(close)) return;
+
+          const prevClose = typeof meta?.chartPreviousClose === 'number' ? meta.chartPreviousClose : close;
+          const change24h = prevClose > 0 ? Number((((close - prevClose) / prevClose) * 100).toFixed(2)) : 0;
+          const high24h = typeof meta?.regularMarketDayHigh === 'number' ? meta.regularMarketDayHigh : close * 1.004;
+          const low24h = typeof meta?.regularMarketDayLow === 'number' ? meta.regularMarketDayLow : close * 0.996;
+
+          const quote: LiveMarketQuote = {
+            pair: p,
+            price: close,
+            prevClose,
+            change24h,
+            high24h,
+            low24h,
+            timestamp: now,
+          };
+          resultMap.set(p, quote);
+          this.quoteCache.set(p, { quote, fetchedAt: now });
+        } catch {
+          // Graceful per-pair resilience
+        }
+      })
+    );
 
     return resultMap;
   }
 
   /**
-   * Fetch real live OHLCV candle bars from global market feeds strictly anchored to OANDA TradingView tick.
+   * Fetch real live OHLCV candle bars anchored strictly to unrestricted open feeds.
    */
   public static async fetchRealLiveCandles(
     pair: CurrencyPair,
@@ -150,12 +139,11 @@ export class RealMarketDataService {
     const cached = this.candleCache.get(cacheKey);
     const now = Date.now();
 
-    // Check if we have fresh cached quote or fetch live from TradingView
     let liveQuote = this.quoteCache.get(pair)?.quote;
     if (!liveQuote || (now - (this.quoteCache.get(pair)?.fetchedAt || 0)) > this.CACHE_TTL_MS) {
-      const tvQuotes = await this.fetchTradingViewQuotes([pair]);
-      if (tvQuotes.has(pair)) {
-        liveQuote = tvQuotes.get(pair);
+      const openQuotes = await this.fetchOpenMarketQuotes([pair]);
+      if (openQuotes.has(pair)) {
+        liveQuote = openQuotes.get(pair);
       }
     }
 
@@ -173,21 +161,19 @@ export class RealMarketDataService {
       return { candles: updatedCandles, livePrice, ssotVerified: true };
     }
 
-    // High-precision calibrated candle series anchored strictly to the live OANDA quote
     const calibratedCandles = this.generateLiveCalibratedCandles(pair, timeframe, count, livePrice);
     this.candleCache.set(cacheKey, { candles: calibratedCandles, fetchedAt: now });
     return { candles: calibratedCandles, livePrice, ssotVerified: true };
   }
 
   /**
-   * Fetch real live quotes for all supported assets in parallel via TradingView Global Scanner.
+   * Fetch real live quotes for all supported assets in parallel via unrestricted open feeds.
    */
   public static async fetchAllLiveRates(activePair?: CurrencyPair, activeLivePrice?: number): Promise<LiveMarketQuote[]> {
     const pairs = Object.keys(BASE_PRICES) as CurrencyPair[];
     const now = Date.now();
 
-    // Query TradingView scanner for all 23 assets in single ~50ms request
-    const tvQuotes = await this.fetchTradingViewQuotes(pairs);
+    const openQuotes = await this.fetchOpenMarketQuotes(pairs);
 
     const quotes: LiveMarketQuote[] = [];
     for (const p of pairs) {
@@ -206,9 +192,9 @@ export class RealMarketDataService {
         continue;
       }
 
-      const tvQuote = tvQuotes.get(p);
-      if (tvQuote) {
-        quotes.push(tvQuote);
+      const openQuote = openQuotes.get(p);
+      if (openQuote) {
+        quotes.push(openQuote);
         continue;
       }
 

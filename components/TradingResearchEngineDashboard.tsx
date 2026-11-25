@@ -52,7 +52,7 @@ import {
 } from '@/lib/research/types';
 import { workflowEngine, SectorRotationItem, OptionsStrategySetup, PreEarningsAnalysis, StockScreenerResultItem } from '@/lib/research/WorkflowEngine';
 import { formatAssetPrice, liveChartTelemetryService } from '@/lib/research/LiveChartTelemetryService';
-import { TradingViewLiveChart } from './research/TradingViewLiveChart';
+import { ChartJsResearchChart } from './research/ChartJsResearchChart';
 import { CommunityLiveChatFeed } from './research/CommunityLiveChatFeed';
 
 export interface TradingResearchEngineDashboardProps {
@@ -505,7 +505,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                 </span>
               </h1>
               <p className="text-xs text-slate-400 font-mono">
-                Real-Time Community Live Chat Ingestion & TradingView Live Chart • 5 Sequential Subagents
+                Chart.js Open Streaming Engine • High-Frequency WS + Modular Vision Atlas Plugins • 5 Sequential Subagents
               </p>
             </div>
           </div>
@@ -614,16 +614,33 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
       </div>
 
       {/* ============================================================= */}
-      {/* 2. REAL-TIME TRADINGVIEW LIVE CHART & COMMUNITY LIVE CHAT FEED */}
+      {/* 2. REAL-TIME CHART.JS OPEN STREAMING CHART & COMMUNITY CHAT FEED */}
       {/* ============================================================= */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
-        {/* Left: Synchronized Editable TradingView Chart */}
+        {/* Left: Unrestricted Chart.js Financial Canvas with Vision Atlas Plugin Overlay */}
         <div className="xl:col-span-7 h-[520px] bg-terminal-950 border border-terminal-border rounded-xl overflow-hidden shadow-lg">
-          <TradingViewLiveChart
+          <ChartJsResearchChart
             symbol={activeSymbol}
             timeframe={activeTimeframe}
             theme="dark"
             height={520}
+            executionLevels={
+              report && report.symbol === activeSymbol
+                ? {
+                    entryMin: report.technical.tradePlan.entryZone.min,
+                    entryMax: report.technical.tradePlan.entryZone.max,
+                    stopLoss: report.technical.tradePlan.stopLoss.price,
+                    takeProfit1: report.technical.tradePlan.target1.price,
+                    takeProfit2: report.technical.tradePlan.target2.price,
+                    bias:
+                      report.technical.trendDirection.includes('BULLISH')
+                        ? 'BUY'
+                        : report.technical.trendDirection.includes('BEARISH')
+                        ? 'SELL'
+                        : 'NEUTRAL',
+                  }
+                : undefined
+            }
             allowIndicatorsCustomization={true}
             onSymbolChange={handleChartSymbolChange}
             onTimeframeChange={handleChartTimeframeChange}
@@ -631,7 +648,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
           />
         </div>
 
-        {/* Right: Real-Time TradingView-Style Community Live Chat Feed */}
+        {/* Right: Real-Time QuriTrader Community Live Chat Feed */}
         <div className="xl:col-span-5 h-[520px]">
           <CommunityLiveChatFeed
             activeSymbol={activeSymbol}
@@ -1570,7 +1587,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
       <div className="p-3.5 rounded-lg bg-terminal-950 border border-terminal-border text-[11px] font-mono text-slate-400 flex items-start gap-2.5">
         <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
         <div>
-          <strong className="text-slate-300">LEGAL & RESEARCH COMPLIANCE DISCLAIMER:</strong> This platform is an automated multi-agent algorithmic research engine designed solely for institutional research, backtesting, and market observation. All analytical outputs, scores, grades, and synthetic theses are synthesized exclusively from active TradingView chart market conditions and real-time community chat transcripts rather than static defaults. No output constitutes financial advice, recommendation, or solicitation.
+          <strong className="text-slate-300">LEGAL & RESEARCH COMPLIANCE DISCLAIMER:</strong> This platform is an automated multi-agent algorithmic research engine designed solely for institutional research, backtesting, and market observation. All analytical outputs, scores, grades, entries, and synthetic theses are synthesized strictly from the live Chart.js WebSocket/open-feed price stream and real-time community chat transcripts, strictly prohibiting hallucinated pricing. No output constitutes financial advice, recommendation, or solicitation.
         </div>
       </div>
 

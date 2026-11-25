@@ -130,7 +130,8 @@ export interface ChartOHLCVBar {
 
 export interface ChartLiveContext {
   symbol: string;
-  tvSymbol: string;
+  exchangeSymbol: string;
+  tvSymbol?: string;
   name?: string;
   timeframe: string;
   livePrice: number;
@@ -145,7 +146,8 @@ export interface ChartLiveContext {
   activeIndicators: string[];
   indicatorReadings: ChartIndicatorReadings;
   recentCandles?: ChartOHLCVBar[];
-  source: 'CHART_WIDGET_EVENT' | 'TRADINGVIEW_SCANNER' | 'YAHOO_FINANCE' | 'SYNTHETIC_FALLBACK';
+  sequenceId?: number;
+  source: 'CHARTJS_WS_STREAM' | 'CHART_WIDGET_EVENT' | 'YAHOO_FINANCE_OPEN' | 'BINANCE_WS' | 'SYNTHETIC_FALLBACK';
   timestamp: number;
 }
 
