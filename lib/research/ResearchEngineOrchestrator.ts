@@ -98,12 +98,37 @@ export class ResearchEngineOrchestrator {
     // Strict Anti-Hallucination Live Chart.js Price Grounding Verification
     if (validTech && brief.pricing.currentPrice > 0) {
       const spot = brief.pricing.currentPrice;
-      const maxAllowedDev = 0.08; // Strictly anchor entry & stop within 8% of live Chart.js spot
+      const dec = brief.assetClass === 'FOREX' && !resolvedSym.includes('JPY')
+        ? 5
+        : resolvedSym.includes('JPY') || resolvedSym.includes('XAG')
+        ? 3
+        : 2;
+      const roundP = (v: number) => Number(v.toFixed(dec));
+      const maxAllowedDev = 0.08; // Strictly anchor entry, stop & targets within 8% of live Chart.js spot
+      const atrSafe = Math.max(brief.volatility.atr14 || spot * 0.012, spot * 0.002);
+
       const entryMid = (validTech.tradePlan.entryZone.min + validTech.tradePlan.entryZone.max) / 2;
       if (!Number.isFinite(entryMid) || Math.abs(entryMid - spot) / spot > maxAllowedDev) {
-        const atrSafe = Math.max(brief.volatility.atr14 || spot * 0.014, spot * 0.002);
-        validTech.tradePlan.entryZone.min = Number((spot - atrSafe * 0.3).toFixed(brief.assetClass === 'FOREX' ? 5 : 2));
-        validTech.tradePlan.entryZone.max = Number((spot + atrSafe * 0.15).toFixed(brief.assetClass === 'FOREX' ? 5 : 2));
+        validTech.tradePlan.entryZone.min = roundP(spot - atrSafe * 0.3);
+        validTech.tradePlan.entryZone.max = roundP(spot + atrSafe * 0.15);
+      }
+
+      const sl = validTech.tradePlan.stopLoss.price;
+      if (!Number.isFinite(sl) || Math.abs(sl - spot) / spot > maxAllowedDev) {
+        const isBull = validTech.trendDirection.includes('BULLISH');
+        validTech.tradePlan.stopLoss.price = roundP(isBull ? spot - atrSafe * 1.4 : spot + atrSafe * 1.4);
+      }
+
+      const t1 = validTech.tradePlan.target1.price;
+      if (!Number.isFinite(t1) || Math.abs(t1 - spot) / spot > maxAllowedDev * 1.5) {
+        const isBull = validTech.trendDirection.includes('BULLISH');
+        validTech.tradePlan.target1.price = roundP(isBull ? spot + atrSafe * 2.1 : spot - atrSafe * 2.1);
+      }
+
+      const t2 = validTech.tradePlan.target2.price;
+      if (!Number.isFinite(t2) || Math.abs(t2 - spot) / spot > maxAllowedDev * 2.2) {
+        const isBull = validTech.trendDirection.includes('BULLISH');
+        validTech.tradePlan.target2.price = roundP(isBull ? spot + atrSafe * 3.4 : spot - atrSafe * 3.4);
       }
     }
 
@@ -206,43 +231,53 @@ export class ResearchEngineOrchestrator {
     }
 
     // -------------------------------------------------------------
-    // COMPILE 25 SUB-SCORE MATRIX (5 per Agent)
+    // COMPILE 25 SUB-SCORE MATRIX (5 per Agent — Strict Parity, Zero Static Fallbacks)
     // -------------------------------------------------------------
+    const subVal = (agentOk: boolean, raw: number | undefined): number => {
+      if (!agentOk || typeof raw !== 'number' || !Number.isFinite(raw)) return 0;
+      return Math.min(20, Math.max(0, Math.round(raw)));
+    };
+    const techOk = techRes.status === 'SUCCESS';
+    const fundOk = fundRes.status === 'SUCCESS';
+    const sentOk = sentRes.status === 'SUCCESS';
+    const riskOk = riskRes.status === 'SUCCESS';
+    const thesisOk = thesisRes.status === 'SUCCESS';
+
     const all25SubScores: ResearchReportSnapshot['all25SubScores'] = [
       // Technical (5)
-      { agent: 'Technical', category: 'Trend', score: techRes.subScores?.trend ?? 15, maxScore: 20, label: 'Trend Direction & EMA Alignment', interpretation: 'EMA 20/50/200 Stack & Market Structure' },
-      { agent: 'Technical', category: 'Momentum', score: techRes.subScores?.momentum ?? 16, maxScore: 20, label: 'RSI & MACD Momentum', interpretation: 'RSI-14 condition & MACD histogram divergence' },
-      { agent: 'Technical', category: 'Volume', score: techRes.subScores?.volume ?? 17, maxScore: 20, label: 'Volume Surge vs 20/50D Avg', interpretation: 'Volume surge ratio & OBV accumulation' },
-      { agent: 'Technical', category: 'Pattern Quality', score: techRes.subScores?.patternQuality ?? 17, maxScore: 20, label: 'Active Chart Pattern Completion', interpretation: 'Pattern maturity & completion %' },
-      { agent: 'Technical', category: 'Relative Strength', score: techRes.subScores?.relativeStrength ?? 16, maxScore: 20, label: 'Alpha vs Benchmark Index', interpretation: 'Relative strength outperformance' },
+      { agent: 'Technical', category: 'Trend', score: subVal(techOk, techRes.subScores?.trend), maxScore: 20, label: 'Trend Direction & EMA Alignment', interpretation: 'EMA 20/50/200 Stack & Market Structure' },
+      { agent: 'Technical', category: 'Momentum', score: subVal(techOk, techRes.subScores?.momentum), maxScore: 20, label: 'RSI & MACD Momentum', interpretation: 'RSI-14 condition & MACD histogram divergence' },
+      { agent: 'Technical', category: 'Volume', score: subVal(techOk, techRes.subScores?.volume), maxScore: 20, label: 'Volume Surge vs 20/50D Avg', interpretation: 'Volume surge ratio & OBV accumulation' },
+      { agent: 'Technical', category: 'Pattern Quality', score: subVal(techOk, techRes.subScores?.patternQuality), maxScore: 20, label: 'Active Chart Pattern Completion', interpretation: 'Pattern maturity & completion %' },
+      { agent: 'Technical', category: 'Relative Strength', score: subVal(techOk, techRes.subScores?.relativeStrength), maxScore: 20, label: 'Alpha vs Benchmark Index', interpretation: 'Relative strength outperformance' },
 
       // Fundamental (5)
-      { agent: 'Fundamental', category: 'Valuation', score: fundRes.subScores?.valuation ?? 16, maxScore: 20, label: 'Multiples & Fair Value (P/E, PEG, EV/EBITDA)', interpretation: 'Multiples vs growth & macro carry' },
-      { agent: 'Fundamental', category: 'Growth', score: fundRes.subScores?.growth ?? 18, maxScore: 20, label: 'YoY Revenue & Earnings CAGR', growth: fundRes.subScores?.growth ?? 18, interpretation: 'Accelerating top-line and bottom-line expansion' } as any,
-      { agent: 'Fundamental', category: 'Profitability', score: fundRes.subScores?.profitability ?? 19, maxScore: 20, label: 'Operating Margins, ROE & ROIC', interpretation: 'Superior capital efficiency and returns' },
-      { agent: 'Fundamental', category: 'Financial Health', score: fundRes.subScores?.financialHealth ?? 18, maxScore: 20, label: 'Balance Sheet Fortress & FCF Yield', interpretation: 'Low debt/equity and robust cash generation' },
-      { agent: 'Fundamental', category: 'Moat Strength', score: fundRes.subScores?.moatStrength ?? 19, maxScore: 20, label: 'Economic Moat & Pricing Power', interpretation: 'High switching costs and defensible moat' },
+      { agent: 'Fundamental', category: 'Valuation', score: subVal(fundOk, fundRes.subScores?.valuation), maxScore: 20, label: 'Multiples & Fair Value (P/E, PEG, EV/EBITDA)', interpretation: 'Multiples vs growth & macro carry' },
+      { agent: 'Fundamental', category: 'Growth', score: subVal(fundOk, fundRes.subScores?.growth), maxScore: 20, label: 'YoY Revenue & Earnings CAGR', interpretation: 'Accelerating top-line and bottom-line expansion' },
+      { agent: 'Fundamental', category: 'Profitability', score: subVal(fundOk, fundRes.subScores?.profitability), maxScore: 20, label: 'Operating Margins, ROE & ROIC', interpretation: 'Superior capital efficiency and returns' },
+      { agent: 'Fundamental', category: 'Financial Health', score: subVal(fundOk, fundRes.subScores?.financialHealth), maxScore: 20, label: 'Balance Sheet Fortress & FCF Yield', interpretation: 'Low debt/equity and robust cash generation' },
+      { agent: 'Fundamental', category: 'Moat Strength', score: subVal(fundOk, fundRes.subScores?.moatStrength), maxScore: 20, label: 'Economic Moat & Pricing Power', interpretation: 'High switching costs and defensible moat' },
 
       // Sentiment & Momentum (5)
-      { agent: 'Sentiment', category: 'News', score: sentRes.subScores?.news ?? 17, maxScore: 20, label: 'Recent Financial News Tone', interpretation: 'NLP sentiment across wire headlines' },
-      { agent: 'Sentiment', category: 'Social', score: sentRes.subScores?.social ?? 16, maxScore: 20, label: 'Social Buzz & Retail Sentiment', interpretation: 'Sentiment trajectory on social platforms' },
-      { agent: 'Sentiment', category: 'Analysts', score: sentRes.subScores?.analysts ?? 18, maxScore: 20, label: 'Wall Street Analyst Consensus', interpretation: 'Buy/Hold/Sell distribution and target upside' },
-      { agent: 'Sentiment', category: 'Institutional', score: sentRes.subScores?.institutional ?? 18, maxScore: 20, label: '13F Smart Money / FII-DII Flows', interpretation: 'Institutional accumulation vs distribution' },
-      { agent: 'Sentiment', category: 'Insider/Short', score: sentRes.subScores?.insiderShort ?? 16, maxScore: 20, label: 'Executive Buys & Short Squeeze Potential', interpretation: 'Insider buying activity and short squeeze pressure' },
+      { agent: 'Sentiment', category: 'News', score: subVal(sentOk, sentRes.subScores?.news), maxScore: 20, label: 'Recent Financial News Tone', interpretation: 'NLP sentiment across wire headlines' },
+      { agent: 'Sentiment', category: 'Social', score: subVal(sentOk, sentRes.subScores?.social), maxScore: 20, label: 'Social Buzz & Retail Sentiment', interpretation: 'Sentiment trajectory on social platforms' },
+      { agent: 'Sentiment', category: 'Analysts', score: subVal(sentOk, sentRes.subScores?.analysts), maxScore: 20, label: 'Wall Street Analyst Consensus', interpretation: 'Buy/Hold/Sell distribution and target upside' },
+      { agent: 'Sentiment', category: 'Institutional', score: subVal(sentOk, sentRes.subScores?.institutional), maxScore: 20, label: '13F Smart Money / FII-DII Flows', interpretation: 'Institutional accumulation vs distribution' },
+      { agent: 'Sentiment', category: 'Insider/Short', score: subVal(sentOk, sentRes.subScores?.insiderShort), maxScore: 20, label: 'Executive Buys & Short Squeeze Potential', interpretation: 'Insider buying activity and short squeeze pressure' },
 
       // Risk Assessment (5 - Inverted)
-      { agent: 'Risk', category: 'Volatility Safety', score: riskRes.subScores?.volatilitySafety ?? 16, maxScore: 20, label: 'ATR & Historical Volatility Safety', interpretation: 'Manageable price swing dispersion' },
-      { agent: 'Risk', category: 'Downside Protection', score: riskRes.subScores?.downsideProtection ?? 17, maxScore: 20, label: 'Bear-Case Drawdown Insulation', interpretation: 'Resilient support levels in correction stress tests' },
-      { agent: 'Risk', category: 'Macro Resilience', score: riskRes.subScores?.macroResilience ?? 16, maxScore: 20, label: 'Rate, Inflation & Currency Stability', interpretation: 'Low vulnerability to macro policy shifts' },
-      { agent: 'Risk', category: 'Liquidity', score: riskRes.subScores?.liquidity ?? 19, maxScore: 20, label: 'Spread Tightness & Dollar Volume', interpretation: 'Deep institutional order book liquidity' },
-      { agent: 'Risk', category: 'Risk/Reward Ratio', score: riskRes.subScores?.riskRewardRatio ?? 17, maxScore: 20, label: 'Kelly Optimal Asymmetry', interpretation: 'Asymmetric payoff profile exceeding 1:1.80' },
+      { agent: 'Risk', category: 'Volatility Safety', score: subVal(riskOk, riskRes.subScores?.volatilitySafety), maxScore: 20, label: 'ATR & Historical Volatility Safety', interpretation: 'Manageable price swing dispersion' },
+      { agent: 'Risk', category: 'Downside Protection', score: subVal(riskOk, riskRes.subScores?.downsideProtection), maxScore: 20, label: 'Bear-Case Drawdown Insulation', interpretation: 'Resilient support levels in correction stress tests' },
+      { agent: 'Risk', category: 'Macro Resilience', score: subVal(riskOk, riskRes.subScores?.macroResilience), maxScore: 20, label: 'Rate, Inflation & Currency Stability', interpretation: 'Low vulnerability to macro policy shifts' },
+      { agent: 'Risk', category: 'Liquidity', score: subVal(riskOk, riskRes.subScores?.liquidity), maxScore: 20, label: 'Spread Tightness & Dollar Volume', interpretation: 'Deep institutional order book liquidity' },
+      { agent: 'Risk', category: 'Risk/Reward Ratio', score: subVal(riskOk, riskRes.subScores?.riskRewardRatio), maxScore: 20, label: 'Kelly Optimal Asymmetry', interpretation: 'Asymmetric payoff profile calibrated to live ATR' },
 
       // Thesis Synthesis (5)
-      { agent: 'Thesis', category: 'Catalyst Clarity', score: thesisRes.subScores?.catalystClarity ?? 18, maxScore: 20, label: 'Tangible Catalysts Identification', interpretation: 'High-conviction upcoming operational catalysts' },
-      { agent: 'Thesis', category: 'Timing', score: thesisRes.subScores?.timing ?? 17, maxScore: 20, label: 'Execution Window Timing', interpretation: 'Optimal alignment with multi-timeframe cycles' },
-      { agent: 'Thesis', category: 'Asymmetry', score: thesisRes.subScores?.asymmetry ?? 18, maxScore: 20, label: 'Upside-to-Downside Asymmetry', interpretation: 'Skewed upside potential relative to defined risk' },
-      { agent: 'Thesis', category: 'Edge', score: thesisRes.subScores?.edge ?? 17, maxScore: 20, label: 'Proprietary Market Edge', interpretation: 'Synthesized confluence across all disciplines' },
-      { agent: 'Thesis', category: 'Conviction', score: thesisRes.subScores?.conviction ?? 18, maxScore: 20, label: 'Overall Swarm Conviction', interpretation: 'Zero-veto consensus clearance' },
+      { agent: 'Thesis', category: 'Catalyst Clarity', score: subVal(thesisOk, thesisRes.subScores?.catalystClarity), maxScore: 20, label: 'Tangible Catalysts Identification', interpretation: 'High-conviction upcoming operational catalysts' },
+      { agent: 'Thesis', category: 'Timing', score: subVal(thesisOk, thesisRes.subScores?.timing), maxScore: 20, label: 'Execution Window Timing', interpretation: 'Optimal alignment with multi-timeframe cycles' },
+      { agent: 'Thesis', category: 'Asymmetry', score: subVal(thesisOk, thesisRes.subScores?.asymmetry), maxScore: 20, label: 'Upside-to-Downside Asymmetry', interpretation: 'Skewed upside potential relative to defined risk' },
+      { agent: 'Thesis', category: 'Edge', score: subVal(thesisOk, thesisRes.subScores?.edge), maxScore: 20, label: 'Proprietary Market Edge', interpretation: 'Synthesized confluence across all disciplines' },
+      { agent: 'Thesis', category: 'Conviction', score: subVal(thesisOk, thesisRes.subScores?.conviction), maxScore: 20, label: 'Overall Swarm Conviction', interpretation: 'Zero-veto consensus clearance' },
     ];
 
     const reportSnapshot: ResearchReportSnapshot = {

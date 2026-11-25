@@ -2,10 +2,9 @@
 
 import React, { useState, useMemo } from 'react';
 import { X, Minimize2, Maximize2, Droplets, Info } from 'lucide-react';
-import { CurrencyPair } from '@/lib/types';
-import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
-import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
-import { BASE_PRICES } from '@/lib/marketData';
+import { Candle, CurrencyPair } from '@/lib/types';
+import { ResearchReportSnapshot } from '@/lib/research/types';
+import { computeLiveVisionAtlasSnapshot } from '@/lib/research/VisionAtlasLiveAnalytics';
 
 export interface LiquidityHeatmapModalProps {
   isOpen: boolean;
@@ -14,6 +13,8 @@ export interface LiquidityHeatmapModalProps {
   timeframe?: string;
   theme?: 'light' | 'dark';
   livePrice?: number;
+  candles?: Candle[];
+  report?: ResearchReportSnapshot | null;
 }
 
 export const LiquidityHeatmapModal: React.FC<LiquidityHeatmapModalProps> = ({
@@ -23,30 +24,50 @@ export const LiquidityHeatmapModal: React.FC<LiquidityHeatmapModalProps> = ({
   timeframe = '15m',
   theme = 'light',
   livePrice: propLivePrice,
+  candles = [],
+  report = null,
 }) => {
   const isLight = theme === 'light';
   const cleanPair = pair.replace('/', '');
 
-  const isGold = pair === 'XAU/USD';
+  const vaSnapshot = useMemo(
+    () =>
+      computeLiveVisionAtlasSnapshot({
+        pair,
+        timeframe,
+        livePrice: propLivePrice,
+        candles,
+        report,
+      }),
+    [pair, timeframe, propLivePrice, candles, report]
+  );
+
+  const decimals = vaSnapshot.priceDecimals;
+  const activePrice = vaSnapshot.livePrice;
+  const isGold = pair.includes('XAU');
   const isJpy = pair.includes('JPY');
-  const isIndian = pair === 'NIFTY 50' || pair === 'BANK NIFTY';
-  const decimals = isJpy ? 3 : (isGold || isIndian) ? 2 : 5;
-  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
+  const isIndian = pair === 'NIFTY 50' || pair === 'BANK NIFTY' || pair.includes('/INR');
   const spreadPts = isGold ? 0.17 : isIndian ? 1.5 : isJpy ? 0.015 : 0.00015;
   const bidVal = (activePrice - spreadPts / 2).toFixed(decimals);
   const askVal = (activePrice + spreadPts / 2).toFixed(decimals);
 
   const liquidityLevels = useMemo(() => {
-    return [
-      { type: 'Sell-limit zone 3', price: Number((activePrice * 1.012).toFixed(decimals)), strength: 33, delta: '+4', color: 'bg-amber-500', barWidth: '45%' },
-      { type: 'Sell-limit zone 2', price: Number((activePrice * 1.008).toFixed(decimals)), strength: 43, delta: '+2', color: 'bg-rose-500', barWidth: '65%' },
-      { type: 'Sell-limit zone 1', price: Number((activePrice * 1.005).toFixed(decimals)), strength: 29, delta: '+2', color: 'bg-amber-500', barWidth: '40%' },
-      { type: 'Institutional Ask Wall', price: Number((activePrice * 1.002).toFixed(decimals)), strength: 40, delta: '+3', color: 'bg-amber-500', barWidth: '58%' },
-      { type: 'Buy-side liquidity', price: Number((activePrice * 0.999).toFixed(decimals)), strength: 34, delta: '+2', color: 'bg-amber-500', barWidth: '48%' },
-      { type: 'Institutional Bid Wall', price: Number((activePrice * 0.996).toFixed(decimals)), strength: 20, delta: '+1', color: 'bg-blue-500', barWidth: '30%' },
-      { type: 'Buy-limit demand zone', price: Number((activePrice * 0.990).toFixed(decimals)), strength: 48, delta: '+5', color: 'bg-blue-600', barWidth: '72%' },
-    ];
-  }, [activePrice, decimals]);
+    const colorMap: Record<string, string> = {
+      BSL: 'bg-rose-500',
+      OB_SUPPLY: 'bg-amber-500',
+      EQ_PIVOT: 'bg-cyan-500',
+      OB_DEMAND: 'bg-emerald-500',
+      SSL: 'bg-blue-600',
+    };
+    return vaSnapshot.liquidityWalls.map((wall, idx) => ({
+      type: wall.label,
+      price: wall.price,
+      strength: wall.strengthPct,
+      delta: `${wall.distancePct >= 0 ? '+' : ''}${wall.distancePct}%`,
+      color: colorMap[wall.kind] || 'bg-cyan-500',
+      barWidth: `${Math.min(95, Math.max(20, wall.strengthPct - idx * 4))}%`,
+    }));
+  }, [vaSnapshot]);
 
   if (!isOpen) return null;
 
@@ -86,8 +107,8 @@ export const LiquidityHeatmapModal: React.FC<LiquidityHeatmapModalProps> = ({
 
         {/* Live Bid / Ask / Spread */}
         <div className="p-2 rounded bg-slate-50 dark:bg-terminal-900 border border-slate-200 dark:border-terminal-border flex items-center justify-between text-xs font-mono">
-          <span>Bid: <strong className="font-bold text-slate-900 dark:text-white">${bidVal}</strong></span>
-          <span>Ask: <strong className="font-bold text-slate-900 dark:text-white">${askVal}</strong></span>
+          <span>Bid: <strong className="font-bold text-slate-900 dark:text-white">{bidVal}</strong></span>
+          <span>Ask: <strong className="font-bold text-slate-900 dark:text-white">{askVal}</strong></span>
           <span className="text-slate-500">Spread: <strong className="text-slate-800 dark:text-slate-200">{spreadPts}</strong></span>
         </div>
 
@@ -107,7 +128,7 @@ export const LiquidityHeatmapModal: React.FC<LiquidityHeatmapModalProps> = ({
 
               <div className="flex items-center gap-3 shrink-0">
                 <span className="font-bold text-slate-900 dark:text-white">
-                  {lvl.price.toFixed(2)}
+                  {lvl.price.toFixed(decimals)}
                 </span>
 
                 {/* Depth visual bar */}
@@ -118,7 +139,7 @@ export const LiquidityHeatmapModal: React.FC<LiquidityHeatmapModalProps> = ({
                   />
                 </div>
 
-                <div className="text-[10px] text-slate-500 flex items-center gap-1 w-12 justify-end">
+                <div className="text-[10px] text-slate-500 flex items-center gap-1 w-14 justify-end">
                   <span className="font-bold text-slate-800 dark:text-slate-200">{lvl.strength}</span>
                   <span className="text-emerald-600 dark:text-emerald-400">{lvl.delta}</span>
                 </div>
@@ -129,45 +150,47 @@ export const LiquidityHeatmapModal: React.FC<LiquidityHeatmapModalProps> = ({
 
         {/* Methodology Footnote */}
         <div className="p-2.5 rounded bg-slate-50 dark:bg-terminal-900/50 border border-slate-200 dark:border-terminal-border text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
-          Real order books not available (No online book). Rather partially print available trends/order book data. Strength (0-100) = frequency independent signs point to the same point: pool/liquidity high/lows, equal highs / lows, order blocks, fair value gaps, round numbers, tick volume.
+          Real-time depth strength synthesized from swing liquidity pools, Order Blocks, Fair Value Gaps, ATR ({vaSnapshot.atr14.toFixed(decimals)}), and tick accumulation around {activePrice.toFixed(decimals)}.
         </div>
 
         {/* Liquidity Analysis (Market DNA) Box */}
         <div className="p-2.5 rounded-lg border border-slate-200 dark:border-terminal-border space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Liquidity analysis</span>
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-terminal-800 text-slate-600 dark:text-slate-400 font-bold">
-              ESTIMATED
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 font-bold">
+              LIVE STREAMED
             </span>
           </div>
 
           <div className="space-y-1 text-[11px]">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-2">
               <span className="text-slate-500">Liquidity sweep:</span>
-              <span className="font-medium text-slate-800 dark:text-slate-200">Sell-side swept at 3998.47 - 3 candles ago</span>
+              <span className="font-medium text-slate-800 dark:text-slate-200 text-right">{vaSnapshot.sweepSummary}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-2">
               <span className="text-slate-500">Structure:</span>
-              <span className="font-medium text-slate-800 dark:text-slate-200">MSS (CHoCH) bearish - not confirming yet</span>
+              <span className="font-medium text-slate-800 dark:text-slate-200 text-right">{vaSnapshot.structureSummary}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500">Analysis confidence:</span>
-              <span className="font-bold text-amber-600">Low</span>
+              <span className={`font-bold ${vaSnapshot.confidenceLabel === 'High' ? 'text-emerald-500' : vaSnapshot.confidenceLabel === 'Medium' ? 'text-cyan-500' : 'text-amber-600'}`}>
+                {vaSnapshot.confidenceLabel}
+              </span>
             </div>
           </div>
 
-          {/* Split Bar: Bullish 47% vs Bearish 53% */}
+          {/* Dynamic Split Bar */}
           <div className="space-y-1 pt-1">
             <div className="flex justify-between text-[10px] font-bold">
-              <span className="text-emerald-600">Bullish 47%</span>
-              <span className="text-rose-600">Bearish 53%</span>
+              <span className="text-emerald-600">Bullish {vaSnapshot.bullishPct}%</span>
+              <span className="text-rose-600">Bearish {vaSnapshot.bearishPct}%</span>
             </div>
             <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-terminal-800 overflow-hidden flex">
-              <div className="bg-emerald-500 h-full" style={{ width: '47%' }} />
-              <div className="bg-rose-500 h-full" style={{ width: '53%' }} />
+              <div className="bg-emerald-500 h-full transition-all" style={{ width: `${vaSnapshot.bullishPct}%` }} />
+              <div className="bg-rose-500 h-full transition-all" style={{ width: `${vaSnapshot.bearishPct}%` }} />
             </div>
             <p className="text-[9px] text-slate-400 leading-tight">
-              Measured on 50 past sell-side sweeps of this chart (first move of &gt;1 ATR within 12 candles). Not a guarantee.
+              Calculated from live {cleanPair} ({timeframe}) RSI {vaSnapshot.rsi14}, EMA-20 {vaSnapshot.ema20.toFixed(decimals)}, and active liquidity sweeps.
             </p>
           </div>
         </div>

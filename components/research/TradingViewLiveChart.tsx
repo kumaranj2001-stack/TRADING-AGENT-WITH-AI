@@ -8,7 +8,8 @@
 
 'use client';
 
-import React, { useEffect, useRef, useState, memo, useCallback } from 'react';
+import React, { useEffect, useRef, useState, memo, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Chart,
   LineController,
@@ -34,8 +35,16 @@ import {
   Compass,
   Crosshair,
   RotateCcw,
+  ZoomIn,
+  ZoomOut,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
+  Droplets,
+  Dna,
 } from 'lucide-react';
-import { ChartLiveContext } from '@/lib/research/types';
+import { ChartLiveContext, ResearchReportSnapshot } from '@/lib/research/types';
+import { Candle, CurrencyPair } from '@/lib/types';
 import { formatAssetPrice, liveChartTelemetryService } from '@/lib/research/LiveChartTelemetryService';
 import { calculateBollingerBands, calculateEMA } from '@/lib/indicators';
 import { ensureDefaultChartPluginsRegistered } from '@/lib/chartjs/registerDefaultPlugins';
@@ -46,6 +55,10 @@ import {
   HighFrequencyTickPacket,
   StreamStatus,
 } from '@/lib/streaming/HighFrequencyStreamEngine';
+import { QuantumVisionDrawer } from '../infinity-vision/QuantumVisionDrawer';
+import { LiquidityHeatmapModal } from '../infinity-vision/LiquidityHeatmapModal';
+import { MarketDnaSidebar } from '../infinity-vision/MarketDnaSidebar';
+import { VisionAtlasLabSidebar } from '../infinity-vision/VisionAtlasLabSidebar';
 
 Chart.register(
   LineController,
@@ -66,6 +79,7 @@ export interface TradingViewLiveChartProps {
   containerIdPrefix?: string;
   allowIndicatorsCustomization?: boolean;
   tradePlanOverlay?: TradePlanOverlayState;
+  activeReport?: ResearchReportSnapshot | null;
   onSymbolChange?: (newSymbol: string, telemetry?: ChartLiveContext) => void;
   onTimeframeChange?: (newTimeframe: string, telemetry?: ChartLiveContext) => void;
   onChartTelemetryUpdate?: (telemetry: ChartLiveContext) => void;
@@ -110,9 +124,10 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
   symbol,
   timeframe = '1h',
   theme = 'dark',
-  height = 520,
+  height = 540,
   allowIndicatorsCustomization = true,
   tradePlanOverlay,
+  activeReport = null,
   onSymbolChange,
   onTimeframeChange,
   onChartTelemetryUpdate,
@@ -120,11 +135,18 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const dragPanRef = useRef<{ clientX: number; initialOffset: number } | null>(null);
 
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [chartType, setChartType] = useState<'Candles' | 'Line'>('Candles');
   const [enableVisionAtlasPlugin, setEnableVisionAtlasPlugin] = useState<boolean>(true);
   const [enableTradePlanPlugin, setEnableTradePlanPlugin] = useState<boolean>(true);
+
+  // Integrated Vision Atlas synchronized drawers inside Research Engine Chart
+  const [showQuantumDrawer, setShowQuantumDrawer] = useState<boolean>(false);
+  const [showLiquidityModal, setShowLiquidityModal] = useState<boolean>(false);
+  const [activeVisionPanel, setActiveVisionPanel] = useState<'none' | 'lab' | 'dna'>('none');
+  const [quantumHorizon, setQuantumHorizon] = useState<number>(6);
 
   const [activeIndicators, setActiveIndicators] = useState<string[]>([
     'RSI',
@@ -145,8 +167,33 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
   const [telemetry, setTelemetry] = useState<ChartLiveContext | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>('CONNECTING');
   const [streamLatencyMs, setStreamLatencyMs] = useState<number>(8);
-  const [visibleCount, setVisibleCount] = useState<number>(65);
+  const [visibleCount, setVisibleCount] = useState<number>(55);
+  const [panOffset, setPanOffset] = useState<number>(0);
+  const [isDraggingPan, setIsDraggingPan] = useState<boolean>(false);
   const [hoveredOhlc, setHoveredOhlc] = useState<{ o: number; h: number; l: number; c: number } | null>(null);
+
+  // Reset pan when changing instrument or timeframe
+  useEffect(() => {
+    setPanOffset(0);
+  }, [symbol, timeframe]);
+
+  // Escape-key & responsive resize handling for true full-screen portal mode
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsFullscreen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const rafId = requestAnimationFrame(() => chartInstanceRef.current?.resize());
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = prevOverflow;
+      cancelAnimationFrame(rafId);
+      requestAnimationFrame(() => chartInstanceRef.current?.resize());
+    };
+  }, [isFullscreen]);
 
   const resolved = liveChartTelemetryService.resolveSymbol(symbol);
   const canonicalSymbol = resolved.symbol;
@@ -326,6 +373,14 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
         responsive: true,
         maintainAspectRatio: false,
         animation: false,
+        layout: {
+          padding: {
+            top: 20,
+            right: 16,
+            bottom: 14,
+            left: 10,
+          },
+        },
         interaction: {
           mode: 'index',
           intersect: false,
@@ -379,9 +434,18 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
     const chart = chartInstanceRef.current;
     if (!chart || !telemetry?.recentCandles || telemetry.recentCandles.length === 0) return;
 
-    const sliced = telemetry.recentCandles.slice(-visibleCount);
+    const allBars = telemetry.recentCandles;
+    const totalBars = allBars.length;
+    const maxPan = Math.max(0, totalBars - 15);
+    const clampedPan = Math.min(panOffset, maxPan);
+    const endIdx = Math.max(15, totalBars - clampedPan);
+    const startIdx = Math.max(0, endIdx - visibleCount);
+    const sliced = allBars.slice(startIdx, endIdx);
+
     const closes = sliced.map((c) => c.close);
-    const labels = sliced.map((c) => c.time || new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    const timeLabels = sliced.map((c) => c.time || new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    const futureSlots = clampedPan === 0 ? Math.min(8, Math.max(5, quantumHorizon)) : 0;
+    const labels = [...timeLabels, ...Array(futureSlots).fill('')];
 
     const ema20Arr = activeIndicators.includes('EMA20') ? calculateEMA(closes, 20) : [];
     const ema50Arr = activeIndicators.includes('EMA50') ? calculateEMA(closes, Math.min(50, closes.length)) : [];
@@ -400,7 +464,7 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
     chart.data.datasets[4].data = bbObj ? bbObj.upper : [];
     chart.data.datasets[5].data = bbObj ? bbObj.lower : [];
 
-    // Compute clean y-bounds encompassing candles + active trade plan so nothing clips
+    // Compute generous y-bounds encompassing candles + active trade plan so nothing clips against edges
     const allLows = sliced.map((c) => c.low);
     const allHighs = sliced.map((c) => c.high);
     if (enableTradePlanPlugin && tradePlanOverlay?.enabled) {
@@ -409,7 +473,7 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
     }
     const minY = Math.min(...allLows);
     const maxY = Math.max(...allHighs);
-    const pad = Math.max((maxY - minY) * 0.08, minY * 0.001);
+    const pad = Math.max((maxY - minY) * 0.14, minY * 0.0018);
     if (chart.options.scales?.y) {
       chart.options.scales.y.min = minY - pad;
       chart.options.scales.y.max = maxY + pad;
@@ -443,15 +507,16 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
         stochD: telemetry.indicatorReadings.stochD,
       },
       visionAtlas: {
-        enabled: enableVisionAtlasPlugin,
-        showLabZones: true,
-        showOrderBlocks: true,
-        showBos: true,
-        showChoch: true,
-        showInternalStructure: true,
-        showQuantumFan: true,
-        showMarketDna: true,
-        showLiquidityHeatmap: true,
+        enabled: enableVisionAtlasPlugin || showQuantumDrawer || showLiquidityModal || activeVisionPanel !== 'none',
+        showLabZones: enableVisionAtlasPlugin || activeVisionPanel === 'lab',
+        showOrderBlocks: enableVisionAtlasPlugin,
+        showBos: enableVisionAtlasPlugin,
+        showChoch: enableVisionAtlasPlugin,
+        showInternalStructure: enableVisionAtlasPlugin,
+        showQuantumFan: showQuantumDrawer || enableVisionAtlasPlugin,
+        showMarketDna: activeVisionPanel === 'dna' || enableVisionAtlasPlugin,
+        showLiquidityHeatmap: showLiquidityModal || enableVisionAtlasPlugin,
+        horizonCandles: quantumHorizon,
       },
       tradePlan: enableTradePlanPlugin ? tradePlanOverlay : { enabled: false },
     };
@@ -474,6 +539,11 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
   }, [
     telemetry,
     visibleCount,
+    panOffset,
+    quantumHorizon,
+    showQuantumDrawer,
+    showLiquidityModal,
+    activeVisionPanel,
     chartType,
     activeIndicators,
     enableVisionAtlasPlugin,
@@ -539,289 +609,489 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
     return formatAssetPrice(v, resolved.assetClass, canonicalSymbol);
   };
 
+  const totalCandleCount = telemetry?.recentCandles?.length || 120;
+  const maxPanAllowed = Math.max(0, totalCandleCount - 15);
+
+  const handleZoomIn = () => setVisibleCount((prev) => Math.max(15, prev - 10));
+  const handleZoomOut = () => setVisibleCount((prev) => Math.min(Math.max(120, totalCandleCount), prev + 10));
+  const handlePanLeft = () => setPanOffset((prev) => Math.min(maxPanAllowed, prev + 8));
+  const handlePanRight = () => setPanOffset((prev) => Math.max(0, prev - 8));
+  const handleAutoFit = () => {
+    setVisibleCount(55);
+    setPanOffset(0);
+  };
+
   const handleWheelZoom = (e: React.WheelEvent<HTMLDivElement>) => {
     setVisibleCount((prev) => {
       const delta = e.deltaY > 0 ? 10 : -10;
-      return Math.min(120, Math.max(20, prev + delta));
+      return Math.min(Math.max(120, totalCandleCount), Math.max(15, prev + delta));
     });
   };
 
-  return (
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    setIsDraggingPan(true);
+    dragPanRef.current = { clientX: e.clientX, initialOffset: Math.min(panOffset, maxPanAllowed) };
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDraggingPan || !dragPanRef.current) return;
+    const dx = e.clientX - dragPanRef.current.clientX;
+    const barShift = Math.round(dx / 12);
+    setPanOffset(Math.max(0, Math.min(maxPanAllowed, dragPanRef.current.initialOffset + barShift)));
+  };
+
+  const handleCanvasMouseUp = () => {
+    setIsDraggingPan(false);
+    dragPanRef.current = null;
+  };
+
+  const visionCandles: Candle[] = useMemo(
+    () =>
+      (telemetry?.recentCandles || []).map((c) => ({
+        time: c.time,
+        timestamp: c.timestamp,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+      })),
+    [telemetry?.recentCandles]
+  );
+
+  const chartNode = (
     <div
       style={{ height: isFullscreen ? undefined : height }}
-      className={`relative w-full h-full flex flex-col rounded-xl overflow-hidden border border-terminal-border bg-terminal-950 transition-all ${
-        isFullscreen ? 'fixed inset-4 z-50 h-[calc(100vh-2rem)]' : ''
-      }`}
+      className={`${
+        isFullscreen
+          ? 'fixed inset-0 z-[9999] p-2 sm:p-4 bg-terminal-950/95 backdrop-blur-md'
+          : 'relative w-full h-full'
+      } flex flex-col transition-all`}
     >
-      {/* 1. Unrestricted Chart.js Control Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-terminal-900 border-b border-terminal-border text-xs font-mono shrink-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Interactive Symbol Search */}
-          <button
-            type="button"
-            onClick={() => setShowSymbolSearch(!showSymbolSearch)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-terminal-950 hover:bg-terminal-800 border border-cyan-500/40 text-white font-bold transition-colors shadow-sm"
-            title="Search any instrument (automatically syncs Chart.js stream, Research Engine & Chat Room)"
-          >
-            <Search className="w-3.5 h-3.5 text-cyan-400" />
-            <span>{canonicalSymbol}</span>
-            <span className="text-[10px] text-cyan-300 font-normal">({tvSymbol})</span>
-          </button>
-
-          {/* Timeframe Pills */}
-          <div className="flex items-center bg-terminal-950 rounded-lg border border-terminal-border p-0.5">
-            {TIMEFRAMES.map((tf) => (
-              <button
-                key={tf.id}
-                type="button"
-                onClick={() => handleSelectTimeframe(tf.id)}
-                className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                  timeframe.toLowerCase() === tf.id
-                    ? 'bg-cyan-600 text-white'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {tf.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Editable Indicators Library */}
-          {allowIndicatorsCustomization && (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowIndicatorsMenu(!showIndicatorsMenu)}
-                className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] font-semibold transition-colors ${
-                  showIndicatorsMenu
-                    ? 'bg-indigo-600/30 border-indigo-400 text-indigo-200'
-                    : 'bg-terminal-950 hover:bg-terminal-800 border-terminal-border text-slate-300'
-                }`}
-              >
-                <SlidersHorizontal className="w-3 h-3 text-cyan-400" />
-                <span>fx Indicators ({activeIndicators.length})</span>
-              </button>
-
-              {showIndicatorsMenu && (
-                <div className="absolute left-0 top-full mt-1.5 z-40 w-60 bg-terminal-900 border border-terminal-border rounded-xl shadow-2xl p-2 space-y-1">
-                  <div className="flex items-center justify-between px-2 py-1 border-b border-terminal-border/70 text-[10px] text-slate-400">
-                    <span>CHART.JS INDICATORS</span>
-                    <button
-                      type="button"
-                      onClick={() => setShowIndicatorsMenu(false)}
-                      className="text-slate-400 hover:text-white"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                  {AVAILABLE_INDICATORS.map((ind) => {
-                    const isOn = activeIndicators.includes(ind.id);
-                    return (
-                      <button
-                        key={ind.id}
-                        type="button"
-                        onClick={() => toggleIndicator(ind.id)}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded text-[11px] transition-colors ${
-                          isOn
-                            ? 'bg-cyan-950/60 text-cyan-300 border border-cyan-500/30'
-                            : 'text-slate-400 hover:bg-terminal-800 hover:text-slate-200'
-                        }`}
-                      >
-                        <span>{ind.label}</span>
-                        {isOn && <Check className="w-3.5 h-3.5 text-emerald-400" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Vision Atlas Proprietary Plugin Toggle */}
-          <button
-            type="button"
-            onClick={() => setEnableVisionAtlasPlugin(!enableVisionAtlasPlugin)}
-            className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition-colors ${
-              enableVisionAtlasPlugin
-                ? 'bg-purple-600/25 border-purple-500/50 text-purple-300'
-                : 'bg-terminal-950 border-terminal-border text-slate-400 hover:text-slate-200'
-            }`}
-            title="Toggle proprietary Vision Atlas SMC + Quantum Chart.js Plugin"
-          >
-            <Compass className="w-3 h-3" />
-            <span>Vision Atlas</span>
-          </button>
-
-          {/* AI Trade Plan Overlay Plugin Toggle */}
-          <button
-            type="button"
-            onClick={() => setEnableTradePlanPlugin(!enableTradePlanPlugin)}
-            className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition-colors ${
-              enableTradePlanPlugin
-                ? 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300'
-                : 'bg-terminal-950 border-terminal-border text-slate-400 hover:text-slate-200'
-            }`}
-            title="Overlay AI Entry Zone, Stop Loss & Targets on Chart.js"
-          >
-            <Crosshair className="w-3 h-3" />
-            <span>Levels</span>
-          </button>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          {/* Candles / Line Switch */}
-          <button
-            type="button"
-            onClick={() => setChartType(chartType === 'Candles' ? 'Line' : 'Candles')}
-            className="px-2 py-1 rounded bg-terminal-950 hover:bg-terminal-800 border border-terminal-border text-[10px] text-slate-300 flex items-center gap-1"
-            title="Toggle Candles / Line rendering"
-          >
-            {chartType === 'Candles' ? (
-              <>
-                <CandlestickChart className="w-3 h-3 text-emerald-400" />
-                <span>Candles</span>
-              </>
-            ) : (
-              <>
-                <BarChart3 className="w-3 h-3 text-cyan-400" />
-                <span>Line</span>
-              </>
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setVisibleCount(65)}
-            className="p-1 rounded bg-terminal-800 hover:bg-terminal-700 text-slate-300 hover:text-white transition-colors"
-            title="Reset Zoom"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsFullscreen(!isFullscreen)}
-            className="p-1 rounded bg-terminal-800 hover:bg-terminal-700 text-slate-300 hover:text-white transition-colors"
-            title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-          >
-            {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-          </button>
-        </div>
-      </div>
-
-      {/* 2. High-Frequency WebSocket Stream & Live OHLCV Strip */}
-      <div className="px-3 py-1 bg-terminal-950/95 border-b border-terminal-border/80 flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono shrink-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="flex items-center gap-1 text-emerald-400 font-bold">
-            <Radio className="w-3 h-3 animate-pulse" />
-            <span>{telemetry ? formatVal(hoveredOhlc?.c ?? telemetry.livePrice) : '...'}</span>
-          </span>
-          {telemetry && (
-            <>
-              <span className={`font-bold ${telemetry.changePercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                ({telemetry.changePercent >= 0 ? '+' : ''}{telemetry.changePercent}%)
-              </span>
-              <span className="text-slate-500">O:<span className="text-slate-300">{formatVal(hoveredOhlc?.o ?? telemetry.open)}</span></span>
-              <span className="text-slate-500">H:<span className="text-emerald-300">{formatVal(hoveredOhlc?.h ?? telemetry.high)}</span></span>
-              <span className="text-slate-500">L:<span className="text-rose-300">{formatVal(hoveredOhlc?.l ?? telemetry.low)}</span></span>
-              <span className="text-slate-500">C:<span className="text-white">{formatVal(hoveredOhlc?.c ?? telemetry.close)}</span></span>
-            </>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap text-slate-400">
-          {telemetry?.indicatorReadings.rsi14 !== undefined && (
-            <span>RSI: <strong className="text-cyan-300">{telemetry.indicatorReadings.rsi14}</strong></span>
-          )}
-          {telemetry?.indicatorReadings.ema20 !== undefined && (
-            <span>EMA20: <strong className="text-slate-200">{formatVal(telemetry.indicatorReadings.ema20)}</strong></span>
-          )}
-          {telemetry?.indicatorReadings.atr14 !== undefined && (
-            <span>ATR: <strong className="text-amber-300">{formatVal(telemetry.indicatorReadings.atr14)}</strong></span>
-          )}
-          <span className={`px-1.5 py-0.2 rounded border ${
-            streamStatus === 'RECONNECTING' || streamStatus === 'DEGRADED'
-              ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-              : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
-          }`}>
-            CHART.JS • {streamStatus === 'LIVE_WS' ? 'WS' : 'STREAM'} {streamLatencyMs}ms
-          </span>
-        </div>
-      </div>
-
-      {/* 3. Symbol Search Dropdown */}
-      {showSymbolSearch && (
-        <div className="absolute top-11 left-3 z-50 w-80 sm:w-96 bg-terminal-900 border border-cyan-500/40 rounded-xl shadow-2xl overflow-hidden font-mono text-xs">
-          <div className="p-2.5 border-b border-terminal-border flex items-center gap-2 bg-terminal-950">
-            <Search className="w-4 h-4 text-cyan-400 shrink-0" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  if (searchResults.length > 0 && searchQuery.trim()) {
-                    handleSelectInstrument(searchResults[0].symbol);
-                  } else if (searchQuery.trim()) {
-                    handleSelectInstrument(searchQuery);
-                  }
-                } else if (e.key === 'Escape') {
-                  setShowSymbolSearch(false);
-                }
-              }}
-              placeholder="Search ticker or name (e.g. NVDA, XAU/USD, EUR/USD)..."
-              className="flex-1 bg-transparent text-white text-xs focus:outline-none placeholder:text-slate-500"
-            />
-            {isSearching && <RefreshCw className="w-3.5 h-3.5 text-cyan-400 animate-spin" />}
+      <div className="relative w-full h-full flex flex-col rounded-xl overflow-hidden border border-terminal-border bg-terminal-950 shadow-2xl">
+        {/* 1. Unrestricted Chart.js Control Toolbar + Integrated Vision Atlas Tools */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-terminal-900 border-b border-terminal-border text-xs font-mono shrink-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Interactive Symbol Search */}
             <button
               type="button"
-              onClick={() => setShowSymbolSearch(false)}
-              className="text-slate-400 hover:text-white"
+              onClick={() => setShowSymbolSearch(!showSymbolSearch)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-terminal-950 hover:bg-terminal-800 border border-cyan-500/40 text-white font-bold transition-colors shadow-sm"
+              title="Search any instrument (automatically syncs Chart.js stream, Research Engine & Chat Room)"
             >
-              <X className="w-4 h-4" />
+              <Search className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{canonicalSymbol}</span>
+              <span className="text-[10px] text-cyan-300 font-normal hidden sm:inline">({tvSymbol})</span>
+            </button>
+
+            {/* Timeframe Pills */}
+            <div className="flex items-center bg-terminal-950 rounded-lg border border-terminal-border p-0.5">
+              {TIMEFRAMES.map((tf) => (
+                <button
+                  key={tf.id}
+                  type="button"
+                  onClick={() => handleSelectTimeframe(tf.id)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${
+                    timeframe.toLowerCase() === tf.id
+                      ? 'bg-cyan-600 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {tf.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Editable Indicators Library */}
+            {allowIndicatorsCustomization && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowIndicatorsMenu(!showIndicatorsMenu)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-semibold transition-colors ${
+                    showIndicatorsMenu
+                      ? 'bg-indigo-600/30 border-indigo-400 text-indigo-200'
+                      : 'bg-terminal-950 hover:bg-terminal-800 border-terminal-border text-slate-300'
+                  }`}
+                >
+                  <SlidersHorizontal className="w-3 h-3 text-cyan-400" />
+                  <span>Indicators ({activeIndicators.length})</span>
+                </button>
+
+                {showIndicatorsMenu && (
+                  <div className="absolute left-0 top-full mt-1.5 z-40 w-60 bg-terminal-900 border border-terminal-border rounded-xl shadow-2xl p-2 space-y-1">
+                    <div className="flex items-center justify-between px-2 py-1 border-b border-terminal-border/70 text-[10px] text-slate-400">
+                      <span>CHART.JS INDICATORS</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowIndicatorsMenu(false)}
+                        className="text-slate-400 hover:text-white"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    {AVAILABLE_INDICATORS.map((ind) => {
+                      const isOn = activeIndicators.includes(ind.id);
+                      return (
+                        <button
+                          key={ind.id}
+                          type="button"
+                          onClick={() => toggleIndicator(ind.id)}
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded text-[11px] transition-colors ${
+                            isOn
+                              ? 'bg-cyan-950/60 text-cyan-300 border border-cyan-500/30'
+                              : 'text-slate-400 hover:bg-terminal-800 hover:text-slate-200'
+                          }`}
+                        >
+                          <span>{ind.label}</span>
+                          {isOn && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Synchronized Vision Atlas Tool Suite */}
+            <button
+              type="button"
+              onClick={() => setEnableVisionAtlasPlugin(!enableVisionAtlasPlugin)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition-colors ${
+                enableVisionAtlasPlugin
+                  ? 'bg-purple-600/25 border-purple-500/50 text-purple-300'
+                  : 'bg-terminal-950 border-terminal-border text-slate-400 hover:text-slate-200'
+              }`}
+              title="Toggle Vision Atlas Chart Overlays"
+            >
+              <Compass className="w-3 h-3" />
+              <span>Atlas</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowQuantumDrawer((p) => !p)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition-colors ${
+                showQuantumDrawer
+                  ? 'bg-cyan-600/25 border-cyan-400 text-cyan-200'
+                  : 'bg-terminal-950 border-terminal-border text-slate-400 hover:text-slate-200'
+              }`}
+              title="Open Quantum Vision Monte Carlo Drawer"
+            >
+              <Sparkles className="w-3 h-3" />
+              <span>Quantum</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowLiquidityModal((p) => !p)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition-colors ${
+                showLiquidityModal
+                  ? 'bg-blue-600/25 border-blue-400 text-blue-200'
+                  : 'bg-terminal-950 border-terminal-border text-slate-400 hover:text-slate-200'
+              }`}
+              title="Open Live Liquidity Heatmap"
+            >
+              <Droplets className="w-3 h-3" />
+              <span>Liquidity</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveVisionPanel((p) => (p === 'lab' ? 'none' : 'lab'))}
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition-colors ${
+                activeVisionPanel === 'lab'
+                  ? 'bg-amber-600/25 border-amber-400 text-amber-200'
+                  : 'bg-terminal-950 border-terminal-border text-slate-400 hover:text-slate-200'
+              }`}
+              title="Open Docked Vision Atlas Lab"
+            >
+              <Compass className="w-3 h-3" />
+              <span>Lab</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveVisionPanel((p) => (p === 'dna' ? 'none' : 'dna'))}
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition-colors ${
+                activeVisionPanel === 'dna'
+                  ? 'bg-pink-600/25 border-pink-400 text-pink-200'
+                  : 'bg-terminal-950 border-terminal-border text-slate-400 hover:text-slate-200'
+              }`}
+              title="Open Docked Market DNA Analyzer"
+            >
+              <Dna className="w-3 h-3" />
+              <span>DNA</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setEnableTradePlanPlugin(!enableTradePlanPlugin)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition-colors ${
+                enableTradePlanPlugin
+                  ? 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300'
+                  : 'bg-terminal-950 border-terminal-border text-slate-400 hover:text-slate-200'
+              }`}
+              title="Overlay AI Entry Zone, Stop Loss & Targets on Chart.js"
+            >
+              <Crosshair className="w-3 h-3" />
+              <span>Levels</span>
             </button>
           </div>
 
-          <div className="max-h-64 overflow-y-auto divide-y divide-terminal-border/40 custom-scrollbar">
-            {searchResults.map((item) => (
-              <button
-                key={item.tvSymbol}
-                type="button"
-                onClick={() => handleSelectInstrument(item.symbol)}
-                className="w-full px-3 py-2 flex items-center justify-between hover:bg-terminal-800 text-left transition-colors"
-              >
-                <div>
-                  <div className="font-bold text-white flex items-center gap-1.5">
-                    <span>{item.symbol}</span>
-                    <span className="text-[10px] text-cyan-400 font-normal">{item.tvSymbol}</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400 truncate max-w-[210px]">{item.description}</div>
-                </div>
-                <span className="px-1.5 py-0.5 rounded bg-terminal-950 border border-terminal-border text-[9px] text-slate-300 uppercase">
-                  {item.exchange}
-                </span>
-              </button>
-            ))}
+          <div className="flex items-center gap-1">
+            {/* Candles / Line Switch */}
+            <button
+              type="button"
+              onClick={() => setChartType(chartType === 'Candles' ? 'Line' : 'Candles')}
+              className="px-2 py-1 rounded bg-terminal-950 hover:bg-terminal-800 border border-terminal-border text-[10px] text-slate-300 flex items-center gap-1"
+              title="Toggle Candles / Line rendering"
+            >
+              {chartType === 'Candles' ? (
+                <>
+                  <CandlestickChart className="w-3 h-3 text-emerald-400" />
+                  <span>Candles</span>
+                </>
+              ) : (
+                <>
+                  <BarChart3 className="w-3 h-3 text-cyan-400" />
+                  <span>Line</span>
+                </>
+              )}
+            </button>
+
+            {/* Intuitive Pan & Zoom Controls */}
+            <button
+              type="button"
+              onClick={handlePanLeft}
+              className="p-1 rounded bg-terminal-800 hover:bg-terminal-700 text-slate-300 hover:text-white transition-colors"
+              title="Pan Left"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={handlePanRight}
+              disabled={panOffset === 0}
+              className="p-1 rounded bg-terminal-800 hover:bg-terminal-700 text-slate-300 hover:text-white transition-colors disabled:opacity-40"
+              title="Pan Right to Live"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={handleZoomIn}
+              className="p-1 rounded bg-terminal-800 hover:bg-terminal-700 text-slate-300 hover:text-white transition-colors"
+              title="Zoom In (Granular Price Action)"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={handleZoomOut}
+              className="p-1 rounded bg-terminal-800 hover:bg-terminal-700 text-slate-300 hover:text-white transition-colors"
+              title="Zoom Out (Broad Trend)"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={handleAutoFit}
+              className="p-1 rounded bg-terminal-800 hover:bg-terminal-700 text-slate-300 hover:text-white transition-colors"
+              title="Auto-Fit & Reset View"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              className="px-2 py-1 rounded bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-300 hover:text-white transition-colors flex items-center gap-1 text-[10px] font-bold"
+              title={isFullscreen ? 'Exit Fullscreen (Esc)' : 'Enter Fullscreen Mode'}
+            >
+              {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">{isFullscreen ? 'Exit' : 'Full'}</span>
+            </button>
           </div>
         </div>
-      )}
 
-      {/* 4. Unrestricted Open-Source Chart.js Canvas Viewport */}
-      <div
-        onWheel={handleWheelZoom}
-        className="relative flex-1 min-h-0 w-full bg-terminal-950 p-1.5"
-      >
-        {!telemetry && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-terminal-950/90 text-cyan-400 font-mono text-xs gap-2">
-            <RefreshCw className="w-5 h-5 animate-spin" />
-            <span>INITIALIZING CHART.JS STREAMING FEED ({canonicalSymbol})...</span>
+        {/* 2. High-Frequency WebSocket Stream & Live OHLCV Strip */}
+        <div className="px-3 py-1 bg-terminal-950/95 border-b border-terminal-border/80 flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono shrink-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="flex items-center gap-1 text-emerald-400 font-bold">
+              <Radio className="w-3 h-3 animate-pulse" />
+              <span>{telemetry ? formatVal(hoveredOhlc?.c ?? telemetry.livePrice) : '...'}</span>
+            </span>
+            {telemetry && (
+              <>
+                <span className={`font-bold ${telemetry.changePercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  ({telemetry.changePercent >= 0 ? '+' : ''}{telemetry.changePercent}%)
+                </span>
+                <span className="text-slate-500">O:<span className="text-slate-300">{formatVal(hoveredOhlc?.o ?? telemetry.open)}</span></span>
+                <span className="text-slate-500">H:<span className="text-emerald-300">{formatVal(hoveredOhlc?.h ?? telemetry.high)}</span></span>
+                <span className="text-slate-500">L:<span className="text-rose-300">{formatVal(hoveredOhlc?.l ?? telemetry.low)}</span></span>
+                <span className="text-slate-500">C:<span className="text-white">{formatVal(hoveredOhlc?.c ?? telemetry.close)}</span></span>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap text-slate-400">
+            {telemetry?.indicatorReadings.rsi14 !== undefined && (
+              <span>RSI: <strong className="text-cyan-300">{telemetry.indicatorReadings.rsi14}</strong></span>
+            )}
+            {telemetry?.indicatorReadings.ema20 !== undefined && (
+              <span>EMA20: <strong className="text-slate-200">{formatVal(telemetry.indicatorReadings.ema20)}</strong></span>
+            )}
+            {telemetry?.indicatorReadings.atr14 !== undefined && (
+              <span>ATR: <strong className="text-amber-300">{formatVal(telemetry.indicatorReadings.atr14)}</strong></span>
+            )}
+            <span className={`px-1.5 py-0.2 rounded border ${
+              streamStatus === 'RECONNECTING' || streamStatus === 'DEGRADED'
+                ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+            }`}>
+              CHART.JS • {streamStatus === 'LIVE_WS' ? 'WS' : 'STREAM'} {streamLatencyMs}ms
+            </span>
+          </div>
+        </div>
+
+        {/* 3. Symbol Search Dropdown */}
+        {showSymbolSearch && (
+          <div className="absolute top-11 left-3 z-50 w-80 sm:w-96 bg-terminal-900 border border-cyan-500/40 rounded-xl shadow-2xl overflow-hidden font-mono text-xs">
+            <div className="p-2.5 border-b border-terminal-border flex items-center gap-2 bg-terminal-950">
+              <Search className="w-4 h-4 text-cyan-400 shrink-0" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (searchResults.length > 0 && searchQuery.trim()) {
+                      handleSelectInstrument(searchResults[0].symbol);
+                    } else if (searchQuery.trim()) {
+                      handleSelectInstrument(searchQuery);
+                    }
+                  } else if (e.key === 'Escape') {
+                    setShowSymbolSearch(false);
+                  }
+                }}
+                placeholder="Search ticker or name (e.g. NVDA, XAU/USD, EUR/USD)..."
+                className="flex-1 bg-transparent text-white text-xs focus:outline-none placeholder:text-slate-500"
+              />
+              {isSearching && <RefreshCw className="w-3.5 h-3.5 text-cyan-400 animate-spin" />}
+              <button
+                type="button"
+                onClick={() => setShowSymbolSearch(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="max-h-64 overflow-y-auto divide-y divide-terminal-border/40 custom-scrollbar">
+              {searchResults.map((item) => (
+                <button
+                  key={item.tvSymbol}
+                  type="button"
+                  onClick={() => handleSelectInstrument(item.symbol)}
+                  className="w-full px-3 py-2 flex items-center justify-between hover:bg-terminal-800 text-left transition-colors"
+                >
+                  <div>
+                    <div className="font-bold text-white flex items-center gap-1.5">
+                      <span>{item.symbol}</span>
+                      <span className="text-[10px] text-cyan-400 font-normal">{item.tvSymbol}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 truncate max-w-[210px]">{item.description}</div>
+                  </div>
+                  <span className="px-1.5 py-0.5 rounded bg-terminal-950 border border-terminal-border text-[9px] text-slate-300 uppercase">
+                    {item.exchange}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
-        <canvas ref={canvasRef} className="w-full h-full" />
+
+        {/* 4. Unrestricted Open-Source Chart.js Canvas Viewport + Integrated Vision Atlas Drawers */}
+        <div className="relative flex-1 min-h-0 flex overflow-hidden bg-terminal-950">
+          <QuantumVisionDrawer
+            isOpen={showQuantumDrawer}
+            onClose={() => setShowQuantumDrawer(false)}
+            horizonCandles={quantumHorizon}
+            onChangeHorizon={setQuantumHorizon}
+            theme={theme}
+            pair={canonicalSymbol as CurrencyPair}
+            timeframe={timeframe}
+            livePrice={telemetry?.livePrice}
+            candles={visionCandles}
+            report={activeReport}
+          />
+
+          <LiquidityHeatmapModal
+            isOpen={showLiquidityModal}
+            onClose={() => setShowLiquidityModal(false)}
+            pair={canonicalSymbol as CurrencyPair}
+            timeframe={timeframe}
+            theme={theme}
+            livePrice={telemetry?.livePrice}
+            candles={visionCandles}
+            report={activeReport}
+          />
+
+          <div
+            onWheel={handleWheelZoom}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleCanvasMouseUp}
+            onMouseLeave={handleCanvasMouseUp}
+            className={`relative flex-1 min-w-0 min-h-0 bg-terminal-950 px-3 py-2 select-none ${
+              isDraggingPan ? 'cursor-grabbing' : 'cursor-grab'
+            }`}
+          >
+            {!telemetry && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-terminal-950/90 text-cyan-400 font-mono text-xs gap-2">
+                <RefreshCw className="w-5 h-5 animate-spin" />
+                <span>INITIALIZING CHART.JS STREAMING FEED ({canonicalSymbol})...</span>
+              </div>
+            )}
+            <canvas ref={canvasRef} className="w-full h-full" />
+          </div>
+
+          {activeVisionPanel !== 'none' && (
+            <div className="w-[270px] sm:w-[300px] shrink-0 border-l border-terminal-border bg-terminal-950 flex flex-col min-h-0">
+              {activeVisionPanel === 'lab' ? (
+                <VisionAtlasLabSidebar
+                  pair={canonicalSymbol as CurrencyPair}
+                  timeframe={timeframe}
+                  theme={theme}
+                  livePrice={telemetry?.livePrice}
+                  candles={visionCandles}
+                  report={activeReport}
+                  onSimulate={() => setShowQuantumDrawer(true)}
+                />
+              ) : (
+                <MarketDnaSidebar
+                  pair={canonicalSymbol as CurrencyPair}
+                  timeframe={timeframe}
+                  theme={theme}
+                  livePrice={telemetry?.livePrice}
+                  candles={visionCandles}
+                  report={activeReport}
+                  onToggleChartMode={setChartType}
+                />
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
+
+  if (isFullscreen && typeof document !== 'undefined') {
+    return createPortal(chartNode, document.body);
+  }
+  return chartNode;
 });
 
 ChartJsResearchChart.displayName = 'ChartJsResearchChart';

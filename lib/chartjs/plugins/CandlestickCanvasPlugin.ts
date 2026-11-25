@@ -69,7 +69,8 @@ export function createCandlestickCanvasPlugin(): Plugin {
 
       // Draw Live Price Line
       const liveY = yScale.getPixelForValue(data.livePrice);
-      if (liveY >= chartArea.top && liveY <= chartArea.bottom) {
+      const clampedLiveY = Math.max(chartArea.top + 8, Math.min(chartArea.bottom - 8, liveY));
+      if (liveY >= chartArea.top - 2 && liveY <= chartArea.bottom + 2) {
         const last = candles[candles.length - 1];
         const isUp = data.livePrice >= (last?.open ?? data.livePrice);
         const lineColor = isUp ? '#10b981' : '#ef4444';
@@ -78,21 +79,21 @@ export function createCandlestickCanvasPlugin(): Plugin {
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 3]);
         ctx.beginPath();
-        ctx.moveTo(chartArea.left, liveY);
-        ctx.lineTo(chartArea.right, liveY);
+        ctx.moveTo(chartArea.left, clampedLiveY);
+        ctx.lineTo(chartArea.right, clampedLiveY);
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Price Badge on right edge of plot
+        // Price Badge neatly inset from right edge so it never clips
         const label = data.livePrice.toFixed(data.priceDecimals);
         ctx.font = 'bold 10px "JetBrains Mono", monospace';
         const textW = ctx.measureText(label).width + 10;
-        const badgeX = chartArea.right - textW - 2;
-        const badgeY = Math.max(chartArea.top + 2, Math.min(chartArea.bottom - 18, liveY - 9));
+        const badgeX = Math.max(chartArea.left + 6, chartArea.right - textW - 6);
+        const badgeY = Math.max(chartArea.top + 4, Math.min(chartArea.bottom - 20, clampedLiveY - 9));
 
         ctx.fillStyle = lineColor;
         ctx.fillRect(badgeX, badgeY, textW, 17);
-        ctx.fillStyle = isLight ? '#ffffff' : '#ffffff';
+        ctx.fillStyle = '#ffffff';
         ctx.fillText(label, badgeX + 5, badgeY + 12);
       }
 

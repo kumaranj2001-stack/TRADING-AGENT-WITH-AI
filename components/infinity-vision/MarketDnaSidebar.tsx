@@ -12,10 +12,9 @@ import {
   Sliders,
   ChevronDown
 } from 'lucide-react';
-import { CurrencyPair } from '@/lib/types';
-import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
-import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
-import { BASE_PRICES } from '@/lib/marketData';
+import { Candle, CurrencyPair } from '@/lib/types';
+import { ResearchReportSnapshot } from '@/lib/research/types';
+import { computeLiveVisionAtlasSnapshot } from '@/lib/research/VisionAtlasLiveAnalytics';
 
 export interface MarketDnaSidebarProps {
   pair: CurrencyPair;
@@ -24,6 +23,8 @@ export interface MarketDnaSidebarProps {
   onTogglePatternOnChart?: (on: boolean) => void;
   onToggleChartMode?: (mode: 'Candles' | 'Line') => void;
   livePrice?: number;
+  candles?: Candle[];
+  report?: ResearchReportSnapshot | null;
 }
 
 export const MarketDnaSidebar: React.FC<MarketDnaSidebarProps> = ({
@@ -33,13 +34,19 @@ export const MarketDnaSidebar: React.FC<MarketDnaSidebarProps> = ({
   onTogglePatternOnChart,
   onToggleChartMode,
   livePrice: propLivePrice,
+  candles = [],
+  report = null,
 }) => {
   const isLight = theme === 'light';
-  const isXau = pair.includes('XAU');
-  const isJpy = pair.includes('JPY');
-  const isIndian = pair === 'NIFTY 50' || pair === 'BANK NIFTY';
-  const decimals = isJpy ? 3 : (isXau || isIndian) ? 2 : 5;
-  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
+  const vaSnapshot = computeLiveVisionAtlasSnapshot({
+    pair,
+    timeframe,
+    livePrice: propLivePrice,
+    candles,
+    report,
+  });
+  const decimals = vaSnapshot.priceDecimals;
+  const activePrice = vaSnapshot.livePrice;
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'twins' | 'entry' | 'stats' | 'confirmation' | 'replay'>('overview');
   const [patternLength, setPatternLength] = useState<number>(40);
   const [outcomeLength, setOutcomeLength] = useState<number>(20);
@@ -194,34 +201,36 @@ export const MarketDnaSidebar: React.FC<MarketDnaSidebarProps> = ({
               </div>
 
               <div className="space-y-1 text-[11px] font-mono">
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-2">
                   <span className="text-slate-500">Liquidity sweep:</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200">
-                    {isXau ? 'Sell-side swept at 3998.47 - 3 candles ago' : 'Sell-side swept at recent low'}
+                  <span className="font-bold text-slate-800 dark:text-slate-200 text-right">
+                    {vaSnapshot.sweepSummary}
                   </span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-2">
                   <span className="text-slate-500">Structure:</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200">MSS (CHoCH) bearish - not confirming yet</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200 text-right">{vaSnapshot.structureSummary}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Analysis confidence:</span>
-                  <span className="font-bold text-amber-600">Low</span>
+                  <span className={`font-bold ${vaSnapshot.confidenceLabel === 'High' ? 'text-emerald-500' : vaSnapshot.confidenceLabel === 'Medium' ? 'text-cyan-500' : 'text-amber-600'}`}>
+                    {vaSnapshot.confidenceLabel} ({vaSnapshot.marketDna.similarityScore}% DNA)
+                  </span>
                 </div>
               </div>
 
               {/* Probability Split Bar */}
               <div className="space-y-1 pt-1">
                 <div className="flex justify-between text-[10px] font-bold font-mono">
-                  <span className="text-emerald-600">Bullish 47%</span>
-                  <span className="text-rose-600">Bearish 53%</span>
+                  <span className="text-emerald-600">Bullish {vaSnapshot.bullishPct}%</span>
+                  <span className="text-rose-600">Bearish {vaSnapshot.bearishPct}%</span>
                 </div>
                 <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-terminal-800 overflow-hidden flex">
-                  <div className="bg-emerald-500 h-full" style={{ width: '47%' }} />
-                  <div className="bg-rose-500 h-full" style={{ width: '53%' }} />
+                  <div className="bg-emerald-500 h-full transition-all" style={{ width: `${vaSnapshot.bullishPct}%` }} />
+                  <div className="bg-rose-500 h-full transition-all" style={{ width: `${vaSnapshot.bearishPct}%` }} />
                 </div>
                 <p className="text-[9px] text-slate-400 leading-tight">
-                  Measured on 50 past sell-side sweeps of this chart (first move of &gt;1 ATR within 12 candles). Not a guarantee.
+                  {vaSnapshot.marketDna.matchedRegime} • Golden Pocket [{vaSnapshot.marketDna.goldenPocketLow.toFixed(decimals)} - {vaSnapshot.marketDna.goldenPocketHigh.toFixed(decimals)}].
                 </p>
               </div>
 
@@ -229,64 +238,48 @@ export const MarketDnaSidebar: React.FC<MarketDnaSidebarProps> = ({
               <div className="pt-2 border-t border-slate-200 dark:border-terminal-border space-y-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase block">Possible reaction zones</span>
                 <div className="space-y-1 text-[11px] font-mono">
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-rose-500" />
-                      <span className="text-slate-700 dark:text-slate-300">Sell-limit zone</span>
-                    </span>
-                    <span className="font-bold text-slate-900 dark:text-white">
-                      {(activePrice * 1.001).toFixed(decimals)} - {(activePrice * 1.003).toFixed(decimals)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-amber-700" />
-                      <span className="text-slate-700 dark:text-slate-300">Sell-limit zone 2</span>
-                    </span>
-                    <span className="font-bold text-slate-900 dark:text-white">
-                      {(activePrice * 1.005).toFixed(decimals)} - {(activePrice * 1.008).toFixed(decimals)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-blue-500" />
-                      <span className="text-slate-700 dark:text-slate-300">Sell-side liquidity</span>
-                    </span>
-                    <span className="font-bold text-slate-900 dark:text-white">
-                      {(activePrice * 0.997).toFixed(decimals)} - {(activePrice * 0.999).toFixed(decimals)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-blue-700" />
-                      <span className="text-slate-700 dark:text-slate-300">Buy-limit zone</span>
-                    </span>
-                    <span className="font-bold text-slate-900 dark:text-white">
-                      {(activePrice * 0.991).toFixed(decimals)} - {(activePrice * 0.995).toFixed(decimals)}
-                    </span>
-                  </div>
+                  {vaSnapshot.zones.map((z) => {
+                    const dotColor =
+                      z.tone === 'rose'
+                        ? 'bg-rose-500'
+                        : z.tone === 'amber'
+                        ? 'bg-amber-600'
+                        : z.tone === 'cyan'
+                        ? 'bg-cyan-500'
+                        : 'bg-emerald-500';
+                    return (
+                      <div key={z.id} className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${dotColor}`} />
+                          <span className="text-slate-700 dark:text-slate-300">{z.name}</span>
+                        </span>
+                        <span className="font-bold text-slate-900 dark:text-white">
+                          {z.min.toFixed(decimals)} - {z.max.toFixed(decimals)}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
                 <p className="text-[9px] text-slate-400 italic pt-1">
-                  Entry areas, invalidation and targets appear only when a sweep, a structure confirmation and enough history agree.
+                  Zones calibrated strictly to live {pair} spot ({activePrice.toFixed(decimals)}) and active ATR ({vaSnapshot.atr14.toFixed(decimals)}).
                 </p>
               </div>
             </div>
 
-            {/* CANDLE 15M / RESEARCH STATUS */}
+            {/* CANDLE TIMEFRAME / RESEARCH STATUS */}
             <div className="p-2.5 rounded-lg border border-slate-200 dark:border-terminal-border space-y-2">
               <div className="flex items-center justify-between text-[11px] font-mono">
                 <div>
-                  <span className="text-slate-500 text-[10px] uppercase block">CANDLE 15M</span>
+                  <span className="text-slate-500 text-[10px] uppercase block">CANDLE {timeframe.toUpperCase()}</span>
                   <strong className="text-slate-900 dark:text-white font-bold">{formattedTimer} FORMING</strong>
                 </div>
 
                 <div className="text-right">
                   <span className="text-slate-500 text-[10px] uppercase block">RESEARCH</span>
-                  <span className="text-amber-600 font-bold">WAITING</span>
-                  <span className="text-[9px] text-slate-400 block -mt-0.5">last confirmed 22:15</span>
+                  <span className={report ? 'text-emerald-500 font-bold' : 'text-amber-600 font-bold'}>
+                    {report ? `GRADE ${report.grade} (${report.compositeScore}/100)` : 'LIVE STREAM'}
+                  </span>
+                  <span className="text-[9px] text-slate-400 block -mt-0.5">last tick {vaSnapshot.lastConfirmedTime}</span>
                 </div>
               </div>
 
@@ -305,37 +298,35 @@ export const MarketDnaSidebar: React.FC<MarketDnaSidebarProps> = ({
             <div className="p-2.5 rounded-lg border border-slate-200 dark:border-terminal-border space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold text-slate-500 uppercase">RESEARCH STATUS</span>
-                <span className="text-[11px] font-bold text-slate-900 dark:text-white">DEVELOPING SETUP</span>
+                <span className="text-[11px] font-bold text-slate-900 dark:text-white">
+                  {report ? `AI GRADE ${report.grade} (${report.compositeScore}/100)` : 'DEVELOPING SETUP'}
+                </span>
               </div>
 
               <p className="text-[10px] text-slate-600 dark:text-slate-400 italic">
-                Historical bias: <strong>bullish</strong> - a description of what similar past patterns did, not a forecast or a trade instruction.
+                Historical bias: <strong>{vaSnapshot.bullishPct >= vaSnapshot.bearishPct ? 'bullish' : 'bearish'}</strong> ({Math.max(vaSnapshot.bullishPct, vaSnapshot.bearishPct)}%) — descriptive match to live stream structure.
               </p>
 
               <div className="space-y-1 pt-1 text-[10px] font-sans border-t border-slate-200 dark:border-terminal-border">
                 <div className="flex justify-between">
                   <span className="text-slate-500">Market condition:</span>
-                  <span className="text-right font-medium max-w-[190px]">Structural transition - sideways - quiet volatility</span>
+                  <span className="text-right font-medium max-w-[190px]">{vaSnapshot.structureSummary}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Market regime:</span>
-                  <span className="font-medium">Structural transition</span>
+                  <span className="font-medium">{vaSnapshot.marketDna.matchedRegime}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Session:</span>
-                  <span className="font-medium">London / New York overlap</span>
+                  <span className="text-slate-500">Live RSI (14) / EMA20:</span>
+                  <span className="font-medium font-mono">{vaSnapshot.rsi14} / {vaSnapshot.ema20.toFixed(decimals)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Volatility:</span>
-                  <span className="font-medium">Quiet</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Candle strength:</span>
-                  <span className="font-medium">Moderate</span>
+                  <span className="text-slate-500">ATR (14) volatility:</span>
+                  <span className="font-medium font-mono">{vaSnapshot.atr14.toFixed(decimals)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Historical similarity:</span>
-                  <span className="font-bold text-amber-600">67.3</span>
+                  <span className="font-bold text-amber-600">{vaSnapshot.marketDna.similarityScore}%</span>
                 </div>
               </div>
             </div>

@@ -80,22 +80,25 @@ export function createVisionAtlasOverlayPlugin(): Plugin {
         for (const z of zones) {
           const yTop = yScale.getPixelForValue(z.max);
           const yBot = yScale.getPixelForValue(z.min);
-          const top = Math.min(yTop, yBot);
-          const h = Math.max(8, Math.abs(yBot - yTop));
+          const top = Math.max(chartArea.top + 2, Math.min(yTop, yBot));
+          const bot = Math.min(chartArea.bottom - 2, Math.max(yTop, yBot));
+          const h = Math.max(8, bot - top);
+          if (bot < chartArea.top + 4 || top > chartArea.bottom - 4) continue;
 
           ctx.fillStyle = z.fill;
-          ctx.fillRect(chartArea.left, top, chartArea.right - chartArea.left, h);
+          ctx.fillRect(chartArea.left + 4, top, Math.max(10, chartArea.right - chartArea.left - 8), h);
           ctx.strokeStyle = z.stroke;
           ctx.lineWidth = 1;
           ctx.setLineDash([4, 2]);
-          ctx.strokeRect(chartArea.left, top, chartArea.right - chartArea.left, h);
+          ctx.strokeRect(chartArea.left + 4, top, Math.max(10, chartArea.right - chartArea.left - 8), h);
           ctx.setLineDash([]);
 
           ctx.fillStyle = z.text;
+          const labelY = Math.max(chartArea.top + 12, Math.min(chartArea.bottom - 6, top + 11));
           ctx.fillText(
             `${z.name} [${z.min.toFixed(dec)} - ${z.max.toFixed(dec)}]`,
-            chartArea.left + 8,
-            top + 11
+            chartArea.left + 10,
+            labelY
           );
         }
       }
@@ -276,23 +279,27 @@ export function createVisionAtlasOverlayPlugin(): Plugin {
         ctx.fillText('CHoCH Floor', chartArea.right - 90, yCh + 2);
       }
 
-      // 5. Quantum Vision 3-Path Volatility Fan Cone
+      // 5. Quantum Vision 3-Path Volatility Fan Cone (anchored into right-side future margin slots)
       if (va.showQuantumFan) {
         const lastIdx = candles.length - 1;
         const lastX = xScale.getPixelForValue(lastIdx);
         const lastY = yScale.getPixelForValue(data.livePrice);
-        const stepPx = Math.max(8, (chartArea.right - chartArea.left) / Math.max(12, candles.length));
-        const horizon = va.horizonCandles || 6;
+        const totalLabels = Array.isArray(chart.data.labels) ? chart.data.labels.length : candles.length;
+        const availableFutureSlots = Math.max(0, totalLabels - candles.length);
+        const horizon = Math.min(va.horizonCandles || 6, Math.max(availableFutureSlots, 4));
+        const stepPx = Math.max(10, (chartArea.right - chartArea.left) / Math.max(12, totalLabels));
 
         const upperPts: Array<{ x: number; y: number }> = [{ x: lastX, y: lastY }];
         const medianPts: Array<{ x: number; y: number }> = [{ x: lastX, y: lastY }];
         const lowerPts: Array<{ x: number; y: number }> = [{ x: lastX, y: lastY }];
 
         for (let i = 1; i <= horizon; i++) {
-          const px = Math.min(chartArea.right - 10, lastX + i * stepPx * 0.9);
-          upperPts.push({ x: px, y: lastY - i * 4.5 - Math.sin(i) * 2 });
-          medianPts.push({ x: px, y: lastY - i * 0.8 + Math.cos(i) * 1.5 });
-          lowerPts.push({ x: px, y: lastY + i * 4.5 + Math.sin(i * 1.2) * 2 });
+          const targetSlot = lastIdx + i;
+          const slotX = targetSlot < totalLabels ? xScale.getPixelForValue(targetSlot) : lastX + i * stepPx * 0.85;
+          const px = Math.min(chartArea.right - 8, slotX);
+          upperPts.push({ x: px, y: Math.max(chartArea.top + 8, lastY - i * 4.2 - Math.sin(i) * 1.5) });
+          medianPts.push({ x: px, y: Math.max(chartArea.top + 8, Math.min(chartArea.bottom - 8, lastY - i * 0.7 + Math.cos(i) * 1.2)) });
+          lowerPts.push({ x: px, y: Math.min(chartArea.bottom - 8, lastY + i * 4.2 + Math.sin(i * 1.2) * 1.5) });
         }
 
         // Shaded Probability Cloud

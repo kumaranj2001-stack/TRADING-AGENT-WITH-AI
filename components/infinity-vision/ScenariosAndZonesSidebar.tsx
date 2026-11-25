@@ -14,10 +14,11 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { CurrencyPair, Candle } from '@/lib/types';
+import { ResearchReportSnapshot } from '@/lib/research/types';
+import { computeLiveVisionAtlasSnapshot } from '@/lib/research/VisionAtlasLiveAnalytics';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
 import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 import { visionSystemLogger } from '@/lib/visionSystemLogger';
-import { BASE_PRICES } from '@/lib/marketData';
 
 export interface ScenariosAndZonesSidebarProps {
   pair: CurrencyPair;
@@ -25,6 +26,7 @@ export interface ScenariosAndZonesSidebarProps {
   theme?: 'light' | 'dark';
   currentPrice?: number;
   candles?: Candle[];
+  report?: ResearchReportSnapshot | null;
   onSyncToTerminal?: (params: {
     symbol: CurrencyPair;
     direction: 'BUY' | 'SELL';
@@ -39,33 +41,44 @@ export const ScenariosAndZonesSidebar: React.FC<ScenariosAndZonesSidebarProps> =
   timeframe,
   theme = 'light',
   currentPrice,
-  candles,
+  candles = [],
+  report = null,
   onSyncToTerminal,
 }) => {
   const isLight = theme === 'light';
   const [activeTab, setActiveTab] = useState<'Strength' | 'Scenarios & Zones' | 'Structure'>('Scenarios & Zones');
   const [selectedScenario, setSelectedScenario] = useState<string>('Follow market bias');
 
-  const isXau = pair.includes('XAU');
-  const priceDecimals = pair.includes('JPY') ? 3 : (pair.includes('USD') && !isXau) ? 5 : (pair.includes('NIFTY') || isXau) ? 2 : 4;
-  
-  // Real-time authoritative price from terminal feed or prop
-  const activePrice = currentPrice || LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
+  const activePriceInput =
+    currentPrice ||
+    LiveMarketFeedManager.getCanonicalPrice(pair) ||
+    liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
+  const vaSnapshot = computeLiveVisionAtlasSnapshot({
+    pair,
+    timeframe,
+    livePrice: activePriceInput,
+    candles,
+    report,
+  });
+  const priceDecimals = vaSnapshot.priceDecimals;
+  const activePrice = vaSnapshot.livePrice;
+
+  const safeZone = vaSnapshot.zones.find(z => z.id === 'safe')!;
+  const entryZone = vaSnapshot.zones.find(z => z.id === 'entry')!;
+  const cautionZone = vaSnapshot.zones.find(z => z.id === 'caution')!;
+  const dangerZone = vaSnapshot.zones.find(z => z.id === 'danger')!;
+
+  const safeMin = safeZone.min;
+  const safeMax = safeZone.max;
+  const entryMin = entryZone.min;
+  const entryMax = entryZone.max;
+  const cautionMin = cautionZone.min;
+  const cautionMax = cautionZone.max;
+  const dangerMin = dangerZone.min;
+  const dangerMax = dangerZone.max;
+
   const recentLogs = visionSystemLogger.getRecentLogs();
   const latestLog = recentLogs.find(l => l.pair === pair) || recentLogs[recentLogs.length - 1];
-
-  // Dynamic institutional zones grounded in live market pricing
-  const safeMin = latestLog?.anticipatedLiquidityZones?.safeZone?.min ?? Number((activePrice - (activePrice * 0.0015)).toFixed(priceDecimals));
-  const safeMax = latestLog?.anticipatedLiquidityZones?.safeZone?.max ?? Number((activePrice - (activePrice * 0.0005)).toFixed(priceDecimals));
-
-  const entryMin = latestLog?.anticipatedLiquidityZones?.entryZone?.min ?? Number((activePrice + (activePrice * 0.0005)).toFixed(priceDecimals));
-  const entryMax = latestLog?.anticipatedLiquidityZones?.entryZone?.max ?? Number((activePrice + (activePrice * 0.0012)).toFixed(priceDecimals));
-
-  const cautionMin = latestLog?.anticipatedLiquidityZones?.cautionZone?.min ?? Number((activePrice + (activePrice * 0.0012)).toFixed(priceDecimals));
-  const cautionMax = latestLog?.anticipatedLiquidityZones?.cautionZone?.max ?? Number((activePrice + (activePrice * 0.0025)).toFixed(priceDecimals));
-
-  const dangerMin = latestLog?.anticipatedLiquidityZones?.dangerZone?.min ?? Number((activePrice + (activePrice * 0.0025)).toFixed(priceDecimals));
-  const dangerMax = latestLog?.anticipatedLiquidityZones?.dangerZone?.max ?? Number((activePrice + (activePrice * 0.0040)).toFixed(priceDecimals));
 
   return (
     <div className={`w-full h-full flex flex-col select-none overflow-y-auto custom-scrollbar font-sans text-xs ${
@@ -144,15 +157,17 @@ export const ScenariosAndZonesSidebar: React.FC<ScenariosAndZonesSidebarProps> =
                 </div>
                 <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
                   <span>3. Quantum Vision Edge (&gt;= 52%)</span>
-                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓ {latestLog?.bearishProbability ?? 53}% EDGE</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                    {Math.max(vaSnapshot.bullishPct, vaSnapshot.bearishPct)}% {vaSnapshot.bullishPct >= vaSnapshot.bearishPct ? 'BULL' : 'BEAR'}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
                   <span>4. Market DNA Similarity (&gt;= 60%)</span>
-                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓ {latestLog?.marketDnaPrint?.similarityScore ?? 67.3}% MATCH</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">{vaSnapshot.marketDna.similarityScore}% MATCH</span>
                 </div>
                 <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
-                  <span>5. Danger Zone Boundary Invalidation</span>
-                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓ DEFINED (1x ATR)</span>
+                  <span>5. Live ATR ({vaSnapshot.atr14.toFixed(priceDecimals)}) Invalidation</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓ DEFINED</span>
                 </div>
               </div>
             </div>

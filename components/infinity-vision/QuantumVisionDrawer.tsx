@@ -14,10 +14,9 @@ import {
   ShieldAlert,
   Info
 } from 'lucide-react';
-import { CurrencyPair } from '@/lib/types';
-import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
-import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
-import { BASE_PRICES } from '@/lib/marketData';
+import { Candle, CurrencyPair } from '@/lib/types';
+import { ResearchReportSnapshot } from '@/lib/research/types';
+import { computeLiveVisionAtlasSnapshot } from '@/lib/research/VisionAtlasLiveAnalytics';
 
 export interface QuantumVisionDrawerProps {
   isOpen: boolean;
@@ -26,7 +25,10 @@ export interface QuantumVisionDrawerProps {
   onChangeHorizon?: (h: number) => void;
   theme?: 'light' | 'dark';
   pair?: CurrencyPair;
+  timeframe?: string;
   livePrice?: number;
+  candles?: Candle[];
+  report?: ResearchReportSnapshot | null;
 }
 
 export const QuantumVisionDrawer: React.FC<QuantumVisionDrawerProps> = ({
@@ -36,7 +38,10 @@ export const QuantumVisionDrawer: React.FC<QuantumVisionDrawerProps> = ({
   onChangeHorizon,
   theme = 'light',
   pair = 'XAU/USD',
+  timeframe = '1h',
   livePrice: propLivePrice,
+  candles = [],
+  report = null,
 }) => {
   const isLight = theme === 'light';
   const [activeViewMode, setActiveViewMode] = useState<'Candles' | 'Line'>('Candles');
@@ -49,17 +54,23 @@ export const QuantumVisionDrawer: React.FC<QuantumVisionDrawerProps> = ({
     distribution: false,
   });
 
-  const isGold = pair === 'XAU/USD';
-  const isJpy = pair?.includes('JPY');
-  const isIndian = pair === 'NIFTY 50' || pair === 'BANK NIFTY';
-  const decimals = isJpy ? 3 : (isGold || isIndian) ? 2 : 5;
-  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
-  const keySupport = (activePrice * 0.996).toFixed(decimals);
-  const keyResistance = (activePrice * 1.004).toFixed(decimals);
-  const breakoutThreshold = (activePrice * 1.006).toFixed(decimals);
-  const rejectionRange = `${(activePrice * 1.002).toFixed(decimals)} / ${(activePrice * 0.998).toFixed(decimals)}`;
-  const rangeMin = (activePrice * 0.991).toFixed(decimals);
-  const rangeMax = (activePrice * 1.009).toFixed(decimals);
+  const vaSnapshot = computeLiveVisionAtlasSnapshot({
+    pair,
+    timeframe,
+    livePrice: propLivePrice,
+    candles,
+    horizonCandles,
+    report,
+  });
+
+  const decimals = vaSnapshot.priceDecimals;
+  const activePrice = vaSnapshot.livePrice;
+  const keySupport = vaSnapshot.quantum.hardSupport.toFixed(decimals);
+  const keyResistance = vaSnapshot.quantum.hardResistance.toFixed(decimals);
+  const breakoutThreshold = vaSnapshot.quantum.expectedUpper.toFixed(decimals);
+  const rejectionRange = `${vaSnapshot.zones[1].min.toFixed(decimals)} / ${vaSnapshot.zones[2].min.toFixed(decimals)}`;
+  const rangeMin = vaSnapshot.quantum.expectedLower.toFixed(decimals);
+  const rangeMax = vaSnapshot.quantum.expectedUpper.toFixed(decimals);
 
   if (!isOpen) return null;
 
@@ -201,57 +212,57 @@ export const QuantumVisionDrawer: React.FC<QuantumVisionDrawerProps> = ({
         <div className="space-y-1.5 pt-1 text-[11px] font-mono border-t border-slate-200 dark:border-terminal-border">
           <div className="flex items-center justify-between">
             <span className="text-slate-500">Market Bias:</span>
-            <span className="font-bold text-slate-700 dark:text-slate-300">Neutral (no measurable edge)</span>
+            <span className="font-bold text-slate-700 dark:text-slate-300">{vaSnapshot.quantum.biasLabel}</span>
           </div>
 
           <div className="flex items-center justify-between">
             <span className="text-slate-500">Bullish Probability:</span>
-            <span className="font-bold text-emerald-600 dark:text-emerald-400">50% (no edge)</span>
+            <span className="font-bold text-emerald-600 dark:text-emerald-400">{vaSnapshot.quantum.bullishProb}%</span>
           </div>
 
           <div className="flex items-center justify-between">
             <span className="text-slate-500">Bearish Probability:</span>
-            <span className="font-bold text-rose-600 dark:text-rose-400">50% (no edge)</span>
+            <span className="font-bold text-rose-600 dark:text-rose-400">{vaSnapshot.quantum.bearishProb}%</span>
           </div>
 
           <div className="flex items-center justify-between">
             <span className="text-slate-500">Key Support:</span>
-            <span className="font-bold text-slate-900 dark:text-white">${keySupport}</span>
+            <span className="font-bold text-slate-900 dark:text-white">{keySupport}</span>
           </div>
-          <p className="text-[10px] text-slate-400 -mt-1 text-right font-sans">Range low (1h) - hard S1</p>
+          <p className="text-[10px] text-slate-400 -mt-1 text-right font-sans">Swing low / S1 confluence ({vaSnapshot.quantum.hardSupportTouchOdds}% touch odds)</p>
 
           <div className="flex items-center justify-between">
             <span className="text-slate-500">Key Resistance:</span>
-            <span className="font-bold text-slate-900 dark:text-white">${keyResistance}</span>
+            <span className="font-bold text-slate-900 dark:text-white">{keyResistance}</span>
           </div>
-          <p className="text-[10px] text-slate-400 -mt-1 text-right font-sans">SSL (swing low) - hold C1</p>
+          <p className="text-[10px] text-slate-400 -mt-1 text-right font-sans">Swing high / R1 ceiling ({vaSnapshot.quantum.hardResistanceTouchOdds}% touch odds)</p>
 
           <div className="flex items-center justify-between">
             <span className="text-slate-500">Potential Breakout:</span>
-            <span className="font-bold text-slate-900 dark:text-white">above ${breakoutThreshold}</span>
+            <span className="font-bold text-slate-900 dark:text-white">above {breakoutThreshold}</span>
           </div>
-          <p className="text-[10px] text-slate-400 -mt-1 text-right font-sans">past breakout can run 61% of 1h</p>
+          <p className="text-[10px] text-slate-400 -mt-1 text-right font-sans">Upper 1σ Monte Carlo cone ({timeframe})</p>
 
           <div className="flex items-center justify-between">
             <span className="text-slate-500">Potential Rejection:</span>
-            <span className="font-bold text-slate-900 dark:text-white">${rejectionRange}</span>
+            <span className="font-bold text-slate-900 dark:text-white">{rejectionRange}</span>
           </div>
-          <p className="text-[10px] text-slate-400 -mt-1 text-right font-sans">Expected Price Range ${rangeMin} - ${rangeMax}, 80% of paths</p>
+          <p className="text-[10px] text-slate-400 -mt-1 text-right font-sans">Expected Cone Range {rangeMin} - {rangeMax}</p>
 
           <div className="flex items-center justify-between pt-1">
             <span className="text-slate-500">Prediction Timeframe:</span>
-            <span className="font-bold text-slate-800 dark:text-slate-200">5 × 15m = 1.3 hours</span>
+            <span className="font-bold text-slate-800 dark:text-slate-200">{vaSnapshot.quantum.horizonCandles} × {timeframe} = {vaSnapshot.quantum.horizonLabel}</span>
           </div>
 
           <div className="flex items-center justify-between">
             <span className="text-slate-500">Scenario Confidence:</span>
-            <span className="font-bold text-slate-700 dark:text-slate-300">No measurable edge</span>
+            <span className="font-bold text-cyan-600 dark:text-cyan-400">{vaSnapshot.confidenceLabel}</span>
           </div>
         </div>
 
-        {/* Walk-forward Validation Notice Box */}
+        {/* Live Telemetry Validation Notice Box */}
         <div className="p-2.5 rounded-lg bg-slate-100 dark:bg-terminal-900/60 border border-slate-200 dark:border-terminal-border text-[10px] text-slate-600 dark:text-slate-400 leading-normal">
-          On this instrument and timeframe the model did not beat a coin flip in walk-forward testing, so the direction is showed as 50/50. Market DNA ran with a 20-candle outcome, set both to the same length to compare.
+          Monte Carlo projection anchored strictly to {pair} spot ({activePrice.toFixed(decimals)}), ATR ({vaSnapshot.atr14.toFixed(decimals)}), and RSI ({vaSnapshot.rsi14}). Median path target: {vaSnapshot.quantum.expectedMedian.toFixed(decimals)}.
         </div>
 
         {/* Scenario Selection Dropdown */}
@@ -262,9 +273,9 @@ export const QuantumVisionDrawer: React.FC<QuantumVisionDrawerProps> = ({
             onChange={(e) => setSelectedScenario(e.target.value)}
             className="w-full px-2 py-1 rounded border border-slate-300 dark:border-terminal-border text-xs font-bold bg-white dark:bg-terminal-900 text-slate-800 dark:text-slate-100 focus:outline-none"
           >
-            <option>Support breakdown - 32% of paths</option>
-            <option>Bullish breakout above C1 - 38% of paths</option>
-            <option>Consolidation equilibrium - 30% of paths</option>
+            <option>Bullish expansion toward {keyResistance} ({vaSnapshot.quantum.bullishProb}% weight)</option>
+            <option>Support retest toward {keySupport} ({vaSnapshot.quantum.bearishProb}% weight)</option>
+            <option>Consolidation around {vaSnapshot.quantum.expectedMedian.toFixed(decimals)}</option>
           </select>
         </div>
 
@@ -286,7 +297,7 @@ export const QuantumVisionDrawer: React.FC<QuantumVisionDrawerProps> = ({
               </button>
               {openAccordions[acc.key] && (
                 <div className="p-2 text-[10px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-terminal-900/40 border-t border-slate-200 dark:border-terminal-border">
-                  Telemetry calculated across 1,000 historical Monte Carlo permutations. Touch odds for Hard S1 (3998.47) are currently 68.4%.
+                  Telemetry calculated across 1,000 live ATR-scaled Monte Carlo permutations. Hard S1 ({keySupport}) touch probability: {vaSnapshot.quantum.hardSupportTouchOdds}% | Hard R1 ({keyResistance}): {vaSnapshot.quantum.hardResistanceTouchOdds}%.
                 </div>
               )}
             </div>

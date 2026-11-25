@@ -60,19 +60,20 @@ export function createTradePlanOverlayPlugin(): Plugin {
       ) => {
         if (price === undefined || !Number.isFinite(price)) return;
         const y = yScale.getPixelForValue(price);
-        if (y < chartArea.top || y > chartArea.bottom) return;
+        if (y < chartArea.top + 4 || y > chartArea.bottom - 4) return;
 
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.4;
         if (dashed) ctx.setLineDash([5, 3]);
         ctx.beginPath();
-        ctx.moveTo(chartArea.left, y);
-        ctx.lineTo(chartArea.right, y);
+        ctx.moveTo(chartArea.left + 4, y);
+        ctx.lineTo(chartArea.right - 4, y);
         ctx.stroke();
         ctx.setLineDash([]);
 
         ctx.fillStyle = color;
-        ctx.fillText(`${label} ${price.toFixed(dec)}`, chartArea.left + 8, y - 4);
+        const textY = Math.max(chartArea.top + 14, Math.min(chartArea.bottom - 6, y - 4));
+        ctx.fillText(`${label} ${price.toFixed(dec)}`, chartArea.left + 10, textY);
       };
 
       drawHorizontalLevel(tp.stopLoss, 'STOP LOSS', '#f43f5e', true);

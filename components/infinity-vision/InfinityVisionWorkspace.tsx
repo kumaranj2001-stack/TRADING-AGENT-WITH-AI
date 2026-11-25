@@ -18,6 +18,8 @@ import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstrai
 import { MarketSessionManager } from '@/lib/marketSessionManager';
 import { visionSystemLogger } from '@/lib/visionSystemLogger';
 import { VisionAtlasWebSocketClient } from '@/lib/visionAtlasWebSocket';
+import { ResearchReportSnapshot } from '@/lib/research/types';
+import { computeLiveVisionAtlasSnapshot } from '@/lib/research/VisionAtlasLiveAnalytics';
 
 export interface InfinityVisionWorkspaceProps {
   pair: CurrencyPair;
@@ -92,6 +94,36 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
   const [isIndicatorsOpen, setIsIndicatorsOpen] = useState<boolean>(false);
   const [activeRightSidebarMode, setActiveRightSidebarMode] = useState<'scenarios' | 'market_dna' | 'vision_atlas'>('scenarios');
   const [horizonCandles, setHorizonCandles] = useState<number>(5);
+  const [syncedReport, setSyncedReport] = useState<ResearchReportSnapshot | null>(null);
+
+  // 🔄 Architecturally synchronize Vision Atlas with AI Multi-Agent Research Engine outputs
+  useEffect(() => {
+    let cancelled = false;
+    const syncResearchReport = async () => {
+      try {
+        const res = await fetch('/api/research/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol: selectedPair,
+            timeframe: selectedTf,
+          }),
+        });
+        if (!cancelled && res.ok) {
+          const data = await res.json();
+          if (data?.report) {
+            setSyncedReport(data.report);
+          }
+        }
+      } catch {
+        // Keep last valid snapshot silently on network hiccup
+      }
+    };
+    syncResearchReport();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPair, selectedTf]);
 
   // 🧭 Bi-directional Control Panel Indicator Overlays State
   const [indicatorSettings, setIndicatorSettings] = useState<Record<string, boolean>>({
@@ -252,36 +284,31 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
     if (!liveCandles || liveCandles.length === 0) return;
     const atr = Math.max(...liveCandles.slice(-14).map(c => c.high - c.low)) || (livePrice * 0.003);
     
-    // Dynamic zones calculated from live price
-    const isSellBias = activeRightSidebarMode === 'scenarios';
-    const safeZone = {
-      min: Number((isSellBias ? livePrice - atr * 0.4 : livePrice + atr * 0.2).toFixed(4)),
-      max: Number((isSellBias ? livePrice + atr * 0.2 : livePrice + atr * 0.6).toFixed(4)),
-    };
-    const entryZone = {
-      min: Number((isSellBias ? livePrice + atr * 0.5 : livePrice - atr * 0.8).toFixed(4)),
-      max: Number((isSellBias ? livePrice + atr * 0.8 : livePrice - atr * 0.5).toFixed(4)),
-    };
-    const cautionZone = {
-      min: Number((isSellBias ? livePrice + atr * 0.8 : livePrice - atr * 1.5).toFixed(4)),
-      max: Number((isSellBias ? livePrice + atr * 1.5 : livePrice - atr * 0.8).toFixed(4)),
-    };
-    const dangerZone = {
-      min: Number((isSellBias ? livePrice + atr * 1.5 : livePrice - atr * 2.2).toFixed(4)),
-      max: Number((isSellBias ? livePrice + atr * 2.2 : livePrice - atr * 1.5).toFixed(4)),
-    };
+    // Dynamic live Vision Atlas analytics (replaces static 47/53 & 67.3 defaults)
+    const liveVa = computeLiveVisionAtlasSnapshot({
+      pair: selectedPair,
+      timeframe: selectedTf,
+      livePrice,
+      candles: liveCandles,
+      horizonCandles,
+      report: syncedReport,
+    });
+    const safeZone = { min: liveVa.zones[3].min, max: liveVa.zones[3].max };
+    const entryZone = { min: liveVa.zones[2].min, max: liveVa.zones[2].max };
+    const cautionZone = { min: liveVa.zones[1].min, max: liveVa.zones[1].max };
+    const dangerZone = { min: liveVa.zones[0].min, max: liveVa.zones[0].max };
 
     visionSystemLogger.logSnapshot({
       pair: selectedPair,
       timeframe: selectedTf,
       livePrice,
-      quantumVisionBias: isSellBias ? 'BEARISH' : 'BULLISH',
-      bullishProbability: isSellBias ? 47 : 53,
-      bearishProbability: isSellBias ? 53 : 47,
-      marketDnaSimilarity: 67.3,
-      liquiditySweepEvent: `Sell-side swept at ${(livePrice - atr * 0.5).toFixed(2)} - 3 candles ago`,
-      structureShift: 'MSS (CHoCH) developing',
-      marketRegime: 'Structural transition - quiet volatility',
+      quantumVisionBias: liveVa.bullishPct >= 50 ? 'BULLISH' : 'BEARISH',
+      bullishProbability: liveVa.bullishPct,
+      bearishProbability: liveVa.bearishPct,
+      marketDnaSimilarity: liveVa.marketDna.similarityScore,
+      liquiditySweepEvent: liveVa.sweepSummary,
+      structureShift: liveVa.structureSummary,
+      marketRegime: liveVa.marketDna.matchedRegime,
       language: 'en',
       voiceActive: true,
       safeZone,
@@ -289,7 +316,7 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
       cautionZone,
       dangerZone,
     });
-  }, [selectedPair, selectedTf, Math.floor(livePrice * 10), activeRightSidebarMode]);
+  }, [selectedPair, selectedTf, Math.floor(livePrice * 10), activeRightSidebarMode, horizonCandles, liveCandles.length]);
 
   // Switching Pair & Timeframe handlers that trigger global sync
   const handleSelectPair = (p: CurrencyPair) => {
@@ -417,6 +444,31 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
         theme={theme}
       />
 
+      {/* 🤖 SYNCHRONIZED AI RESEARCH ENGINE SCORE STRIP */}
+      {syncedReport && (
+        <div className={`px-3.5 py-1.5 border-b flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono ${
+          theme === 'light'
+            ? 'bg-cyan-50 border-slate-200 text-slate-800'
+            : 'bg-terminal-900/90 border-terminal-border text-slate-200'
+        }`}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 font-bold">
+              AI RESEARCH SYNC • {syncedReport.symbol} ({selectedTf.toUpperCase()})
+            </span>
+            <span className="font-bold">
+              Composite Score: <strong className="text-emerald-400">{syncedReport.compositeScore}/100</strong>
+            </span>
+            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">
+              GRADE {syncedReport.grade} • {syncedReport.signal.replace(/_/g, ' ')}
+            </span>
+          </div>
+          <div className="flex items-center gap-3 text-[10px] text-slate-400">
+            <span>25 Sub-Scores Active ({syncedReport.all25SubScores.length}/25)</span>
+            <span>Tech:{syncedReport.technical.totalScore} • Fund:{syncedReport.fundamental.totalScore} • Sent:{syncedReport.sentiment.totalScore} • Risk:{syncedReport.risk.totalScore} • Thesis:{syncedReport.thesis.totalScore}</span>
+          </div>
+        </div>
+      )}
+
       {/* 🧭 MAIN BODY: Real-Time Streaming Chart + Fluid Dynamic Drawers */}
       <div className="flex-1 flex min-h-[500px] relative overflow-hidden">
         {/* Left Floating Quantum Vision Drawer */}
@@ -426,6 +478,11 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
           horizonCandles={horizonCandles}
           onChangeHorizon={setHorizonCandles}
           theme={theme}
+          pair={selectedPair}
+          timeframe={selectedTf}
+          livePrice={livePrice}
+          candles={liveCandles}
+          report={syncedReport}
         />
 
         {/* Center Floating Liquidity Heatmap Window */}
@@ -435,6 +492,9 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
           pair={selectedPair}
           timeframe={selectedTf}
           theme={theme}
+          livePrice={livePrice}
+          candles={liveCandles}
+          report={syncedReport}
         />
 
         {/* 📈 Central High-Frequency Chart.js Streaming Container (Modular Vision Atlas Plugins) */}
@@ -487,6 +547,7 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
               theme={theme}
               currentPrice={livePrice}
               candles={liveCandles}
+              report={syncedReport}
               onSyncToTerminal={onSyncToTerminal}
             />
           )}
@@ -496,6 +557,9 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
               pair={selectedPair}
               timeframe={selectedTf}
               theme={theme}
+              livePrice={livePrice}
+              candles={liveCandles}
+              report={syncedReport}
               onTogglePatternOnChart={setShowPatternOnChart}
               onToggleChartMode={setChartType}
             />
@@ -506,6 +570,9 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
               pair={selectedPair}
               timeframe={selectedTf}
               theme={theme}
+              livePrice={livePrice}
+              candles={liveCandles}
+              report={syncedReport}
               onSimulate={() => setIsQuantumVisionOpen(true)}
             />
           )}
@@ -517,6 +584,8 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
         pair={selectedPair}
         timeframe={selectedTf}
         theme={theme}
+        livePrice={livePrice}
+        candles={liveCandles}
       />
 
       {/* ⚙️ Comprehensive Indicators Drawer */}

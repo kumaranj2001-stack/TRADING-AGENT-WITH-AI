@@ -14,10 +14,9 @@ import {
   CheckCircle2,
   AlertTriangle
 } from 'lucide-react';
-import { CurrencyPair } from '@/lib/types';
-import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
-import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
-import { BASE_PRICES } from '@/lib/marketData';
+import { Candle, CurrencyPair } from '@/lib/types';
+import { ResearchReportSnapshot } from '@/lib/research/types';
+import { computeLiveVisionAtlasSnapshot } from '@/lib/research/VisionAtlasLiveAnalytics';
 
 export interface VisionAtlasLabSidebarProps {
   pair: CurrencyPair;
@@ -25,6 +24,8 @@ export interface VisionAtlasLabSidebarProps {
   theme?: 'light' | 'dark';
   onSimulate?: () => void;
   livePrice?: number;
+  candles?: Candle[];
+  report?: ResearchReportSnapshot | null;
 }
 
 export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
@@ -33,6 +34,8 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
   theme = 'light',
   onSimulate,
   livePrice: propLivePrice,
+  candles = [],
+  report = null,
 }) => {
   const isLight = theme === 'light';
   const cleanPair = pair.replace('/', '');
@@ -42,20 +45,29 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
   const [isExplaining, setIsExplaining] = useState<boolean>(false);
   const [explanationText, setExplanationText] = useState<string>('');
 
-  const isGold = pair === 'XAU/USD';
-  const isJpy = pair.includes('JPY');
-  const isIndian = pair === 'NIFTY 50' || pair === 'BANK NIFTY';
-  const decimals = isJpy ? 3 : (isGold || isIndian) ? 2 : 5;
-  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
-  const sweepPrice = (activePrice * 0.998).toFixed(decimals);
-  const entryMin = (activePrice * 1.002).toFixed(decimals);
-  const entryMax = (activePrice * 1.004).toFixed(decimals);
-  const stopThreshold = (activePrice * 1.008).toFixed(decimals);
+  const vaSnapshot = computeLiveVisionAtlasSnapshot({
+    pair,
+    timeframe,
+    livePrice: propLivePrice,
+    candles,
+    report,
+  });
+  const decimals = vaSnapshot.priceDecimals;
+  const activePrice = vaSnapshot.livePrice;
+  const sweepPrice = vaSnapshot.sweepPrice.toFixed(decimals);
+  const entryZone = vaSnapshot.zones.find(z => z.id === 'entry')!;
+  const dangerZone = vaSnapshot.zones.find(z => z.id === 'danger')!;
+  const entryMin = entryZone.min.toFixed(decimals);
+  const entryMax = entryZone.max.toFixed(decimals);
+  const stopThreshold = dangerZone.max.toFixed(decimals);
 
   const handleAnalyseAndExplain = () => {
     setIsExplaining(true);
-    const textEn = `Institutional Order Flow for ${cleanPair} on ${timeframe}: Price has executed a sell-side liquidity sweep at ${sweepPrice}. High-probability confluence entry zone is isolated between ${entryMin} and ${entryMax}, overlapping the 61.8% Fibonacci retracement and premium fair value gap. Maintain stop loss above danger threshold ${stopThreshold}.`;
-    const textTa = `${cleanPair} ${timeframe} நேரடி தொழில்நுட்ப பகுப்பாய்வு: விலை ${sweepPrice} இல் கீழ்நிலைப் பணப்புழக்கத்தை (Sell-side Liquidity) எடுத்துள்ளது. ${entryMin} முதல் ${entryMax} வரையிலான பகுதியில் உயர் நம்பகத்தன்மை கொண்ட என்ட்ரி மண்டலம் கண்டறியப்பட்டுள்ளது. ஆபத்து எல்லையான ${stopThreshold} க்கு மேல் ஸ்டாப் லாஸ் வைக்கவும்.`;
+    const aiContextEn = report
+      ? ` Multi-Agent Composite Score is ${report.compositeScore}/100 (Grade ${report.grade}, ${report.signal.replace(/_/g, ' ')}).`
+      : '';
+    const textEn = `Institutional Order Flow for ${cleanPair} on ${timeframe} (Live ${activePrice.toFixed(decimals)}): ${vaSnapshot.sweepSummary} with ${vaSnapshot.structureSummary}. Bullish probability is ${vaSnapshot.bullishPct}% vs Bearish ${vaSnapshot.bearishPct}%. Key confluence entry zone sits between ${entryMin} and ${entryMax}; invalidation threshold near ${stopThreshold}.${aiContextEn}`;
+    const textTa = `${cleanPair} ${timeframe} நேரடி பகுப்பாய்வு (விலை ${activePrice.toFixed(decimals)}): ${sweepPrice} இல் பணப்புழக்க ஸ்வீப் கண்டறியப்பட்டது (${vaSnapshot.bullishPct}% Bullish / ${vaSnapshot.bearishPct}% Bearish). ${entryMin} முதல் ${entryMax} வரையிலான பகுதியில் என்ட்ரி மண்டலம் உள்ளது; ஆபத்து எல்லை ${stopThreshold}.`;
     
     const textToSpeak = selectedLanguage === 'ta' ? textTa : textEn;
     setExplanationText(textToSpeak);
@@ -140,29 +152,31 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
           </div>
 
           <div className="space-y-1">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-2">
               <span className="text-slate-500 font-sans">Liquidity sweep:</span>
-              <span className="font-bold text-slate-800 dark:text-slate-200">Sell-side swept at 3998.47</span>
+              <span className="font-bold text-slate-800 dark:text-slate-200 text-right">{vaSnapshot.sweepSummary}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-2">
               <span className="text-slate-500 font-sans">Structure:</span>
-              <span className="font-bold text-slate-800 dark:text-slate-200">MSS (CHoCH) bearish</span>
+              <span className="font-bold text-slate-800 dark:text-slate-200 text-right">{vaSnapshot.structureSummary}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500 font-sans">Analysis confidence:</span>
-              <span className="font-bold text-amber-600">Low</span>
+              <span className={`font-bold ${vaSnapshot.confidenceLabel === 'High' ? 'text-emerald-500' : vaSnapshot.confidenceLabel === 'Medium' ? 'text-cyan-500' : 'text-amber-600'}`}>
+                {vaSnapshot.confidenceLabel}
+              </span>
             </div>
           </div>
 
           {/* Split Bar */}
           <div className="space-y-1 pt-1">
             <div className="flex justify-between text-[10px] font-bold">
-              <span className="text-emerald-600">Bullish 47%</span>
-              <span className="text-rose-600">Bearish 53%</span>
+              <span className="text-emerald-600">Bullish {vaSnapshot.bullishPct}%</span>
+              <span className="text-rose-600">Bearish {vaSnapshot.bearishPct}%</span>
             </div>
             <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-terminal-800 overflow-hidden flex">
-              <div className="bg-emerald-500 h-full" style={{ width: '47%' }} />
-              <div className="bg-rose-500 h-full" style={{ width: '53%' }} />
+              <div className="bg-emerald-500 h-full transition-all" style={{ width: `${vaSnapshot.bullishPct}%` }} />
+              <div className="bg-rose-500 h-full transition-all" style={{ width: `${vaSnapshot.bearishPct}%` }} />
             </div>
           </div>
 
@@ -170,34 +184,27 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
           <div className="pt-2 border-t border-slate-200 dark:border-terminal-border space-y-1">
             <span className="text-[10px] font-bold text-slate-500 uppercase block font-sans">Possible reaction zones</span>
             <div className="space-y-1 text-[11px] font-mono">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-rose-500" />
-                  <span className="text-slate-700 dark:text-slate-300">Sell-limit zone</span>
-                </span>
-                <span className="font-bold text-slate-900 dark:text-white">{(activePrice * 1.001).toFixed(decimals)} - {(activePrice * 1.003).toFixed(decimals)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-amber-700" />
-                  <span className="text-slate-700 dark:text-slate-300">Sell-limit zone 2</span>
-                </span>
-                <span className="font-bold text-slate-900 dark:text-white">{(activePrice * 1.005).toFixed(decimals)} - {(activePrice * 1.008).toFixed(decimals)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-blue-500" />
-                  <span className="text-slate-700 dark:text-slate-300">Sell-side liquidity</span>
-                </span>
-                <span className="font-bold text-slate-900 dark:text-white">{(activePrice * 0.997).toFixed(decimals)} - {(activePrice * 0.999).toFixed(decimals)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-blue-700" />
-                  <span className="text-slate-700 dark:text-slate-300">Buy-limit zone</span>
-                </span>
-                <span className="font-bold text-slate-900 dark:text-white">{(activePrice * 0.991).toFixed(decimals)} - {(activePrice * 0.995).toFixed(decimals)}</span>
-              </div>
+              {vaSnapshot.zones.map((z) => {
+                const dotColor =
+                  z.tone === 'rose'
+                    ? 'bg-rose-500'
+                    : z.tone === 'amber'
+                    ? 'bg-amber-600'
+                    : z.tone === 'cyan'
+                    ? 'bg-cyan-500'
+                    : 'bg-emerald-500';
+                return (
+                  <div key={z.id} className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${dotColor}`} />
+                      <span className="text-slate-700 dark:text-slate-300">{z.name}</span>
+                    </span>
+                    <span className="font-bold text-slate-900 dark:text-white">
+                      {z.min.toFixed(decimals)} - {z.max.toFixed(decimals)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
             <p className="text-[9px] text-slate-400 italic pt-1 font-sans">
               Entry areas, invalidation and targets appear only when a sweep, a structure confirmation and enough history agree.
@@ -285,8 +292,11 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
           <span className="font-bold text-[11px] text-slate-900 dark:text-white block">
             Signal engine - {cleanPair} {timeframe}
           </span>
-          <p className="text-[10px] text-slate-500 font-mono">
-            NO SIGNAL: Bullish - last closed candle did not meet minimum institutional threshold.
+          <p className="text-[10px] font-bold text-cyan-600 dark:text-cyan-400 font-mono">
+            {vaSnapshot.signalEngineHeadline}
+          </p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+            {vaSnapshot.signalEngineDetail}
           </p>
         </div>
       </div>

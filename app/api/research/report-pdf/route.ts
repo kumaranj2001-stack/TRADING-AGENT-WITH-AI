@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { workflowEngine } from '@/lib/research/WorkflowEngine';
-import { ChartLiveContext } from '@/lib/research/types';
+import { ChartLiveContext, ResearchReportSnapshot } from '@/lib/research/types';
 
 export async function GET(req: NextRequest) {
   try {
@@ -29,8 +29,9 @@ export async function POST(req: NextRequest) {
     const symbol: string = body?.symbol || 'NVDA';
     const timeframe: string = body?.timeframe || body?.chartContext?.timeframe || '1h';
     const chartContext: ChartLiveContext | undefined = body?.chartContext;
+    const activeReport: ResearchReportSnapshot | undefined = body?.report;
 
-    const html = await workflowEngine.generateReportPdfHtml(symbol, chartContext, timeframe);
+    const html = await workflowEngine.generateReportPdfHtml(symbol, chartContext, timeframe, activeReport);
 
     return NextResponse.json({
       success: true,

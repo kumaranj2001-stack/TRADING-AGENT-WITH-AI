@@ -44,6 +44,7 @@ export interface CommunityLiveChatFeedProps {
   onSelectSymbol?: (symbol: string) => void;
   onTriggerAnalysis?: (symbol: string) => void;
   isAnalyzing?: boolean;
+  singleAssetMode?: boolean;
 }
 
 const PRESET_TAG_FILTERS = [
@@ -61,6 +62,7 @@ export const CommunityLiveChatFeed: React.FC<CommunityLiveChatFeedProps> = ({
   onSelectSymbol,
   onTriggerAnalysis,
   isAnalyzing = false,
+  singleAssetMode = false,
 }) => {
   const [messages, setMessages] = useState<CommunityChatMessage[]>(() => {
     return communityChatEngine.getMessagesForSymbol(activeSymbol);
@@ -212,8 +214,8 @@ export const CommunityLiveChatFeed: React.FC<CommunityLiveChatFeedProps> = ({
             {isStreamingActive ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
           </button>
 
-          {/* Trigger 5-Stage Sequential Discovery Pipeline */}
-          {onTriggerAnalysis && (
+          {/* Trigger 5-Stage Sequential Discovery Pipeline (hidden in streamlined singleAssetMode) */}
+          {!singleAssetMode && onTriggerAnalysis && (
             <button
               onClick={() => onTriggerAnalysis(activeSymbol)}
               disabled={isAnalyzing}
@@ -230,9 +232,12 @@ export const CommunityLiveChatFeed: React.FC<CommunityLiveChatFeedProps> = ({
       <div className="px-3 py-1.5 bg-terminal-950/90 border-b border-terminal-border flex items-center gap-1.5 overflow-x-auto text-[11px] custom-scrollbar">
         <span className="text-slate-500 flex items-center gap-1 mr-1 shrink-0">
           <Filter className="w-3 h-3 text-cyan-400" />
-          <span>Filter Tag:</span>
+          <span>{singleAssetMode ? 'Active Stream:' : 'Filter Tag:'}</span>
         </span>
         {(() => {
+          if (singleAssetMode) {
+            return [{ label: `${activeTag} ROOM`, tag: 'ALL', sym: activeSymbol }];
+          }
           const hasActivePreset = PRESET_TAG_FILTERS.some(
             (p) => p.tag === activeTag || (p.sym && p.sym.toUpperCase() === activeSymbol.toUpperCase())
           );
@@ -251,7 +256,7 @@ export const CommunityLiveChatFeed: React.FC<CommunityLiveChatFeedProps> = ({
               key={item.tag}
               onClick={() => {
                 setActiveTagFilter(item.tag);
-                if (item.sym && onSelectSymbol && item.sym !== activeSymbol) {
+                if (!singleAssetMode && item.sym && onSelectSymbol && item.sym !== activeSymbol) {
                   onSelectSymbol(item.sym);
                 }
               }}

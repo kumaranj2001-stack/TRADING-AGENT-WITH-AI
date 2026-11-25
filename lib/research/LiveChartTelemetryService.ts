@@ -201,6 +201,21 @@ export class LiveChartTelemetryService {
     return LiveChartTelemetryService.instance;
   }
 
+  /**
+   * Synchronously inspects cached live telemetry for a given symbol if recently fetched.
+   */
+  public peekCachedTelemetry(symbol: string): ChartLiveContext | undefined {
+    const resolved = this.resolveSymbol(symbol);
+    for (const key of ['1h', '15m', '5m', '4h', '1d']) {
+      const hit = this.cache.get(`${resolved.symbol}_${key}`);
+      if (hit) return hit.data;
+    }
+    for (const [k, entry] of this.cache.entries()) {
+      if (k.startsWith(`${resolved.symbol}_`)) return entry.data;
+    }
+    return undefined;
+  }
+
   public resolveSymbol(rawInput: string): SymbolResolution {
     const clean = (rawInput || 'NVDA').toUpperCase().trim().replace(/^\$/, '');
     const mappedKey = ALIAS_MAP[clean] || clean;

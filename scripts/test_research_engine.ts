@@ -8,6 +8,7 @@ import { liveChartTelemetryService } from '../lib/research/LiveChartTelemetrySer
 import { researchEngineOrchestrator } from '../lib/research/ResearchEngineOrchestrator';
 import { workflowEngine } from '../lib/research/WorkflowEngine';
 import { PdfReportGenerator } from '../lib/research/PdfReportGenerator';
+import { computeLiveVisionAtlasSnapshot } from '../lib/research/VisionAtlasLiveAnalytics';
 
 async function runTests() {
   console.log('================================================================');
@@ -212,6 +213,46 @@ async function runTests() {
     throw new Error('EUR/USD PDF precision formatting error');
   }
   console.log('✅ EUR/USD 6-Page PDF Report preserves exact FX precision and live chart timeframe.');
+
+  // TEST 7: Single Source of Truth — 25 Sub-Score Parity, PDF Snapshot Parity & Vision Atlas Live Grounding
+  console.log('\n--- TEST 7: Single Source of Truth (25 Sub-Scores <-> Agents <-> PDF <-> Vision Atlas) ---');
+  for (const r of [nvdaReport, goldReport, eurReport]) {
+    const agentNames: Array<{ key: 'Technical' | 'Fundamental' | 'Sentiment' | 'Risk' | 'Thesis'; idx: number }> = [
+      { key: 'Technical', idx: 0 },
+      { key: 'Fundamental', idx: 1 },
+      { key: 'Sentiment', idx: 2 },
+      { key: 'Risk', idx: 3 },
+      { key: 'Thesis', idx: 4 },
+    ];
+    for (const a of agentNames) {
+      const subSum = r.all25SubScores
+        .filter((s) => s.agent === a.key)
+        .reduce((acc, s) => acc + s.score, 0);
+      const rawScore = r.weightsBreakdown[a.idx].scoreRaw;
+      if (subSum !== rawScore) {
+        throw new Error(`${r.symbol} ${a.key} sub-score mismatch: matrix sum=${subSum} vs weightsBreakdown=${rawScore}`);
+      }
+    }
+
+    const pdfFromSnapshot = await workflowEngine.generateReportPdfHtml(r.symbol, r.brief.chartContext, r.brief.chartContext?.timeframe || '1h', r);
+    if (!pdfFromSnapshot.includes(r.reportId) || !pdfFromSnapshot.includes(`${r.compositeScore}/100`)) {
+      throw new Error(`${r.symbol} PDF snapshot parity mismatch`);
+    }
+
+    const vaLive = computeLiveVisionAtlasSnapshot({
+      pair: r.symbol,
+      timeframe: r.brief.chartContext?.timeframe || '1h',
+      livePrice: r.brief.pricing.currentPrice,
+      report: r,
+    });
+    if (Math.abs(vaLive.livePrice - r.brief.pricing.currentPrice) > 0.05) {
+      throw new Error(`Vision Atlas live price drift for ${r.symbol}: va=${vaLive.livePrice} vs report=${r.brief.pricing.currentPrice}`);
+    }
+    if (vaLive.sweepSummary.includes('3998.47')) {
+      throw new Error(`Vision Atlas stale hardcoded sweep detected for ${r.symbol}`);
+    }
+    console.log(`✅ [SSOT Verified] ${r.symbol}: 25 Sub-Scores Sum==RawScores | PDF Report ID=${r.reportId} (${r.compositeScore}/100) | Vision Atlas Live=${vaLive.livePrice}`);
+  }
 
   console.log('\n================================================================');
   console.log('🎉 ALL ARCHITECTURAL TESTS AND WORKFLOWS PASSED WITH 100% SUCCESS!');

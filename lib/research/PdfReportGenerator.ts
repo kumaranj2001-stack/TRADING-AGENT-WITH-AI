@@ -589,14 +589,14 @@ export class PdfReportGenerator {
 
         <div class="card">
           <div class="card-title">Kelly Criterion & Sizing Governance</div>
-          <div>Recommended NAV Allocation: <strong class="text-cyan font-mono">${risk.positionSizingKelly.recommendedPositionPercentNAV}%</strong></div>
-          <div>Max Capital at Risk: <strong class="font-mono">$${risk.positionSizingKelly.maxRiskExposureDollars}</strong></div>
-          <div>Half-Kelly Mathematical Ceiling: <strong>${risk.positionSizingKelly.halfKellyPercent}%</strong></div>
-          <div style="margin-top: 6px; border-top: 1px dashed #e2e8f0; padding-top: 4px;">
-            <strong>Stress-Tested Drawdown Thresholds:</strong><br>
-            Mild Correction (-7%): $${risk.bearCaseDrawdownScenario.mildCorrectionPrice}<br>
-            Deep Correction (-15%): $${risk.bearCaseDrawdownScenario.deepCorrectionPrice}
-          </div>
+            <div>Recommended NAV Allocation: <strong class="text-cyan font-mono">${risk.positionSizingKelly.recommendedPositionPercentNAV}%</strong></div>
+            <div>Max Capital at Risk: <strong class="font-mono">${brief.pricing.currency} ${fmt(risk.positionSizingKelly.maxRiskExposureDollars)}</strong></div>
+            <div>Half-Kelly Mathematical Ceiling: <strong>${risk.positionSizingKelly.halfKellyPercent}%</strong></div>
+            <div style="margin-top: 6px; border-top: 1px dashed #e2e8f0; padding-top: 4px;">
+              <strong>Stress-Tested Drawdown Thresholds:</strong><br>
+              Mild Correction (-7%): ${brief.pricing.currency} ${fmt(risk.bearCaseDrawdownScenario.mildCorrectionPrice)}<br>
+              Deep Correction (-15%): ${brief.pricing.currency} ${fmt(risk.bearCaseDrawdownScenario.deepCorrectionPrice)}
+            </div>
         </div>
       </div>
 
@@ -663,7 +663,7 @@ export class PdfReportGenerator {
             <div style="margin-bottom: 6px;">
               <strong class="text-emerald">${c.title}</strong><br>
               <span style="font-size: 9.5px; color: #475569;">${c.catalystExplanation}</span><br>
-              Target: <strong class="font-mono text-emerald">$${c.upsideTargetPrice} (+${c.upsidePotentialPercent}%)</strong>
+              Target: <strong class="font-mono text-emerald">${brief.pricing.currency} ${fmt(c.upsideTargetPrice)} (+${c.upsidePotentialPercent}%)</strong>
             </div>
           `).join('')}
         </div>
@@ -674,7 +674,7 @@ export class PdfReportGenerator {
             <div style="margin-bottom: 6px;">
               <strong class="text-rose">${r.title}</strong><br>
               <span style="font-size: 9.5px; color: #475569;">${r.riskExplanation}</span><br>
-              Risk Floor: <strong class="font-mono text-rose">$${r.downsideTargetPrice} (-${r.downsideRiskPercent}%)</strong>
+              Risk Floor: <strong class="font-mono text-rose">${brief.pricing.currency} ${fmt(r.downsideTargetPrice)} (-${r.downsideRiskPercent}%)</strong>
             </div>
           `).join('')}
         </div>
@@ -693,9 +693,28 @@ export class PdfReportGenerator {
 
         <div class="card">
           <div class="card-title">Strict Invalidation Trigger & Exit Protocol</div>
-          <div>Invalidation Level: <strong class="font-mono text-rose">$${thesis.invalidationTrigger.priceLevel}</strong></div>
+          <div>Invalidation Level: <strong class="font-mono text-rose">${brief.pricing.currency} ${fmt(thesis.invalidationTrigger.priceLevel)}</strong></div>
           <div>Breach Condition: ${thesis.invalidationTrigger.macroOrEventCondition}</div>
           <div style="color: #dc2626; margin-top: 4px;"><strong>Exit Action:</strong> ${thesis.invalidationTrigger.exitAction}</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 8px; padding: 8px 10px;">
+        <div class="card-title">Verified 25-Sub-Score Matrix Audit (${all25SubScores.length}/25 Active • Report ID: ${report.reportId})</div>
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; font-size: 8.5px;">
+          ${['Technical', 'Fundamental', 'Sentiment', 'Risk', 'Thesis'].map(agentName => {
+            const list = all25SubScores.filter(s => s.agent === agentName);
+            const sum = list.reduce((a, b) => a + b.score, 0);
+            return `
+              <div style="border: 1px solid #e2e8f0; border-radius: 4px; padding: 4px 6px; background: #f8fafc;">
+                <div style="font-weight: 700; color: #0f172a; border-bottom: 1px solid #cbd5e1; margin-bottom: 3px; display: flex; justify-content: space-between;">
+                  <span>${agentName}</span>
+                  <span>${sum}/100</span>
+                </div>
+                ${list.map(s => `<div style="display: flex; justify-content: space-between;"><span>${s.category}</span><strong>${s.score}/20</strong></div>`).join('')}
+              </div>
+            `;
+          }).join('')}
         </div>
       </div>
 
