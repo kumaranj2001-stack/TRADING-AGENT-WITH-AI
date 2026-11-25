@@ -52,6 +52,9 @@ export function createTradePlanOverlayPlugin(): Plugin {
         );
       }
 
+      const offScreenTop: string[] = [];
+      const offScreenBottom: string[] = [];
+
       const drawHorizontalLevel = (
         price: number | undefined,
         label: string,
@@ -60,7 +63,14 @@ export function createTradePlanOverlayPlugin(): Plugin {
       ) => {
         if (price === undefined || !Number.isFinite(price)) return;
         const y = yScale.getPixelForValue(price);
-        if (y < chartArea.top + 4 || y > chartArea.bottom - 4) return;
+        if (y < chartArea.top + 4) {
+          offScreenTop.push(`↑ ${label} ${price.toFixed(dec)}`);
+          return;
+        }
+        if (y > chartArea.bottom - 4) {
+          offScreenBottom.push(`↓ ${label} ${price.toFixed(dec)}`);
+          return;
+        }
 
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.4;
@@ -79,6 +89,33 @@ export function createTradePlanOverlayPlugin(): Plugin {
       drawHorizontalLevel(tp.stopLoss, 'STOP LOSS', '#f43f5e', true);
       drawHorizontalLevel(tp.target1, 'TARGET 1', '#10b981', true);
       drawHorizontalLevel(tp.target2, 'TARGET 2', '#34d399', true);
+
+      // Render compact directional badges if MT5 vertical pan/scale scrolled trade levels off-screen
+      if (offScreenTop.length > 0) {
+        const msg = offScreenTop.join('  •  ');
+        const tw = ctx.measureText(msg).width + 12;
+        const bx = Math.max(chartArea.left + 8, chartArea.right - tw - 10);
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.22)';
+        ctx.fillRect(bx, chartArea.top + 6, tw, 16);
+        ctx.strokeStyle = 'rgba(16, 185, 129, 0.7)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx, chartArea.top + 6, tw, 16);
+        ctx.fillStyle = '#6ee7b7';
+        ctx.fillText(msg, bx + 6, chartArea.top + 17);
+      }
+      if (offScreenBottom.length > 0) {
+        const msg = offScreenBottom.join('  •  ');
+        const tw = ctx.measureText(msg).width + 12;
+        const bx = Math.max(chartArea.left + 8, chartArea.right - tw - 10);
+        const by = chartArea.bottom - 22;
+        ctx.fillStyle = 'rgba(244, 63, 94, 0.22)';
+        ctx.fillRect(bx, by, tw, 16);
+        ctx.strokeStyle = 'rgba(244, 63, 94, 0.7)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx, by, tw, 16);
+        ctx.fillStyle = '#fda4af';
+        ctx.fillText(msg, bx + 6, by + 11);
+      }
 
       // Indicator telemetry HUD top-left
       const ind = data.indicators;

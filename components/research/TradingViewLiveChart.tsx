@@ -124,7 +124,7 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
   symbol,
   timeframe = '1h',
   theme = 'dark',
-  height = 540,
+  height = 560,
   allowIndicatorsCustomization = true,
   tradePlanOverlay,
   activeReport = null,
@@ -133,9 +133,25 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
   onChartTelemetryUpdate,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const dragPanRef = useRef<{ clientX: number; initialOffset: number } | null>(null);
+
+  // MetaTrader 5 Y-Axis Scaling & 2D Panning State/Refs
+  const [yAxisMode, setYAxisMode] = useState<'AUTO' | 'MANUAL'>('AUTO');
+  const [manualYBounds, setManualYBounds] = useState<{ min: number; max: number } | null>(null);
+  const manualYBoundsRef = useRef<{ min: number; max: number } | null>(null);
+  const lastAutoYBoundsRef = useRef<{ min: number; max: number }>({ min: 0, max: 100 });
+  const [isHoveringYAxis, setIsHoveringYAxis] = useState<boolean>(false);
+  const [interactionKind, setInteractionKind] = useState<'NONE' | 'PAN_2D' | 'SCALE_Y'>('NONE');
+  const interactionRef = useRef<{
+    kind: 'PAN_2D' | 'SCALE_Y';
+    startX: number;
+    startY: number;
+    initialPanOffset: number;
+    initialYMin: number;
+    initialYMax: number;
+  } | null>(null);
 
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [chartType, setChartType] = useState<'Candles' | 'Line'>('Candles');
@@ -165,35 +181,51 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
 
   // High-Frequency Stream Telemetry State
   const [telemetry, setTelemetry] = useState<ChartLiveContext | null>(null);
+  const telemetryRef = useRef<ChartLiveContext | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>('CONNECTING');
   const [streamLatencyMs, setStreamLatencyMs] = useState<number>(8);
   const [visibleCount, setVisibleCount] = useState<number>(55);
   const [panOffset, setPanOffset] = useState<number>(0);
-  const [isDraggingPan, setIsDraggingPan] = useState<boolean>(false);
   const [hoveredOhlc, setHoveredOhlc] = useState<{ o: number; h: number; l: number; c: number } | null>(null);
 
-  // Reset pan when changing instrument or timeframe
+  // Reset horizontal/vertical pan & lock on symbol/timeframe change
   useEffect(() => {
     setPanOffset(0);
+    manualYBoundsRef.current = null;
+    setManualYBounds(null);
+    setYAxisMode('AUTO');
   }, [symbol, timeframe]);
 
-  // Escape-key & responsive resize handling for true full-screen portal mode
+  // Escape-key & body scroll cleanup for fullscreen portal mode
   useEffect(() => {
     if (!isFullscreen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsFullscreen(false);
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setIsFullscreen(false);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    const rafId = requestAnimationFrame(() => chartInstanceRef.current?.resize());
     return () => {
       window.removeEventListener('keydown', onKeyDown);
-      document.body.style.overflow = prevOverflow;
-      cancelAnimationFrame(rafId);
-      requestAnimationFrame(() => chartInstanceRef.current?.resize());
+      document.body.style.overflow = prevOverflow || '';
     };
   }, [isFullscreen]);
+
+  // ResizeObserver keeps Chart.js canvas crisp when container size changes (sidebars / fullscreen / responsive breakpoints)
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      try {
+        chartInstanceRef.current?.resize();
+      } catch {}
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isFullscreen, activeVisionPanel]);
 
   const resolved = liveChartTelemetryService.resolveSymbol(symbol);
   const canonicalSymbol = resolved.symbol;
@@ -224,6 +256,7 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
       activeIndicators,
       indicatorReadings: pkt.indicatorReadings,
       recentCandles: pkt.candles,
+      priceScale: pkt.priceScale,
       source: 'CHART_WIDGET_EVENT',
       timestamp: pkt.timestamp,
     }),
@@ -242,11 +275,12 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
     const unsubTicks = client.subscribeTicks((pkt) => {
       setStreamLatencyMs(pkt.latencyMs);
       const ctx = convertPacketToContext(pkt);
+      telemetryRef.current = ctx;
       setTelemetry(ctx);
 
-      // Propagate snapshot to Research Engine immediately on snapshot or every 2.5s cleanly
+      // Propagate snapshot immediately on initial load/switch, or on meaningful tick cadence (1.5s)
       const now = Date.now();
-      if (pkt.type === 'SNAPSHOT' || now - lastPropagatedTsRef.current > 2500) {
+      if (pkt.type === 'SNAPSHOT' || now - lastPropagatedTsRef.current > 1500) {
         lastPropagatedTsRef.current = now;
         onChartTelemetryUpdate?.(ctx);
       }
@@ -290,7 +324,144 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
     }
   }, [showSymbolSearch]);
 
-  // 3. Initialize Unrestricted Chart.js Canvas with Modular Plugins
+  // Synchronizes telemetry, indicators, MT5 Y-axis scale bounds, and plugins onto any active Chart instance
+  const syncChartToInstance = useCallback(
+    (chart: Chart) => {
+      const currentTelemetry = telemetryRef.current;
+      if (!currentTelemetry?.recentCandles || currentTelemetry.recentCandles.length === 0) return;
+
+      const allBars = currentTelemetry.recentCandles;
+      const totalBars = allBars.length;
+      const maxPan = Math.max(0, totalBars - 15);
+      const clampedPan = Math.min(panOffset, maxPan);
+      const endIdx = Math.max(15, totalBars - clampedPan);
+      const startIdx = Math.max(0, endIdx - visibleCount);
+      const sliced = allBars.slice(startIdx, endIdx);
+
+      const closes = sliced.map((c) => c.close);
+      const timeLabels = sliced.map(
+        (c) => c.time || new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      );
+      const futureSlots = clampedPan === 0 ? Math.min(8, Math.max(5, quantumHorizon)) : 0;
+      const labels = [...timeLabels, ...Array(futureSlots).fill('')];
+
+      const ema20Arr = activeIndicators.includes('EMA20') ? calculateEMA(closes, 20) : [];
+      const ema50Arr = activeIndicators.includes('EMA50') ? calculateEMA(closes, Math.min(50, closes.length)) : [];
+      const ema200Arr = activeIndicators.includes('EMA200') ? calculateEMA(closes, Math.min(200, closes.length)) : [];
+      const bbObj = activeIndicators.includes('BB') ? calculateBollingerBands(closes, 20, 2) : null;
+
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = closes;
+      (chart.data.datasets[0] as any).borderColor = chartType === 'Line' ? '#06b6d4' : 'transparent';
+      (chart.data.datasets[0] as any).fill = chartType === 'Line';
+
+      chart.data.datasets[1].data = ema20Arr;
+      chart.data.datasets[2].data = ema50Arr;
+      chart.data.datasets[3].data = ema200Arr;
+      chart.data.datasets[4].data = bbObj ? bbObj.upper : [];
+      chart.data.datasets[5].data = bbObj ? bbObj.lower : [];
+
+      const allLows = sliced.map((c) => c.low);
+      const allHighs = sliced.map((c) => c.high);
+      if (enableTradePlanPlugin && tradePlanOverlay?.enabled && !manualYBoundsRef.current) {
+        if (tradePlanOverlay.stopLoss) allLows.push(tradePlanOverlay.stopLoss);
+        if (tradePlanOverlay.target1) allHighs.push(tradePlanOverlay.target1);
+      }
+      const minY = Math.min(...allLows);
+      const maxY = Math.max(...allHighs);
+      const atrPad = currentTelemetry.priceScale?.atr14 ? currentTelemetry.priceScale.atr14 * 0.6 : 0;
+      const pad = Math.max((maxY - minY) * 0.14, atrPad, minY * 0.0018);
+      const autoMinY = minY - pad;
+      const autoMaxY = maxY + pad;
+      lastAutoYBoundsRef.current = { min: autoMinY, max: autoMaxY };
+
+      const activeBounds = manualYBoundsRef.current;
+      if (chart.options.scales?.y) {
+        chart.options.scales.y.min = activeBounds ? activeBounds.min : autoMinY;
+        chart.options.scales.y.max = activeBounds ? activeBounds.max : autoMaxY;
+      }
+
+      const qriContext: QriChartJsPluginData = {
+        candles: sliced.map((c) => ({
+          time: c.time,
+          timestamp: c.timestamp,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume,
+        })),
+        symbol: canonicalSymbol,
+        timeframe,
+        priceDecimals,
+        chartType,
+        theme,
+        livePrice: currentTelemetry.livePrice,
+        indicators: {
+          ema20: activeIndicators.includes('EMA20'),
+          ema50: activeIndicators.includes('EMA50'),
+          ema200: activeIndicators.includes('EMA200'),
+          bollingerBands: activeIndicators.includes('BB'),
+          rsi14: currentTelemetry.indicatorReadings.rsi14,
+          macdHistogram: currentTelemetry.indicatorReadings.macdHistogram,
+          atr14: currentTelemetry.indicatorReadings.atr14,
+          stochK: currentTelemetry.indicatorReadings.stochK,
+          stochD: currentTelemetry.indicatorReadings.stochD,
+        },
+        visionAtlas: {
+          enabled: enableVisionAtlasPlugin || showQuantumDrawer || showLiquidityModal || activeVisionPanel !== 'none',
+          showLabZones: enableVisionAtlasPlugin || activeVisionPanel === 'lab',
+          showOrderBlocks: enableVisionAtlasPlugin,
+          showBos: enableVisionAtlasPlugin,
+          showChoch: enableVisionAtlasPlugin,
+          showInternalStructure: enableVisionAtlasPlugin,
+          showQuantumFan: showQuantumDrawer || enableVisionAtlasPlugin,
+          showMarketDna: activeVisionPanel === 'dna' || enableVisionAtlasPlugin,
+          showLiquidityHeatmap: showLiquidityModal || enableVisionAtlasPlugin,
+          horizonCandles: quantumHorizon,
+        },
+        tradePlan: enableTradePlanPlugin ? tradePlanOverlay : { enabled: false },
+      };
+
+      (chart.options.plugins as any).qriContext = qriContext;
+
+      chart.options.onHover = (_evt, elements) => {
+        if (elements && elements.length > 0) {
+          const idx = elements[0].index;
+          const bar = sliced[idx];
+          if (bar) {
+            setHoveredOhlc({ o: bar.open, h: bar.high, l: bar.low, c: bar.close });
+          }
+        } else {
+          setHoveredOhlc(null);
+        }
+      };
+
+      chart.update('none');
+    },
+    [
+      visibleCount,
+      panOffset,
+      quantumHorizon,
+      showQuantumDrawer,
+      showLiquidityModal,
+      activeVisionPanel,
+      chartType,
+      activeIndicators,
+      enableVisionAtlasPlugin,
+      enableTradePlanPlugin,
+      tradePlanOverlay,
+      canonicalSymbol,
+      timeframe,
+      priceDecimals,
+      theme,
+    ]
+  );
+
+  const syncChartRef = useRef(syncChartToInstance);
+  syncChartRef.current = syncChartToInstance;
+
+  // 3. Initialize / Re-mount Chart.js Canvas across theme, decimal, and portal fullscreen swaps with ZERO blank frame
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -376,7 +547,7 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
         layout: {
           padding: {
             top: 20,
-            right: 16,
+            right: 8,
             bottom: 14,
             left: 10,
           },
@@ -407,6 +578,9 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
           },
           y: {
             position: 'right',
+            afterFit: (axis) => {
+              axis.width = Math.max(axis.width, 68);
+            },
             grid: { color: isLight ? 'rgba(203,213,225,0.4)' : 'rgba(30,41,59,0.5)' },
             ticks: {
               color: isLight ? '#334155' : '#94a3b8',
@@ -420,140 +594,30 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
     });
 
     chartInstanceRef.current = chart;
+    // Immediately populate canvas synchronously on mount & fullscreen transition
+    syncChartRef.current(chart);
+    const rafId = requestAnimationFrame(() => {
+      try {
+        chart.resize();
+        syncChartRef.current(chart);
+      } catch {}
+    });
 
     return () => {
+      cancelAnimationFrame(rafId);
       try {
         chart.destroy();
       } catch {}
       chartInstanceRef.current = null;
     };
-  }, [theme, priceDecimals]);
+  }, [theme, priceDecimals, isFullscreen]);
 
-  // 4. Synchronize Streaming Data + Modular Plugins into Chart.js without Canvas Recreate
+  // 4. Synchronize streaming ticks, scale changes & overlays without canvas recreate
   useEffect(() => {
     const chart = chartInstanceRef.current;
-    if (!chart || !telemetry?.recentCandles || telemetry.recentCandles.length === 0) return;
-
-    const allBars = telemetry.recentCandles;
-    const totalBars = allBars.length;
-    const maxPan = Math.max(0, totalBars - 15);
-    const clampedPan = Math.min(panOffset, maxPan);
-    const endIdx = Math.max(15, totalBars - clampedPan);
-    const startIdx = Math.max(0, endIdx - visibleCount);
-    const sliced = allBars.slice(startIdx, endIdx);
-
-    const closes = sliced.map((c) => c.close);
-    const timeLabels = sliced.map((c) => c.time || new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-    const futureSlots = clampedPan === 0 ? Math.min(8, Math.max(5, quantumHorizon)) : 0;
-    const labels = [...timeLabels, ...Array(futureSlots).fill('')];
-
-    const ema20Arr = activeIndicators.includes('EMA20') ? calculateEMA(closes, 20) : [];
-    const ema50Arr = activeIndicators.includes('EMA50') ? calculateEMA(closes, Math.min(50, closes.length)) : [];
-    const ema200Arr = activeIndicators.includes('EMA200') ? calculateEMA(closes, Math.min(200, closes.length)) : [];
-    const bbObj = activeIndicators.includes('BB') ? calculateBollingerBands(closes, 20, 2) : null;
-
-    chart.data.labels = labels;
-    // Price line dataset visible only in Line mode; in Candles mode, CandlestickCanvasPlugin draws OHLC cleanly
-    chart.data.datasets[0].data = closes;
-    (chart.data.datasets[0] as any).borderColor = chartType === 'Line' ? '#06b6d4' : 'transparent';
-    (chart.data.datasets[0] as any).fill = chartType === 'Line';
-
-    chart.data.datasets[1].data = ema20Arr;
-    chart.data.datasets[2].data = ema50Arr;
-    chart.data.datasets[3].data = ema200Arr;
-    chart.data.datasets[4].data = bbObj ? bbObj.upper : [];
-    chart.data.datasets[5].data = bbObj ? bbObj.lower : [];
-
-    // Compute generous y-bounds encompassing candles + active trade plan so nothing clips against edges
-    const allLows = sliced.map((c) => c.low);
-    const allHighs = sliced.map((c) => c.high);
-    if (enableTradePlanPlugin && tradePlanOverlay?.enabled) {
-      if (tradePlanOverlay.stopLoss) allLows.push(tradePlanOverlay.stopLoss);
-      if (tradePlanOverlay.target1) allHighs.push(tradePlanOverlay.target1);
-    }
-    const minY = Math.min(...allLows);
-    const maxY = Math.max(...allHighs);
-    const pad = Math.max((maxY - minY) * 0.14, minY * 0.0018);
-    if (chart.options.scales?.y) {
-      chart.options.scales.y.min = minY - pad;
-      chart.options.scales.y.max = maxY + pad;
-    }
-
-    const qriContext: QriChartJsPluginData = {
-      candles: sliced.map((c) => ({
-        time: c.time,
-        timestamp: c.timestamp,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-        volume: c.volume,
-      })),
-      symbol: canonicalSymbol,
-      timeframe,
-      priceDecimals,
-      chartType,
-      theme,
-      livePrice: telemetry.livePrice,
-      indicators: {
-        ema20: activeIndicators.includes('EMA20'),
-        ema50: activeIndicators.includes('EMA50'),
-        ema200: activeIndicators.includes('EMA200'),
-        bollingerBands: activeIndicators.includes('BB'),
-        rsi14: telemetry.indicatorReadings.rsi14,
-        macdHistogram: telemetry.indicatorReadings.macdHistogram,
-        atr14: telemetry.indicatorReadings.atr14,
-        stochK: telemetry.indicatorReadings.stochK,
-        stochD: telemetry.indicatorReadings.stochD,
-      },
-      visionAtlas: {
-        enabled: enableVisionAtlasPlugin || showQuantumDrawer || showLiquidityModal || activeVisionPanel !== 'none',
-        showLabZones: enableVisionAtlasPlugin || activeVisionPanel === 'lab',
-        showOrderBlocks: enableVisionAtlasPlugin,
-        showBos: enableVisionAtlasPlugin,
-        showChoch: enableVisionAtlasPlugin,
-        showInternalStructure: enableVisionAtlasPlugin,
-        showQuantumFan: showQuantumDrawer || enableVisionAtlasPlugin,
-        showMarketDna: activeVisionPanel === 'dna' || enableVisionAtlasPlugin,
-        showLiquidityHeatmap: showLiquidityModal || enableVisionAtlasPlugin,
-        horizonCandles: quantumHorizon,
-      },
-      tradePlan: enableTradePlanPlugin ? tradePlanOverlay : { enabled: false },
-    };
-
-    (chart.options.plugins as any).qriContext = qriContext;
-
-    chart.options.onHover = (_evt, elements) => {
-      if (elements && elements.length > 0) {
-        const idx = elements[0].index;
-        const bar = sliced[idx];
-        if (bar) {
-          setHoveredOhlc({ o: bar.open, h: bar.high, l: bar.low, c: bar.close });
-        }
-      } else {
-        setHoveredOhlc(null);
-      }
-    };
-
-    chart.update('none');
-  }, [
-    telemetry,
-    visibleCount,
-    panOffset,
-    quantumHorizon,
-    showQuantumDrawer,
-    showLiquidityModal,
-    activeVisionPanel,
-    chartType,
-    activeIndicators,
-    enableVisionAtlasPlugin,
-    enableTradePlanPlugin,
-    tradePlanOverlay,
-    canonicalSymbol,
-    timeframe,
-    priceDecimals,
-    theme,
-  ]);
+    if (!chart) return;
+    syncChartToInstance(chart);
+  }, [telemetry, manualYBounds, syncChartToInstance]);
 
   const handleSelectInstrument = async (nextSymbolOrQuery: string) => {
     const clean = nextSymbolOrQuery.trim();
@@ -561,6 +625,9 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
     const nextResolved = liveChartTelemetryService.resolveSymbol(clean);
     setShowSymbolSearch(false);
     setSearchQuery('');
+    manualYBoundsRef.current = null;
+    setManualYBounds(null);
+    setYAxisMode('AUTO');
 
     onSymbolChange?.(nextResolved.symbol);
 
@@ -572,6 +639,7 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
       if (res.ok) {
         const data = await res.json();
         if (data?.telemetry) {
+          telemetryRef.current = data.telemetry;
           setTelemetry(data.telemetry);
           onChartTelemetryUpdate?.(data.telemetry);
           onSymbolChange?.(nextResolved.symbol, data.telemetry);
@@ -581,6 +649,9 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
   };
 
   const handleSelectTimeframe = async (nextTf: string) => {
+    manualYBoundsRef.current = null;
+    setManualYBounds(null);
+    setYAxisMode('AUTO');
     onTimeframeChange?.(nextTf);
     try {
       const res = await fetch(
@@ -590,6 +661,7 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
       if (res.ok) {
         const data = await res.json();
         if (data?.telemetry) {
+          telemetryRef.current = data.telemetry;
           setTelemetry(data.telemetry);
           onChartTelemetryUpdate?.(data.telemetry);
           onTimeframeChange?.(nextTf, data.telemetry);
@@ -609,40 +681,177 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
     return formatAssetPrice(v, resolved.assetClass, canonicalSymbol);
   };
 
-  const totalCandleCount = telemetry?.recentCandles?.length || 120;
+  const totalCandleCount = telemetry?.recentCandles?.length || 180;
   const maxPanAllowed = Math.max(0, totalCandleCount - 15);
 
+  const scaleVerticalSpan = useCallback((factor: number) => {
+    const base = manualYBoundsRef.current || lastAutoYBoundsRef.current;
+    const mid = (base.min + base.max) / 2;
+    const curSpan = Math.max(base.max - base.min, mid * 0.0002);
+    const nextHalf = Math.max(mid * 0.0001, Math.min(mid * 2.5, (curSpan * factor) / 2));
+    const nextBounds = { min: mid - nextHalf, max: mid + nextHalf };
+    manualYBoundsRef.current = nextBounds;
+    setManualYBounds(nextBounds);
+    setYAxisMode('MANUAL');
+    if (chartInstanceRef.current) {
+      syncChartRef.current(chartInstanceRef.current);
+    }
+  }, []);
+
+  const handleResetYAxis = useCallback(() => {
+    manualYBoundsRef.current = null;
+    setManualYBounds(null);
+    setYAxisMode('AUTO');
+    if (chartInstanceRef.current) {
+      syncChartRef.current(chartInstanceRef.current);
+    }
+  }, []);
+
   const handleZoomIn = () => setVisibleCount((prev) => Math.max(15, prev - 10));
-  const handleZoomOut = () => setVisibleCount((prev) => Math.min(Math.max(120, totalCandleCount), prev + 10));
+  const handleZoomOut = () => setVisibleCount((prev) => Math.min(Math.max(180, totalCandleCount), prev + 10));
   const handlePanLeft = () => setPanOffset((prev) => Math.min(maxPanAllowed, prev + 8));
   const handlePanRight = () => setPanOffset((prev) => Math.max(0, prev - 8));
   const handleAutoFit = () => {
     setVisibleCount(55);
     setPanOffset(0);
+    handleResetYAxis();
   };
 
-  const handleWheelZoom = (e: React.WheelEvent<HTMLDivElement>) => {
-    setVisibleCount((prev) => {
-      const delta = e.deltaY > 0 ? 10 : -10;
-      return Math.min(Math.max(120, totalCandleCount), Math.max(15, prev + delta));
-    });
+  // Native non-passive wheel listener: wheel over Y-axis strip (or Shift+Wheel) scales Y; wheel over plot zooms X
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const canvas = canvasRef.current;
+      const chart = chartInstanceRef.current;
+      const rect = canvas?.getBoundingClientRect();
+      const px = rect ? e.clientX - rect.left : 0;
+      const isOverYAxis = Boolean(chart?.chartArea && px >= chart.chartArea.right);
+
+      if (isOverYAxis || e.shiftKey) {
+        const factor = e.deltaY > 0 ? 1.15 : 0.87;
+        scaleVerticalSpan(factor);
+      } else {
+        setVisibleCount((prev) => {
+          const delta = e.deltaY > 0 ? 10 : -10;
+          return Math.min(Math.max(180, totalCandleCount), Math.max(15, prev + delta));
+        });
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [isFullscreen, totalCandleCount, scaleVerticalSpan]);
+
+  // Global window pointer move/up listeners for smooth MT5 Y-axis drag & 2D canvas panning
+  useEffect(() => {
+    if (interactionKind === 'NONE') return;
+
+    const handleWindowPointerMove = (e: PointerEvent) => {
+      const drag = interactionRef.current;
+      const chart = chartInstanceRef.current;
+      if (!drag || !chart) return;
+
+      const dx = e.clientX - drag.startX;
+      const dy = e.clientY - drag.startY;
+      const baseSpan = Math.max(drag.initialYMax - drag.initialYMin, Math.abs(drag.initialYMax) * 0.0002);
+
+      if (drag.kind === 'SCALE_Y') {
+        const factor = Math.max(0.15, Math.min(8.0, Math.exp(dy * 0.007)));
+        const mid = (drag.initialYMin + drag.initialYMax) / 2;
+        const nextHalf = (baseSpan * factor) / 2;
+        const nextBounds = { min: mid - nextHalf, max: mid + nextHalf };
+        manualYBoundsRef.current = nextBounds;
+        setManualYBounds(nextBounds);
+        setYAxisMode('MANUAL');
+        if (chart.options.scales?.y) {
+          chart.options.scales.y.min = nextBounds.min;
+          chart.options.scales.y.max = nextBounds.max;
+          chart.update('none');
+        }
+        return;
+      }
+
+      // Free 2D Panning: X shifts historical candle window, Y shifts vertical price frame
+      const plotW = Math.max(80, (chart.chartArea?.right ?? 400) - (chart.chartArea?.left ?? 0));
+      const stepPx = Math.max(4, plotW / Math.max(10, visibleCount));
+      const barShift = Math.round(dx / stepPx);
+      setPanOffset(Math.max(0, Math.min(maxPanAllowed, drag.initialPanOffset + barShift)));
+
+      if (Math.abs(dy) >= 2 || manualYBoundsRef.current !== null) {
+        const plotH = Math.max(40, (chart.chartArea?.bottom ?? 300) - (chart.chartArea?.top ?? 0));
+        const deltaPrice = (dy / plotH) * baseSpan;
+        const nextBounds = {
+          min: drag.initialYMin + deltaPrice,
+          max: drag.initialYMax + deltaPrice,
+        };
+        manualYBoundsRef.current = nextBounds;
+        setManualYBounds(nextBounds);
+        setYAxisMode('MANUAL');
+        if (chart.options.scales?.y) {
+          chart.options.scales.y.min = nextBounds.min;
+          chart.options.scales.y.max = nextBounds.max;
+          chart.update('none');
+        }
+      }
+    };
+
+    const handleWindowPointerUp = () => {
+      interactionRef.current = null;
+      setInteractionKind('NONE');
+    };
+
+    window.addEventListener('pointermove', handleWindowPointerMove);
+    window.addEventListener('pointerup', handleWindowPointerUp);
+    window.addEventListener('pointercancel', handleWindowPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handleWindowPointerMove);
+      window.removeEventListener('pointerup', handleWindowPointerUp);
+      window.removeEventListener('pointercancel', handleWindowPointerUp);
+    };
+  }, [interactionKind, visibleCount, maxPanAllowed]);
+
+  const handleViewportPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const canvas = canvasRef.current;
+    const chart = chartInstanceRef.current;
+    if (!canvas || !chart) return;
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const isOnYAxis = Boolean(chart.chartArea && px >= chart.chartArea.right);
+
+    const activeBounds = manualYBoundsRef.current || lastAutoYBoundsRef.current;
+    const kind: 'SCALE_Y' | 'PAN_2D' = isOnYAxis ? 'SCALE_Y' : 'PAN_2D';
+
+    interactionRef.current = {
+      kind,
+      startX: e.clientX,
+      startY: e.clientY,
+      initialPanOffset: Math.min(panOffset, maxPanAllowed),
+      initialYMin: activeBounds.min,
+      initialYMax: activeBounds.max,
+    };
+    setInteractionKind(kind);
   };
 
-  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    setIsDraggingPan(true);
-    dragPanRef.current = { clientX: e.clientX, initialOffset: Math.min(panOffset, maxPanAllowed) };
+  const handleViewportPointerMoveHover = (e: React.PointerEvent<HTMLDivElement>) => {
+    const canvas = canvasRef.current;
+    const chart = chartInstanceRef.current;
+    if (!canvas || !chart?.chartArea) return;
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    setIsHoveringYAxis(px >= chart.chartArea.right);
   };
 
-  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isDraggingPan || !dragPanRef.current) return;
-    const dx = e.clientX - dragPanRef.current.clientX;
-    const barShift = Math.round(dx / 12);
-    setPanOffset(Math.max(0, Math.min(maxPanAllowed, dragPanRef.current.initialOffset + barShift)));
-  };
-
-  const handleCanvasMouseUp = () => {
-    setIsDraggingPan(false);
-    dragPanRef.current = null;
+  const handleViewportDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const canvas = canvasRef.current;
+    const chart = chartInstanceRef.current;
+    if (!canvas || !chart?.chartArea) return;
+    const rect = canvas.getBoundingClientRect();
+    if (e.clientX - rect.left >= chart.chartArea.right) {
+      handleResetYAxis();
+    } else {
+      handleAutoFit();
+    }
   };
 
   const visionCandles: Candle[] = useMemo(
@@ -661,16 +870,16 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
 
   const chartNode = (
     <div
-      style={{ height: isFullscreen ? undefined : height }}
+      style={isFullscreen ? { width: '100vw', height: '100dvh' } : { minHeight: Math.min(height, 420) }}
       className={`${
         isFullscreen
-          ? 'fixed inset-0 z-[9999] p-2 sm:p-4 bg-terminal-950/95 backdrop-blur-md'
-          : 'relative w-full h-full'
-      } flex flex-col transition-all`}
+          ? 'fixed inset-0 z-[9999] w-screen h-[100dvh] p-1.5 sm:p-4 bg-terminal-950 flex flex-col overflow-hidden'
+          : 'relative w-full h-full flex flex-col'
+      } transition-colors`}
     >
-      <div className="relative w-full h-full flex flex-col rounded-xl overflow-hidden border border-terminal-border bg-terminal-950 shadow-2xl">
-        {/* 1. Unrestricted Chart.js Control Toolbar + Integrated Vision Atlas Tools */}
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-terminal-900 border-b border-terminal-border text-xs font-mono shrink-0">
+      <div className="relative w-full h-full flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-terminal-border bg-terminal-950 shadow-2xl">
+        {/* 1. Unrestricted Chart.js Control Toolbar + Integrated Vision Atlas Tools + MT5 Scale Controls */}
+        <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-2 bg-terminal-900 border-b border-terminal-border text-xs font-mono shrink-0">
           <div className="flex items-center gap-1.5 flex-wrap">
             {/* Interactive Symbol Search */}
             <button
@@ -685,7 +894,7 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
             </button>
 
             {/* Timeframe Pills */}
-            <div className="flex items-center bg-terminal-950 rounded-lg border border-terminal-border p-0.5">
+            <div className="flex items-center bg-terminal-950 rounded-lg border border-terminal-border p-0.5 overflow-x-auto max-w-full">
               {TIMEFRAMES.map((tf) => (
                 <button
                   key={tf.id}
@@ -719,7 +928,7 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
                 </button>
 
                 {showIndicatorsMenu && (
-                  <div className="absolute left-0 top-full mt-1.5 z-40 w-60 bg-terminal-900 border border-terminal-border rounded-xl shadow-2xl p-2 space-y-1">
+                  <div className="absolute left-0 top-full mt-1.5 z-40 w-60 max-w-[calc(100vw-2rem)] bg-terminal-900 border border-terminal-border rounded-xl shadow-2xl p-2 space-y-1">
                     <div className="flex items-center justify-between px-2 py-1 border-b border-terminal-border/70 text-[10px] text-slate-400">
                       <span>CHART.JS INDICATORS</span>
                       <button
@@ -839,7 +1048,7 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
             </button>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-wrap">
             {/* Candles / Line Switch */}
             <button
               type="button"
@@ -850,17 +1059,17 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
               {chartType === 'Candles' ? (
                 <>
                   <CandlestickChart className="w-3 h-3 text-emerald-400" />
-                  <span>Candles</span>
+                  <span className="hidden md:inline">Candles</span>
                 </>
               ) : (
                 <>
                   <BarChart3 className="w-3 h-3 text-cyan-400" />
-                  <span>Line</span>
+                  <span className="hidden md:inline">Line</span>
                 </>
               )}
             </button>
 
-            {/* Intuitive Pan & Zoom Controls */}
+            {/* Horizontal & MT5 Vertical Price Scale Controls */}
             <button
               type="button"
               onClick={handlePanLeft}
@@ -882,7 +1091,7 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
               type="button"
               onClick={handleZoomIn}
               className="p-1 rounded bg-terminal-800 hover:bg-terminal-700 text-slate-300 hover:text-white transition-colors"
-              title="Zoom In (Granular Price Action)"
+              title="Zoom In (Bars)"
             >
               <ZoomIn className="w-3.5 h-3.5" />
             </button>
@@ -890,27 +1099,62 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
               type="button"
               onClick={handleZoomOut}
               className="p-1 rounded bg-terminal-800 hover:bg-terminal-700 text-slate-300 hover:text-white transition-colors"
-              title="Zoom Out (Broad Trend)"
+              title="Zoom Out (Bars)"
             >
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
+
+            {/* MT5 Y-Axis Price Scale Buttons */}
+            <button
+              type="button"
+              onClick={() => scaleVerticalSpan(0.8)}
+              className="px-1.5 py-1 rounded bg-terminal-800 hover:bg-terminal-700 text-cyan-300 text-[10px] font-bold transition-colors"
+              title="Expand Vertical Price Scale (Zoom Y In)"
+            >
+              Y+
+            </button>
+            <button
+              type="button"
+              onClick={() => scaleVerticalSpan(1.25)}
+              className="px-1.5 py-1 rounded bg-terminal-800 hover:bg-terminal-700 text-cyan-300 text-[10px] font-bold transition-colors"
+              title="Compress Vertical Price Scale to view distant targets (Zoom Y Out)"
+            >
+              Y-
+            </button>
+            <button
+              type="button"
+              onClick={handleResetYAxis}
+              className={`px-1.5 py-1 rounded text-[10px] font-bold border transition-colors ${
+                yAxisMode === 'MANUAL'
+                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30'
+                  : 'bg-terminal-950 border-terminal-border text-slate-400 hover:text-white'
+              }`}
+              title="Toggle/Reset Auto Vertical Price Scaling (Double-click Y-axis)"
+            >
+              {yAxisMode === 'MANUAL' ? 'Y:FREE ↺' : 'Y:AUTO'}
+            </button>
+
             <button
               type="button"
               onClick={handleAutoFit}
               className="p-1 rounded bg-terminal-800 hover:bg-terminal-700 text-slate-300 hover:text-white transition-colors"
-              title="Auto-Fit & Reset View"
+              title="Auto-Fit X & Y Scale"
             >
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
 
             <button
               type="button"
-              onClick={() => setIsFullscreen(!isFullscreen)}
-              className="px-2 py-1 rounded bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-300 hover:text-white transition-colors flex items-center gap-1 text-[10px] font-bold"
+              onClick={() => setIsFullscreen((prev) => !prev)}
+              className={`px-2 py-1 rounded border transition-colors flex items-center gap-1 text-[10px] font-bold ${
+                isFullscreen
+                  ? 'bg-rose-600/25 hover:bg-rose-600/40 border-rose-500/60 text-rose-200'
+                  : 'bg-cyan-600/20 hover:bg-cyan-600/35 border-cyan-500/40 text-cyan-300 hover:text-white'
+              }`}
               title={isFullscreen ? 'Exit Fullscreen (Esc)' : 'Enter Fullscreen Mode'}
             >
               {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-              <span className="hidden sm:inline">{isFullscreen ? 'Exit' : 'Full'}</span>
+              <span>{isFullscreen ? 'Exit Full' : 'Full'}</span>
             </button>
           </div>
         </div>
@@ -945,6 +1189,9 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
             {telemetry?.indicatorReadings.atr14 !== undefined && (
               <span>ATR: <strong className="text-amber-300">{formatVal(telemetry.indicatorReadings.atr14)}</strong></span>
             )}
+            <span className="hidden md:inline text-[9px] text-cyan-400/80">
+              Drag chart (X/Y) • Drag price axis to scale
+            </span>
             <span className={`px-1.5 py-0.2 rounded border ${
               streamStatus === 'RECONNECTING' || streamStatus === 'DEGRADED'
                 ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
@@ -957,7 +1204,7 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
 
         {/* 3. Symbol Search Dropdown */}
         {showSymbolSearch && (
-          <div className="absolute top-11 left-3 z-50 w-80 sm:w-96 bg-terminal-900 border border-cyan-500/40 rounded-xl shadow-2xl overflow-hidden font-mono text-xs">
+          <div className="absolute top-11 left-3 z-50 w-80 sm:w-96 max-w-[calc(100vw-1.5rem)] bg-terminal-900 border border-cyan-500/40 rounded-xl shadow-2xl overflow-hidden font-mono text-xs">
             <div className="p-2.5 border-b border-terminal-border flex items-center gap-2 bg-terminal-950">
               <Search className="w-4 h-4 text-cyan-400 shrink-0" />
               <input
@@ -1013,7 +1260,7 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
           </div>
         )}
 
-        {/* 4. Unrestricted Open-Source Chart.js Canvas Viewport + Integrated Vision Atlas Drawers */}
+        {/* 4. Unrestricted Open-Source Chart.js Canvas Viewport + MT5 Price Axis + Integrated Drawers */}
         <div className="relative flex-1 min-h-0 flex overflow-hidden bg-terminal-950">
           <QuantumVisionDrawer
             isOpen={showQuantumDrawer}
@@ -1040,26 +1287,40 @@ export const ChartJsResearchChart: React.FC<TradingViewLiveChartProps> = memo(({
           />
 
           <div
-            onWheel={handleWheelZoom}
-            onMouseDown={handleCanvasMouseDown}
-            onMouseMove={handleCanvasMouseMove}
-            onMouseUp={handleCanvasMouseUp}
-            onMouseLeave={handleCanvasMouseUp}
-            className={`relative flex-1 min-w-0 min-h-0 bg-terminal-950 px-3 py-2 select-none ${
-              isDraggingPan ? 'cursor-grabbing' : 'cursor-grab'
+            ref={viewportRef}
+            onPointerDown={handleViewportPointerDown}
+            onPointerMove={handleViewportPointerMoveHover}
+            onPointerLeave={() => setIsHoveringYAxis(false)}
+            onDoubleClick={handleViewportDoubleClick}
+            className={`relative flex-1 min-w-0 min-h-0 bg-terminal-950 px-2 sm:px-3 py-2 select-none touch-none ${
+              interactionKind === 'SCALE_Y' || isHoveringYAxis
+                ? 'cursor-ns-resize'
+                : interactionKind === 'PAN_2D'
+                ? 'cursor-grabbing'
+                : 'cursor-grab'
             }`}
           >
+            {/* Interactive Y-Axis MT5 Visual Rail Indicator */}
+            <div
+              className={`pointer-events-none absolute top-2 bottom-2 right-2 w-[64px] rounded-r border-l transition-colors ${
+                interactionKind === 'SCALE_Y' || isHoveringYAxis
+                  ? 'border-cyan-400/60 bg-cyan-500/10'
+                  : 'border-slate-700/30 bg-transparent'
+              }`}
+              title="Drag vertically to scale price axis (MT5 mode)"
+            />
+
             {!telemetry && (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-terminal-950/90 text-cyan-400 font-mono text-xs gap-2">
                 <RefreshCw className="w-5 h-5 animate-spin" />
                 <span>INITIALIZING CHART.JS STREAMING FEED ({canonicalSymbol})...</span>
               </div>
             )}
-            <canvas ref={canvasRef} className="w-full h-full" />
+            <canvas ref={canvasRef} className="w-full h-full block" />
           </div>
 
           {activeVisionPanel !== 'none' && (
-            <div className="w-[270px] sm:w-[300px] shrink-0 border-l border-terminal-border bg-terminal-950 flex flex-col min-h-0">
+            <div className="w-64 sm:w-72 md:w-[300px] shrink-0 border-l border-terminal-border bg-terminal-950 flex flex-col min-h-0">
               {activeVisionPanel === 'lab' ? (
                 <VisionAtlasLabSidebar
                   pair={canonicalSymbol as CurrencyPair}

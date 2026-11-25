@@ -85,6 +85,10 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
   const activeChartTelemetryRef = useRef<ChartLiveContext | null>(null);
   const [autoSyncAnalyze, setAutoSyncAnalyze] = useState<boolean>(true);
   const lastAutoTriggeredKeyRef = useRef<string>('');
+  const runSeqRef = useRef<number>(0);
+  const phaseTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const lastAnalyzedKeyRef = useRef<string>('');
+  const lastAnalyzedPriceRef = useRef<number>(0);
 
   const [activeWorkflow, setActiveWorkflow] = useState<ResearchEngineWorkflow>('ANALYZE_FULL');
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
@@ -116,9 +120,43 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
   const [showPdfModal, setShowPdfModal] = useState<boolean>(false);
   const [pdfHtml, setPdfHtml] = useState<string>('');
 
-  // Run initial analysis on mount
+  // Stable refs so SSE telemetry callbacks never tear down chart subscriptions
+  const activeSymbolRef = useRef<string>(activeSymbol);
+  const activeTimeframeRef = useRef<string>(activeTimeframe);
+  const activeWorkflowRef = useRef<ResearchEngineWorkflow>(activeWorkflow);
+  const autoSyncAnalyzeRef = useRef<boolean>(autoSyncAnalyze);
+  const isExecutingRef = useRef<boolean>(isExecuting);
+  const compareSymbolBRef = useRef<string>(compareSymbolB);
+  const reportRef = useRef<ResearchReportSnapshot | null>(report);
+  const executeWorkflowRef = useRef<
+    ((
+      workflow: ResearchEngineWorkflow,
+      sym?: string,
+      symB?: string,
+      explicitTelemetry?: ChartLiveContext,
+      tfOverride?: string
+    ) => Promise<void>) | null
+  >(null);
+
+  activeSymbolRef.current = activeSymbol;
+  activeTimeframeRef.current = activeTimeframe;
+  activeWorkflowRef.current = activeWorkflow;
+  autoSyncAnalyzeRef.current = autoSyncAnalyze;
+  isExecutingRef.current = isExecuting;
+  compareSymbolBRef.current = compareSymbolB;
+  reportRef.current = report;
+
+  useEffect(() => {
+    executeWorkflowRef.current = executeWorkflow;
+  });
+
+  // Run initial analysis on mount and clean up pending stage timers on unmount
   useEffect(() => {
     executeWorkflow('ANALYZE_FULL', initialCanonical);
+    return () => {
+      phaseTimersRef.current.forEach((id) => clearTimeout(id));
+      phaseTimersRef.current = [];
+    };
   }, []);
 
   // Bidirectional sync if parent prop initialSymbol changes (e.g. from global Header pair switcher)
@@ -126,7 +164,17 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
     const nextCanonical = liveChartTelemetryService.resolveSymbol(initialSymbol).symbol;
     if (nextCanonical && nextCanonical !== activeSymbol) {
       setActiveSymbol(nextCanonical);
+      activeSymbolRef.current = nextCanonical;
       setSymbolInput(nextCanonical);
+      setActiveChartTelemetry(null);
+      activeChartTelemetryRef.current = null;
+      lastAnalyzedKeyRef.current = '';
+      lastAnalyzedPriceRef.current = 0;
+      setQuickSnapshot(null);
+      setCompareData(null);
+      setOptionsData(null);
+      setEarningsData(null);
+      setStandaloneAgentData(null);
       executeWorkflow('ANALYZE_FULL', nextCanonical);
     }
   }, [initialSymbol]);
@@ -147,49 +195,121 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
   };
 
   const handleChartTelemetryUpdate = useCallback((telemetry: ChartLiveContext) => {
+    const telSym = liveChartTelemetryService.resolveSymbol(telemetry.symbol).symbol;
+    if (telSym !== activeSymbolRef.current) {
+      return;
+    }
+
     setActiveChartTelemetry(telemetry);
     activeChartTelemetryRef.current = telemetry;
+
+    const telTf = telemetry.timeframe || activeTimeframeRef.current;
+    if (telemetry.timeframe && telemetry.timeframe !== activeTimeframeRef.current) {
+      setActiveTimeframe(telemetry.timeframe);
+      activeTimeframeRef.current = telemetry.timeframe;
+    }
+
+    if (!autoSyncAnalyzeRef.current) return;
+
+    const telKey = `${telSym}_${telTf}`;
+    const currentReport = reportRef.current;
+    const needsLiveSync =
+      !currentReport ||
+      currentReport.symbol !== telSym ||
+      !currentReport.brief?.chartContext ||
+      lastAnalyzedKeyRef.current !== telKey;
+
+    const basePrice = lastAnalyzedPriceRef.current;
+    const priceShiftPct =
+      basePrice > 0 ? Math.abs(telemetry.livePrice - basePrice) / basePrice : 0;
+    const significantLiveMove = priceShiftPct >= 0.004 && !isExecutingRef.current;
+
+    if (needsLiveSync || significantLiveMove) {
+      lastAnalyzedKeyRef.current = telKey;
+      lastAnalyzedPriceRef.current = telemetry.livePrice;
+      lastAutoTriggeredKeyRef.current = telKey;
+      const targetWorkflow =
+        activeWorkflowRef.current === 'REPORT_PDF' || activeWorkflowRef.current === 'COMPARE_ASSETS'
+          ? 'ANALYZE_FULL'
+          : activeWorkflowRef.current;
+      executeWorkflowRef.current?.(targetWorkflow, telSym, compareSymbolBRef.current, telemetry, telTf);
+    }
   }, []);
 
   const handleChartSymbolChange = useCallback(
     (newSym: string, telemetry?: ChartLiveContext) => {
       const nextCanonical = liveChartTelemetryService.resolveSymbol(newSym).symbol;
+      const symbolChanged = nextCanonical !== activeSymbolRef.current;
+      if (symbolChanged) {
+        lastAnalyzedKeyRef.current = '';
+        lastAnalyzedPriceRef.current = 0;
+        setQuickSnapshot(null);
+        setCompareData(null);
+        setOptionsData(null);
+        setEarningsData(null);
+        setStandaloneAgentData(null);
+      }
+
+      activeSymbolRef.current = nextCanonical;
       setActiveSymbol(nextCanonical);
       syncCommandInputWithSymbol(nextCanonical);
       if (telemetry) {
         setActiveChartTelemetry(telemetry);
         activeChartTelemetryRef.current = telemetry;
+      } else if (symbolChanged) {
+        setActiveChartTelemetry(null);
+        activeChartTelemetryRef.current = null;
       }
       onSymbolChange?.(nextCanonical);
 
       // Deduplicate between immediate click notification and telemetry-arrival notification
-      const triggerKey = `${nextCanonical}_${activeTimeframe}`;
-      if (autoSyncAnalyze && (telemetry || lastAutoTriggeredKeyRef.current !== triggerKey)) {
+      const targetTf = telemetry?.timeframe || activeTimeframeRef.current;
+      const triggerKey = `${nextCanonical}_${targetTf}`;
+      if (autoSyncAnalyzeRef.current && (telemetry || lastAutoTriggeredKeyRef.current !== triggerKey)) {
         lastAutoTriggeredKeyRef.current = triggerKey;
+        if (telemetry) {
+          lastAnalyzedKeyRef.current = triggerKey;
+          lastAnalyzedPriceRef.current = telemetry.livePrice;
+        }
         const targetWorkflow =
-          activeWorkflow === 'REPORT_PDF' || activeWorkflow === 'COMPARE_ASSETS'
+          activeWorkflowRef.current === 'REPORT_PDF' || activeWorkflowRef.current === 'COMPARE_ASSETS'
             ? 'ANALYZE_FULL'
-            : activeWorkflow;
-        executeWorkflow(targetWorkflow, nextCanonical, compareSymbolB, telemetry, activeTimeframe);
+            : activeWorkflowRef.current;
+        executeWorkflowRef.current?.(targetWorkflow, nextCanonical, compareSymbolBRef.current, telemetry, targetTf);
       }
     },
-    [activeTimeframe, activeWorkflow, autoSyncAnalyze, compareSymbolB, onSymbolChange, symbolInput]
+    [onSymbolChange, symbolInput]
   );
 
   const handleChartTimeframeChange = useCallback(
     (newTf: string, telemetry?: ChartLiveContext) => {
       setActiveTimeframe(newTf);
+      activeTimeframeRef.current = newTf;
+      const currentSym = activeSymbolRef.current;
+      const telKey = `${currentSym}_${newTf}`;
+
       if (telemetry) {
         setActiveChartTelemetry(telemetry);
         activeChartTelemetryRef.current = telemetry;
-        if (autoSyncAnalyze) {
-          const targetWorkflow =
-            activeWorkflow === 'REPORT_PDF' ? 'ANALYZE_FULL' : activeWorkflow;
-          executeWorkflow(targetWorkflow, activeSymbol, compareSymbolB, telemetry, newTf);
-        }
+        lastAnalyzedKeyRef.current = telKey;
+        lastAnalyzedPriceRef.current = telemetry.livePrice;
+      } else {
+        lastAnalyzedKeyRef.current = '';
+      }
+
+      if (autoSyncAnalyzeRef.current) {
+        const currentTel =
+          telemetry ||
+          (activeChartTelemetryRef.current &&
+          liveChartTelemetryService.resolveSymbol(activeChartTelemetryRef.current.symbol).symbol === currentSym
+            ? activeChartTelemetryRef.current
+            : undefined);
+        const targetWorkflow =
+          activeWorkflowRef.current === 'REPORT_PDF' ? 'ANALYZE_FULL' : activeWorkflowRef.current;
+        executeWorkflowRef.current?.(targetWorkflow, currentSym, compareSymbolBRef.current, currentTel, newTf);
       }
     },
-    [activeSymbol, activeWorkflow, autoSyncAnalyze, compareSymbolB]
+    []
   );
 
   const handleCommandSubmit = (cmdText: string) => {
@@ -214,11 +334,30 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
     explicitTelemetry?: ChartLiveContext,
     tfOverride?: string
   ) => {
+    const seq = ++runSeqRef.current;
+    phaseTimersRef.current.forEach((id) => clearTimeout(id));
+    phaseTimersRef.current = [];
+
+    const prevSym = activeSymbolRef.current;
     const cleanSym = liveChartTelemetryService.resolveSymbol(sym || activeSymbol).symbol;
     const targetTf = tfOverride || activeTimeframe;
+
+    if (cleanSym !== prevSym) {
+      setQuickSnapshot(null);
+      setCompareData(null);
+      setOptionsData(null);
+      setEarningsData(null);
+      setStandaloneAgentData(null);
+      lastAnalyzedKeyRef.current = '';
+      lastAnalyzedPriceRef.current = 0;
+    }
+
+    activeSymbolRef.current = cleanSym;
+    activeTimeframeRef.current = targetTf;
     setActiveSymbol(cleanSym);
     setActiveWorkflow(workflow);
     setIsExecuting(true);
+    isExecutingRef.current = true;
 
     // Match explicit telemetry or currently captured active chart telemetry if symbols match
     const candidateTelemetry = explicitTelemetry || activeChartTelemetryRef.current;
@@ -228,27 +367,49 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
         ? candidateTelemetry
         : undefined;
 
+    if (!matchingTelemetry && activeChartTelemetryRef.current) {
+      const currentTelSym = liveChartTelemetryService.resolveSymbol(activeChartTelemetryRef.current.symbol).symbol;
+      if (currentTelSym !== cleanSym) {
+        setActiveChartTelemetry(null);
+        activeChartTelemetryRef.current = null;
+      }
+    }
+
+    const scheduleStage = (fn: () => void, delayMs: number) => {
+      const id = setTimeout(() => {
+        if (seq !== runSeqRef.current) return;
+        fn();
+      }, delayMs);
+      phaseTimersRef.current.push(id);
+    };
+
     try {
       if (workflow === 'ANALYZE_FULL') {
         setExecutionPhase('PHASE_1_DISCOVERY');
         setParallelAgentsRunning({ technical: false, fundamental: false, sentiment: false, risk: false, thesis: false });
-        
-        setTimeout(() => {
+        if (matchingTelemetry) {
+          lastAnalyzedKeyRef.current = `${cleanSym}_${targetTf}`;
+          lastAnalyzedPriceRef.current = matchingTelemetry.livePrice;
+        } else {
+          lastAnalyzedKeyRef.current = '';
+        }
+
+        scheduleStage(() => {
           setExecutionPhase('PHASE_2_PARALLEL');
           setParallelAgentsRunning(p => ({ ...p, technical: true }));
-        }, 150);
-        setTimeout(() => {
+        }, 120);
+        scheduleStage(() => {
           setParallelAgentsRunning(p => ({ ...p, fundamental: true }));
-        }, 300);
-        setTimeout(() => {
+        }, 220);
+        scheduleStage(() => {
           setParallelAgentsRunning(p => ({ ...p, sentiment: true }));
-        }, 450);
-        setTimeout(() => {
+        }, 320);
+        scheduleStage(() => {
           setParallelAgentsRunning(p => ({ ...p, risk: true }));
-        }, 600);
-        setTimeout(() => {
+        }, 420);
+        scheduleStage(() => {
           setParallelAgentsRunning(p => ({ ...p, thesis: true }));
-        }, 750);
+        }, 520);
 
         const res = await fetch('/api/research/analyze', {
           method: 'POST',
@@ -259,23 +420,41 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             chartContext: matchingTelemetry,
           }),
         });
+
+        phaseTimersRef.current.forEach((id) => clearTimeout(id));
+        phaseTimersRef.current = [];
+        if (seq !== runSeqRef.current) return;
+
         if (res.ok) {
           const data = await res.json();
-          setTimeout(() => {
-            setExecutionPhase('PHASE_3_SYNTHESIS');
-            setParallelAgentsRunning({ technical: false, fundamental: false, sentiment: false, risk: false, thesis: false });
-            setTimeout(() => {
-              setReport(data.report);
-              if (data.report?.brief?.chartContext) {
-                setActiveChartTelemetry(data.report.brief.chartContext);
-                activeChartTelemetryRef.current = data.report.brief.chartContext;
-              }
-              setExecutionPhase('COMPLETED');
-              setIsExecuting(false);
-            }, 250);
-          }, 800);
+          if (seq !== runSeqRef.current) return;
+
+          setExecutionPhase('PHASE_3_SYNTHESIS');
+          setParallelAgentsRunning({ technical: false, fundamental: false, sentiment: false, risk: false, thesis: false });
+          setReport(data.report);
+          reportRef.current = data.report;
+
+          const resolvedTf = data.report?.brief?.chartContext?.timeframe || targetTf;
+          lastAnalyzedKeyRef.current = `${cleanSym}_${resolvedTf}`;
+          lastAnalyzedPriceRef.current =
+            matchingTelemetry?.livePrice ?? data.report?.brief?.pricing?.currentPrice ?? 0;
+
+          // Only initialize telemetry from report if live SSE stream hasn't already populated this symbol
+          const currentTel = activeChartTelemetryRef.current;
+          const currentTelSym = currentTel
+            ? liveChartTelemetryService.resolveSymbol(currentTel.symbol).symbol
+            : null;
+          if (data.report?.brief?.chartContext && (!currentTel || currentTelSym !== cleanSym)) {
+            setActiveChartTelemetry(data.report.brief.chartContext);
+            activeChartTelemetryRef.current = data.report.brief.chartContext;
+          }
+
+          setExecutionPhase('COMPLETED');
+          setIsExecuting(false);
+          isExecutingRef.current = false;
         } else {
           setIsExecuting(false);
+          isExecutingRef.current = false;
         }
       } else if (workflow === 'QUICK_SNAPSHOT') {
         setExecutionPhase('PHASE_1_DISCOVERY');
@@ -288,13 +467,16 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             chartContext: matchingTelemetry,
           }),
         });
+        if (seq !== runSeqRef.current) return;
         if (res.ok) {
           const data = await res.json();
+          if (seq !== runSeqRef.current) return;
           setQuickSnapshot(data);
           setExecutionPhase('COMPLETED');
           setActiveTab('workflows');
         }
         setIsExecuting(false);
+        isExecutingRef.current = false;
       } else if (workflow === 'SECTOR_ROTATION') {
         const res = await fetch('/api/research/workflows?action=SECTOR_ROTATION');
         if (res.ok) {
@@ -613,9 +795,9 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
       {/* ============================================================= */}
       {/* 2. UNRESTRICTED CHART.JS STREAMING CHART & COMMUNITY CHAT FEED */}
       {/* ============================================================= */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
         {/* Left: Unrestricted Chart.js Live Chart + Integrated Vision Atlas Tools */}
-        <div className="xl:col-span-7 h-[560px] bg-terminal-950 border border-terminal-border rounded-xl overflow-hidden shadow-lg">
+        <div className="xl:col-span-7 h-[450px] sm:h-[530px] xl:h-[580px] bg-terminal-950 border border-terminal-border rounded-xl overflow-hidden shadow-lg">
           <ChartJsResearchChart
             symbol={activeSymbol}
             timeframe={activeTimeframe}
@@ -644,11 +826,34 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
         </div>
 
         {/* Right: Single-Asset Live Community Feed */}
-        <div className="xl:col-span-5 h-[560px]">
+        <div className="xl:col-span-5 h-[430px] sm:h-[500px] xl:h-[580px]">
           <CommunityLiveChatFeed
             activeSymbol={activeSymbol}
+            activeTimeframe={activeTimeframe}
             singleAssetMode={true}
             isAnalyzing={isExecuting}
+            chartTelemetry={
+              activeChartTelemetry &&
+              liveChartTelemetryService.resolveSymbol(activeChartTelemetry.symbol).symbol === activeSymbol
+                ? activeChartTelemetry
+                : null
+            }
+            report={report && report.symbol === activeSymbol ? report : null}
+            onMessageDispatched={() => {
+              const currentTel =
+                activeChartTelemetryRef.current &&
+                liveChartTelemetryService.resolveSymbol(activeChartTelemetryRef.current.symbol).symbol ===
+                  activeSymbolRef.current
+                  ? activeChartTelemetryRef.current
+                  : undefined;
+              executeWorkflow(
+                'ANALYZE_FULL',
+                activeSymbolRef.current,
+                compareSymbolBRef.current,
+                currentTel,
+                activeTimeframeRef.current
+              );
+            }}
           />
         </div>
       </div>
@@ -771,16 +976,46 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               <h2 className="text-xl sm:text-2xl font-bold text-white font-mono">
                 {report.symbol} <span className="text-sm font-normal text-slate-400">({report.name})</span>
               </h2>
-              <div className="text-sm font-mono text-slate-300 flex items-center gap-2 flex-wrap">
-                <span>Live Chart Price: <strong className="text-white">{report.brief.pricing.currency} {formatAssetPrice(report.brief.pricing.currentPrice, report.assetClass, report.symbol)}</strong></span>
-                <span className={`font-bold ${report.brief.pricing.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  ({report.brief.pricing.change >= 0 ? '+' : ''}{report.brief.pricing.changePercent}%)
-                </span>
-                <span className="text-slate-500">•</span>
-                <span className="text-xs text-cyan-400">RSI-14: {report.technical.rsi14} • ATR: {formatAssetPrice(report.brief.volatility.atr14, report.assetClass, report.symbol)}</span>
-                <span className="text-slate-500">•</span>
-                <span className="text-xs text-emerald-400">Chat Room: {report.brief.chatTranscript?.tickerTag || `$${report.symbol}`} ({report.brief.chatTranscript?.totalMessages ?? 5} msgs)</span>
-              </div>
+              {(() => {
+                const liveTel =
+                  activeChartTelemetry &&
+                  liveChartTelemetryService.resolveSymbol(activeChartTelemetry.symbol).symbol === report.symbol
+                    ? activeChartTelemetry
+                    : null;
+                const displayPrice = liveTel ? liveTel.livePrice : report.brief.pricing.currentPrice;
+                const displayChangePct = liveTel ? liveTel.changePercent : report.brief.pricing.changePercent;
+                const displayRsi =
+                  liveTel?.indicatorReadings?.rsi14 !== undefined
+                    ? Number(liveTel.indicatorReadings.rsi14.toFixed(1))
+                    : report.technical.rsi14;
+                const displayAtr =
+                  liveTel?.indicatorReadings?.atr14 !== undefined
+                    ? liveTel.indicatorReadings.atr14
+                    : report.brief.volatility.atr14;
+                const displayTf = liveTel?.timeframe || report.brief.chartContext?.timeframe || activeTimeframe;
+
+                return (
+                  <div className="text-xs sm:text-sm font-mono text-slate-300 flex items-center gap-2 flex-wrap">
+                    <span>
+                      Live Chart Price:{' '}
+                      <strong className="text-white">
+                        {report.brief.pricing.currency} {formatAssetPrice(displayPrice, report.assetClass, report.symbol)}
+                      </strong>
+                    </span>
+                    <span className={`font-bold ${displayChangePct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      ({displayChangePct >= 0 ? '+' : ''}{displayChangePct.toFixed(2)}%)
+                    </span>
+                    <span className="text-slate-500">•</span>
+                    <span className="text-xs text-cyan-400">
+                      TF: {displayTf.toUpperCase()} • RSI-14: {displayRsi} • ATR: {formatAssetPrice(displayAtr, report.assetClass, report.symbol)}
+                    </span>
+                    <span className="text-slate-500">•</span>
+                    <span className="text-xs text-emerald-400">
+                      Chat Room: {report.brief.chatTranscript?.tickerTag || `$${report.symbol}`} ({report.brief.chatTranscript?.totalMessages ?? 5} msgs)
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Right: SVG Semi-Circular Score Gauge */}
@@ -902,7 +1137,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               Every specialized agent returns five strict 0–20 sub-scores within operational boundaries. Risk Assessment sub-scores are inverted where higher score equals lower risk / superior capital protection.
             </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 pt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 pt-2">
               {['Technical', 'Fundamental', 'Sentiment', 'Risk', 'Thesis'].map((agentName) => {
                 const subScores = report.all25SubScores.filter(s => s.agent === agentName);
                 return (

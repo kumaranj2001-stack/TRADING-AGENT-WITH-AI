@@ -128,6 +128,19 @@ export interface ChartOHLCVBar {
   volume: number;
 }
 
+export interface ChartPriceScaleMetadata {
+  minPrice: number;
+  maxPrice: number;
+  rangeSpan: number;
+  atr14: number;
+  tickStep: number;
+  priceDecimals: number;
+  recommendedMinY: number;
+  recommendedMaxY: number;
+  supportsVerticalPan: boolean;
+  supportsPriceScaleDrag: boolean;
+}
+
 export interface ChartLiveContext {
   symbol: string;
   tvSymbol: string;
@@ -145,6 +158,7 @@ export interface ChartLiveContext {
   activeIndicators: string[];
   indicatorReadings: ChartIndicatorReadings;
   recentCandles?: ChartOHLCVBar[];
+  priceScale?: ChartPriceScaleMetadata;
   source: 'CHART_WIDGET_EVENT' | 'TRADINGVIEW_SCANNER' | 'YAHOO_FINANCE' | 'SYNTHETIC_FALLBACK';
   timestamp: number;
 }

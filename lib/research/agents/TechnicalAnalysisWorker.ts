@@ -338,13 +338,23 @@ export class TechnicalAnalysisWorker {
     }
 
     // 7. Five Deterministic 0-20 Sub-Scores combining live chart indicators + chat technical consensus
+    const tf = (brief.chartContext?.timeframe || '1h').toLowerCase();
+    const tfSensitivity = tf === '1m' || tf === '5m' ? 1.15 : tf === '15m' || tf === '30m' ? 1.05 : tf === '1d' || tf === '1w' ? 0.92 : 1.0;
+
     const trendScore = Math.min(
       20,
       Math.max(
-        5,
+        4,
         Math.round(
-          (emaAlignment === 'BULLISH_STACK' ? 16 : emaAlignment === 'BEARISH_STACK' ? 7 : 12) +
-            (livePrice > ema20 ? 2 : -1) +
+          (emaAlignment === 'BULLISH_STACK'
+            ? 15
+            : emaAlignment === 'BEARISH_STACK'
+            ? 6
+            : emaAlignment === 'GOLDEN_CROSS_PENDING'
+            ? 13
+            : 11) +
+            (livePrice > ema20 ? 2 : -2) +
+            (ema20 > ema50 ? 1 : -1) +
             (transcript.consensusSentiment === 'BULLISH' ? 2 : transcript.consensusSentiment === 'BEARISH' ? -2 : 0)
         )
       )
@@ -353,11 +363,11 @@ export class TechnicalAnalysisWorker {
     const momentumScore = Math.min(
       20,
       Math.max(
-        5,
+        4,
         Math.round(
-          (rsi14 >= 50 && rsi14 <= 72 ? 16 : rsi14 < 35 ? 9 : rsi14 > 75 ? 12 : 13) +
-            (macdHistogram > 0 ? 2 : -2) +
-            (stochK > stochD ? 1 : -1)
+          (rsi14 >= 52 && rsi14 <= 72 ? 15 : rsi14 < 32 ? 8 : rsi14 < 46 ? 10 : rsi14 > 75 ? 12 : 13) +
+            (macdHistogram > 0 ? 2 : macdHistogram < 0 ? -2 : 0) +
+            (stochK > stochD ? 2 : stochK < stochD ? -1 : 0)
         )
       )
     );
@@ -365,21 +375,38 @@ export class TechnicalAnalysisWorker {
     const volumeScore = Math.min(
       20,
       Math.max(
-        8,
-        Math.round(12 + Math.min(4, brief.volume.volumeSurgeRatio * 2) + (transcript.chatVelocityScore / 100) * 3)
+        6,
+        Math.round(
+          10 +
+            Math.min(5, brief.volume.volumeSurgeRatio * 2.4) +
+            (transcript.chatVelocityScore / 100) * 3 +
+            (Math.abs(brief.pricing.changePercent) * tfSensitivity >= 0.8 ? 1 : 0)
+        )
       )
     );
 
     const patternQualityScore = Math.min(
       20,
-      Math.max(8, (hasPatternTalk ? 16 : 14) + (isSqueeze ? 2 : 0) + (Math.abs(techBullSignals) >= 2 ? 1 : 0))
+      Math.max(
+        6,
+        Math.round(
+          (hasPatternTalk ? 14 : 12) +
+            (isSqueeze ? 2 : 0) +
+            (Math.abs(techBullSignals) >= 3 ? 3 : Math.abs(techBullSignals) >= 1 ? 1 : -1) +
+            (percentB >= 0.45 && percentB <= 0.88 ? 1 : 0)
+        )
+      )
     );
 
     const relativeStrengthScore = Math.min(
       20,
       Math.max(
-        6,
-        Math.round(12 + Math.max(-5, Math.min(6, brief.pricing.changePercent * 1.5)) + (isBullBias ? 2 : -1))
+        4,
+        Math.round(
+          11 +
+            Math.max(-5, Math.min(6, brief.pricing.changePercent * 1.45 * tfSensitivity)) +
+            (techBullSignals >= 2 ? 2 : techBullSignals <= -2 ? -2 : 0)
+        )
       )
     );
 

@@ -254,6 +254,124 @@ async function runTests() {
     console.log(`✅ [SSOT Verified] ${r.symbol}: 25 Sub-Scores Sum==RawScores | PDF Report ID=${r.reportId} (${r.compositeScore}/100) | Vision Atlas Live=${vaLive.livePrice}`);
   }
 
+  // TEST 8: MT5 Price Scale Metadata & Live Chart <-> Community Chat <-> Sentiment/Technical Correlation
+  console.log('\n--- TEST 8: MT5 Price Scale & Live Chart <-> Chat <-> Pipeline Correlation ---');
+  for (const tel of [goldTelemetry, nvdaTelemetry, eurTelemetry]) {
+    if (!tel.priceScale?.supportsVerticalPan || !tel.priceScale?.supportsPriceScaleDrag || tel.priceScale.tickStep <= 0) {
+      throw new Error(`Missing/invalid MT5 priceScale metadata for ${tel.symbol}`);
+    }
+    if ((tel.recentCandles?.length ?? 0) < 24) {
+      throw new Error(`Insufficient recentCandles for ${tel.symbol}: ${tel.recentCandles?.length ?? 0}`);
+    }
+  }
+  console.log(`✅ MT5 Y-Axis Price Scale Metadata verified across XAU/USD, NVDA (${nvdaTelemetry.recentCandles?.length} bars), and EUR/USD (tickStep=${eurTelemetry.priceScale?.tickStep}).`);
+
+  const bullishTsla = {
+    symbol: 'TSLA',
+    tvSymbol: 'NASDAQ:TSLA',
+    name: 'Tesla Inc.',
+    timeframe: '1h',
+    livePrice: 274.5,
+    open: 264.4,
+    high: 276.2,
+    low: 263.8,
+    close: 274.5,
+    prevClose: 264.4,
+    volume: 94_000_000,
+    changePercent: 3.82,
+    currency: 'USD',
+    activeIndicators: ['EMA 20/50', 'RSI 14', 'MACD'],
+    indicatorReadings: {
+      rsi14: 66.2,
+      ema20: 268.0,
+      ema50: 256.5,
+      ema200: 242.0,
+      macdLine: 2.3,
+      macdSignal: 0.85,
+      macdHistogram: 1.45,
+      bbUpper: 278.0,
+      bbMiddle: 267.5,
+      bbLower: 257.0,
+      atr14: 7.4,
+      stochK: 82,
+      stochD: 74,
+    },
+    source: 'CHART_WIDGET_EVENT' as const,
+    timestamp: Date.now(),
+  };
+
+  const bearishTsla = {
+    ...bullishTsla,
+    livePrice: 244.5,
+    open: 255.2,
+    high: 256.4,
+    low: 243.1,
+    close: 244.5,
+    prevClose: 255.2,
+    changePercent: -4.19,
+    indicatorReadings: {
+      rsi14: 33.4,
+      ema20: 254.0,
+      ema50: 266.0,
+      ema200: 269.5,
+      macdLine: -2.4,
+      macdSignal: -0.75,
+      macdHistogram: -1.65,
+      bbUpper: 268.0,
+      bbMiddle: 256.0,
+      bbLower: 244.0,
+      atr14: 8.6,
+      stochK: 18,
+      stochD: 26,
+    },
+    timestamp: Date.now(),
+  };
+
+  communityChatEngine.syncWithLiveTelemetry('TSLA', {
+    timeframe: '1h',
+    livePrice: bullishTsla.livePrice,
+    changePercent: bullishTsla.changePercent,
+    rsi14: bullishTsla.indicatorReadings.rsi14,
+    ema20: bullishTsla.indicatorReadings.ema20,
+    ema50: bullishTsla.indicatorReadings.ema50,
+    macdHistogram: bullishTsla.indicatorReadings.macdHistogram,
+    atr14: bullishTsla.indicatorReadings.atr14,
+  });
+  const bullChat = communityChatEngine.getBufferedTranscript('TSLA');
+  const bullReport = await researchEngineOrchestrator.executeFullAnalysis('TSLA', bullishTsla, '1h');
+
+  communityChatEngine.syncWithLiveTelemetry('TSLA', {
+    timeframe: '1h',
+    livePrice: bearishTsla.livePrice,
+    changePercent: bearishTsla.changePercent,
+    rsi14: bearishTsla.indicatorReadings.rsi14,
+    ema20: bearishTsla.indicatorReadings.ema20,
+    ema50: bearishTsla.indicatorReadings.ema50,
+    macdHistogram: bearishTsla.indicatorReadings.macdHistogram,
+    atr14: bearishTsla.indicatorReadings.atr14,
+  });
+  const bearChat = communityChatEngine.getBufferedTranscript('TSLA');
+  const bearReport = await researchEngineOrchestrator.executeFullAnalysis('TSLA', bearishTsla, '1h');
+
+  if (bullReport.technical.totalScore <= bearReport.technical.totalScore) {
+    throw new Error(`Technical correlation failure: bull=${bullReport.technical.totalScore} vs bear=${bearReport.technical.totalScore}`);
+  }
+  if (bullReport.sentiment.totalScore <= bearReport.sentiment.totalScore) {
+    throw new Error(`Sentiment correlation failure: bull=${bullReport.sentiment.totalScore} vs bear=${bearReport.sentiment.totalScore}`);
+  }
+  if (bullReport.sentiment.wallStreetConsensus.averagePriceTarget === bearReport.sentiment.wallStreetConsensus.averagePriceTarget) {
+    throw new Error('Static Wall Street Price Target detected across live regime shift');
+  }
+  if (bearChat.consensusSentiment !== 'BEARISH') {
+    throw new Error(`Community chat failed to pivot BEARISH on bearish telemetry: got ${bearChat.consensusSentiment}`);
+  }
+  if (Math.abs(bearReport.brief.pricing.currentPrice - bearishTsla.livePrice) > 0.01) {
+    throw new Error(`Bearish live chart parity broken: ${bearReport.brief.pricing.currentPrice} vs ${bearishTsla.livePrice}`);
+  }
+  console.log(`✅ Live Chart <-> Chat <-> Pipeline Correlation Verified:`);
+  console.log(`   TSLA Bullish (${bullishTsla.livePrice}): Chat=${bullChat.consensusSentiment}, Tech=${bullReport.technical.totalScore}, Sent=${bullReport.sentiment.totalScore}, Target=$${bullReport.sentiment.wallStreetConsensus.averagePriceTarget}`);
+  console.log(`   TSLA Bearish (${bearishTsla.livePrice}): Chat=${bearChat.consensusSentiment}, Tech=${bearReport.technical.totalScore}, Sent=${bearReport.sentiment.totalScore}, Target=$${bearReport.sentiment.wallStreetConsensus.averagePriceTarget}`);
+
   console.log('\n================================================================');
   console.log('🎉 ALL ARCHITECTURAL TESTS AND WORKFLOWS PASSED WITH 100% SUCCESS!');
   console.log('================================================================');

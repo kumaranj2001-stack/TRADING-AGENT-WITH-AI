@@ -80,17 +80,30 @@ export class DiscoveryBriefCompiler {
     const livePrice = chartContext.livePrice;
     const name = chartContext.name || resolved.name;
     const r = (v: number) => roundAssetPrice(v, assetClass, cleanSym);
+    const changePercent = Number((chartContext.changePercent ?? 0).toFixed(2));
+    const atrRaw = chartContext.indicatorReadings?.atr14 || r(livePrice * 0.015);
+    const atr14 = r(atrRaw);
 
-    // Ingest corresponding community chat transcript calibrated to live market price
+    // Synchronize community chat room telemetry strictly with the active Chart.js live price & technicals
+    communityChatEngine.syncWithLiveTelemetry(cleanSym, {
+      livePrice,
+      changePercent,
+      timeframe: chartContext.timeframe || timeframe,
+      rsi14: chartContext.indicatorReadings?.rsi14,
+      ema20: chartContext.indicatorReadings?.ema20,
+      ema50: chartContext.indicatorReadings?.ema50,
+      macdHistogram: chartContext.indicatorReadings?.macdHistogram,
+      atr14,
+      assetClass,
+    });
+
+    // Ingest corresponding community chat transcript calibrated strictly to live market price & chart telemetry
     const chatTranscript = communityChatEngine.getBufferedTranscript(cleanSym, livePrice);
 
-    const changePercent = Number((chartContext.changePercent ?? 0).toFixed(2));
     const prevClose = chartContext.prevClose || (changePercent !== 0 ? r(livePrice / (1 + changePercent / 100)) : livePrice);
     const change = r(livePrice - prevClose);
     const isFxFourDec = assetClass === 'FOREX' && !cleanSym.includes('JPY');
 
-    const atrRaw = chartContext.indicatorReadings?.atr14 || r(livePrice * 0.015);
-    const atr14 = r(atrRaw);
     const atrPercent = livePrice > 0 ? Number(((atr14 / livePrice) * 100).toFixed(2)) : 1.5;
 
     const pricing: LocalizedPricing = {

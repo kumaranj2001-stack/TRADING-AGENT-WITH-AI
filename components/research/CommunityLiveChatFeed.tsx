@@ -36,13 +36,22 @@ import {
   Clock,
   Tag
 } from 'lucide-react';
-import { CommunityChatMessage, CommunityChatTranscript } from '@/lib/research/types';
-import { communityChatEngine } from '@/lib/research/CommunityChatEngine';
+import {
+  ChartLiveContext,
+  CommunityChatMessage,
+  CommunityChatTranscript,
+  ResearchReportSnapshot,
+} from '@/lib/research/types';
+import { formatAssetPrice, liveChartTelemetryService } from '@/lib/research/LiveChartTelemetryService';
 
 export interface CommunityLiveChatFeedProps {
   activeSymbol: string;
+  activeTimeframe?: string;
+  chartTelemetry?: ChartLiveContext | null;
+  report?: ResearchReportSnapshot | null;
   onSelectSymbol?: (symbol: string) => void;
   onTriggerAnalysis?: (symbol: string) => void;
+  onMessageDispatched?: (msg: CommunityChatMessage, transcript?: CommunityChatTranscript) => void;
   isAnalyzing?: boolean;
   singleAssetMode?: boolean;
 }
@@ -59,35 +68,61 @@ const PRESET_TAG_FILTERS = [
 
 export const CommunityLiveChatFeed: React.FC<CommunityLiveChatFeedProps> = ({
   activeSymbol,
+  activeTimeframe = '1h',
+  chartTelemetry = null,
+  report = null,
   onSelectSymbol,
   onTriggerAnalysis,
+  onMessageDispatched,
   isAnalyzing = false,
   singleAssetMode = false,
 }) => {
-  const [messages, setMessages] = useState<CommunityChatMessage[]>(() => {
-    return communityChatEngine.getMessagesForSymbol(activeSymbol);
-  });
+  const [messages, setMessages] = useState<CommunityChatMessage[]>([]);
   const [activeTagFilter, setActiveTagFilter] = useState<string>('ALL');
   const [inputText, setInputText] = useState<string>('');
   const [inputSentiment, setInputSentiment] = useState<'BULLISH' | 'BEARISH' | 'NEUTRAL'>('BULLISH');
   const [isStreamingActive, setIsStreamingActive] = useState<boolean>(true);
   const [onlineCount, setOnlineCount] = useState<number>(1428);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const lastSyncKeyRef = useRef<string>('');
+  const chartTelemetryRef = useRef<ChartLiveContext | null>(chartTelemetry);
+  chartTelemetryRef.current = chartTelemetry;
 
-  // Sync symbol changes & reset active tag filter to new chart room
-  useEffect(() => {
-    const msgs = communityChatEngine.getMessagesForSymbol(activeSymbol);
-    setMessages(msgs);
-    setActiveTagFilter('ALL');
-  }, [activeSymbol]);
+  const resolvedSym = liveChartTelemetryService.resolveSymbol(activeSymbol);
+  const cleanCanonical = resolvedSym.symbol;
+  const activeTag = `$${cleanCanonical.replace(/[^A-Za-z0-9]/g, '').toUpperCase()}`;
 
-  // Subscribe to new real-time messages
+  // Fetch & synchronize server chat transcript directly with active Chart.js symbol, timeframe & live price/indicators
+  const fetchSyncedChatRoom = async (sym: string, tf: string, ctx: ChartLiveContext | null) => {
+    try {
+      const qs = new URLSearchParams({ symbol: sym, timeframe: tf });
+      if (ctx && liveChartTelemetryService.resolveSymbol(ctx.symbol).symbol === sym && ctx.livePrice > 0) {
+        qs.set('livePrice', String(ctx.livePrice));
+        qs.set('changePercent', String(ctx.changePercent ?? 0));
+        if (ctx.indicatorReadings?.rsi14 !== undefined) qs.set('rsi14', String(ctx.indicatorReadings.rsi14));
+        if (ctx.indicatorReadings?.ema20 !== undefined) qs.set('ema20', String(ctx.indicatorReadings.ema20));
+        if (ctx.indicatorReadings?.macdHistogram !== undefined) qs.set('macdHistogram', String(ctx.indicatorReadings.macdHistogram));
+      }
+      const res = await fetch(`/api/research/chat?${qs.toString()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.messages)) {
+          setMessages(data.messages);
+        }
+      }
+    } catch {}
+  };
+
   useEffect(() => {
-    const unsubscribe = communityChatEngine.subscribeMessages((newMsg) => {
-      setMessages(prev => [...prev, newMsg]);
-    });
-    return () => unsubscribe();
-  }, []);
+    const priceBucket = chartTelemetry?.livePrice ? Math.round(chartTelemetry.livePrice * 200) : 0;
+    const tfKey = chartTelemetry?.timeframe || activeTimeframe;
+    const syncKey = `${cleanCanonical}_${tfKey}_${priceBucket > 0 ? Math.floor(priceBucket / 4) : 'init'}`;
+    if (lastSyncKeyRef.current !== syncKey) {
+      lastSyncKeyRef.current = syncKey;
+      setActiveTagFilter('ALL');
+      fetchSyncedChatRoom(cleanCanonical, tfKey, chartTelemetry);
+    }
+  }, [cleanCanonical, activeTimeframe, chartTelemetry?.livePrice, chartTelemetry?.timeframe]);
 
   // Auto-scroll to bottom of chat on new message
   useEffect(() => {
@@ -96,92 +131,144 @@ export const CommunityLiveChatFeed: React.FC<CommunityLiveChatFeedProps> = ({
     }
   }, [messages.length]);
 
-  // Simulated live community message generator (every 12 seconds when active)
+  // Correlated live community commentary aligned strictly to active chart indicators & price action
   useEffect(() => {
     if (!isStreamingActive) return;
 
-    const interval = setInterval(() => {
-      const simulatedTraders = [
-        { name: 'AlphaSeeker_99', badge: 'PRO TRADER' as const, text: `$${activeSymbol.replace('/', '')} displaying clear buyer absorption at the intraday POC level. Watching for higher-timeframe continuation.` },
-        { name: 'DeltaNeutral_Quant', badge: 'ALGO SCALPER' as const, text: `Order flow delta flipped positive on the 5m footprint for $${activeSymbol.replace('/', '')}. Stop loss disciplined below the swing low.` },
-        { name: 'MacroWaveSurfer', badge: 'MACRO ANALYST' as const, text: `Latest commentary across macro wires supports sustained liquidity expansion for $${activeSymbol.replace('/', '')}. Upside asymmetry remains intact.` },
-        { name: 'MomentumChaser_X', badge: 'CHARTIST' as const, text: `Clean breakout retest pattern on $${activeSymbol.replace('/', '')}. Bullish confirmation candle printed.` },
-      ];
+    const interval = setInterval(async () => {
+      const ctx = chartTelemetryRef.current;
+      const spot = ctx?.livePrice || report?.brief.pricing.currentPrice || resolvedSym.fallbackPrice;
+      const ema20 = ctx?.indicatorReadings?.ema20 ?? spot;
+      const rsi = ctx?.indicatorReadings?.rsi14 ?? report?.technical.rsi14 ?? 50;
+      const atr = ctx?.indicatorReadings?.atr14 ?? Math.max(spot * 0.012, spot * 0.002);
+      const tfLabel = (ctx?.timeframe || activeTimeframe).toUpperCase();
+      const fmtSpot = formatAssetPrice(spot, resolvedSym.assetClass, cleanCanonical);
+      const fmtEma = formatAssetPrice(ema20, resolvedSym.assetClass, cleanCanonical);
+      const isBull = spot >= ema20 && rsi >= 51;
+      const isBear = spot < ema20 && rsi <= 49;
+      const sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = isBull ? 'BULLISH' : isBear ? 'BEARISH' : 'NEUTRAL';
 
-      const randomTrader = simulatedTraders[Math.floor(Math.random() * simulatedTraders.length)];
-      communityChatEngine.dispatchUserMessage({
-        symbol: activeSymbol,
-        text: randomTrader.text,
-        username: randomTrader.name,
-        badge: randomTrader.badge,
-        sentiment: 'BULLISH',
-      });
+      const pool = isBull
+        ? [
+            { name: 'AlphaSeeker_99', badge: 'PRO TRADER', text: `${activeTag} (${tfLabel}) holding above EMA-20 (${fmtEma}) at ${fmtSpot}. RSI-14 at ${rsi}; continuation setups favored.` },
+            { name: 'DeltaNeutral_Quant', badge: 'ALGO SCALPER', text: `Order flow bid absorption near ${formatAssetPrice(spot - atr * 0.5, resolvedSym.assetClass, cleanCanonical)} on ${tfLabel}. Buyers maintaining control.` },
+          ]
+        : isBear
+        ? [
+            { name: 'BearishDesk_FX', badge: 'CHARTIST', text: `${activeTag} (${tfLabel}) pressured below EMA-20 (${fmtEma}) at ${fmtSpot}. RSI-14 softening (${rsi}); watching support test.` },
+            { name: 'RiskHedge_Quant', badge: 'MACRO ANALYST', text: `Sellers defending overhead supply above ${formatAssetPrice(spot + atr * 0.6, resolvedSym.assetClass, cleanCanonical)}. Disciplined risk management priority.` },
+          ]
+        : [
+            { name: 'EquilibriumDesk', badge: 'CHARTIST', text: `${activeTag} (${tfLabel}) balanced around ${fmtSpot} (RSI-14: ${rsi}, EMA-20: ${fmtEma}). Awaiting decisive range break.` },
+          ];
 
-      setOnlineCount(prev => prev + Math.floor(Math.random() * 7 - 3));
-    }, 14000);
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      try {
+        const res = await fetch('/api/research/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol: cleanCanonical,
+            username: pick.name,
+            message: pick.text,
+            sentiment,
+            badges: [pick.badge],
+            chartContext: ctx,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.message) {
+            setMessages((prev) => [...prev.slice(-24), data.message]);
+            onMessageDispatched?.(data.message, data.transcript);
+          }
+        }
+      } catch {}
+
+      setOnlineCount((prev) => Math.max(850, prev + Math.floor(Math.random() * 7 - 3)));
+    }, 22000);
 
     return () => clearInterval(interval);
-  }, [isStreamingActive, activeSymbol]);
+  }, [isStreamingActive, cleanCanonical, activeTimeframe, activeTag, resolvedSym.assetClass, resolvedSym.fallbackPrice, report?.technical.rsi14, report?.brief.pricing.currentPrice]);
 
-  // Handle user dispatch
-  const handleSendMessage = (e?: React.FormEvent) => {
+  // Handle user dispatch directly to server buffer so all 5 subagents receive the live comment
+  const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!inputText.trim()) return;
-
-    const dispatched = communityChatEngine.dispatchUserMessage({
-      symbol: activeSymbol,
-      text: inputText.trim(),
-      sentiment: inputSentiment,
-      username: 'You (Trader)',
-      badge: 'PRO TRADER',
-    });
-
+    const txt = inputText.trim();
+    if (!txt) return;
     setInputText('');
+
+    try {
+      const res = await fetch('/api/research/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: cleanCanonical,
+          username: 'You (Trader)',
+          message: txt,
+          sentiment: inputSentiment,
+          badges: ['PRO TRADER'],
+          chartContext: chartTelemetryRef.current,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.message) {
+          setMessages((prev) => [...prev, data.message]);
+          onMessageDispatched?.(data.message, data.transcript);
+        }
+      }
+    } catch {}
   };
 
   // Like message toggle
   const handleLikeMessage = (id: string) => {
-    setMessages(prev => prev.map(m => m.id === id ? { ...m, likes: m.likes + 1 } : m));
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, likes: m.likes + 1 } : m)));
   };
 
   // Filter messages based on activeTagFilter
-  const filteredMessages = messages.filter(m => {
+  const filteredMessages = messages.filter((m) => {
     if (activeTagFilter === 'ALL') return true;
     return m.tickerTag.toUpperCase() === activeTagFilter.toUpperCase() || m.ticker.toUpperCase() === activeTagFilter.replace('$', '').toUpperCase();
   });
 
   // Calculate sentiment percentages for room header
   const total = filteredMessages.length || 1;
-  const bullCount = filteredMessages.filter(m => m.sentiment === 'BULLISH').length;
-  const bearCount = filteredMessages.filter(m => m.sentiment === 'BEARISH').length;
+  const bullCount = filteredMessages.filter((m) => m.sentiment === 'BULLISH').length;
+  const bearCount = filteredMessages.filter((m) => m.sentiment === 'BEARISH').length;
   const bullPct = Math.round((bullCount / total) * 100);
   const bearPct = Math.round((bearCount / total) * 100);
-
-  const activeTag = communityChatEngine.normalizeTickerTag(activeSymbol);
 
   return (
     <div className="bg-terminal-950 border border-terminal-border rounded-xl flex flex-col h-full shadow-xl overflow-hidden font-mono text-xs">
       {/* 1. Community Header Bar */}
-      <div className="px-3.5 py-2.5 bg-terminal-900 border-b border-terminal-border flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-cyan-600/20 text-cyan-400 border border-cyan-500/30">
+      <div className="px-3 py-2.5 bg-terminal-900 border-b border-terminal-border flex flex-wrap items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="p-1.5 rounded-lg bg-cyan-600/20 text-cyan-400 border border-cyan-500/30 shrink-0">
             <MessageSquare className="w-4 h-4" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-white text-xs tracking-wider">TRADINGVIEW-STYLE COMMUNITY LIVE CHAT</span>
-              <span className="flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="font-bold text-white text-xs tracking-wider truncate">COMMUNITY LIVE CHAT</span>
+              <span className="flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-800">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span>LIVE FEED</span>
+                <span>SYNCED</span>
               </span>
             </div>
-            <div className="text-[10px] text-slate-400 flex items-center gap-2">
+            <div className="text-[10px] text-slate-400 flex items-center gap-2 flex-wrap">
               <span className="flex items-center gap-1">
                 <Users className="w-3 h-3 text-slate-500" />
-                <span>{onlineCount.toLocaleString()} active traders online</span>
+                <span>{onlineCount.toLocaleString()}</span>
               </span>
-              <span>•</span>
-              <span className="text-cyan-300">Room: {activeTag}</span>
+              <span className="text-cyan-300 font-bold">{activeTag} ({(chartTelemetry?.timeframe || activeTimeframe).toUpperCase()})</span>
+              {chartTelemetry?.livePrice && (
+                <span className="text-slate-300">
+                  @ {formatAssetPrice(chartTelemetry.livePrice, resolvedSym.assetClass, cleanCanonical)}
+                </span>
+              )}
+              {chartTelemetry?.indicatorReadings?.rsi14 !== undefined && (
+                <span className="text-cyan-400">RSI {chartTelemetry.indicatorReadings.rsi14}</span>
+              )}
             </div>
           </div>
         </div>
@@ -275,7 +362,7 @@ export const CommunityLiveChatFeed: React.FC<CommunityLiveChatFeedProps> = ({
       {/* 3. Interactive Messages Scroll Container */}
       <div 
         ref={chatScrollRef}
-        className="flex-1 p-3.5 space-y-3 overflow-y-auto max-h-[360px] min-h-[240px] bg-gradient-to-b from-terminal-950 via-terminal-900/60 to-terminal-950 custom-scrollbar"
+        className="flex-1 min-h-0 p-3 space-y-3 overflow-y-auto bg-gradient-to-b from-terminal-950 via-terminal-900/60 to-terminal-950 custom-scrollbar"
       >
         {filteredMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center p-8 text-center text-slate-500 space-y-1">
@@ -370,7 +457,7 @@ export const CommunityLiveChatFeed: React.FC<CommunityLiveChatFeedProps> = ({
       </div>
 
       {/* 4. Real-Time Message Dispatch Form */}
-      <form onSubmit={handleSendMessage} className="p-2.5 bg-terminal-900 border-t border-terminal-border space-y-2">
+      <form onSubmit={handleSendMessage} className="p-2.5 bg-terminal-900 border-t border-terminal-border space-y-2 shrink-0">
         <div className="flex items-center justify-between gap-2 flex-wrap text-[11px]">
           <span className="text-slate-400 flex items-center gap-1">
             <Radio className="w-3 h-3 text-cyan-400 animate-pulse" />

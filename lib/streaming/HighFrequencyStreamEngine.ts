@@ -10,8 +10,8 @@
  *  - Strict live-quote anchoring (zero hallucinated pricing)
  */
 
-import { ChartIndicatorReadings, ChartLiveContext, ChartOHLCVBar } from '../research/types';
-import { liveChartTelemetryService } from '../research/LiveChartTelemetryService';
+import { ChartIndicatorReadings, ChartLiveContext, ChartOHLCVBar, ChartPriceScaleMetadata } from '../research/types';
+import { getAssetDecimals, liveChartTelemetryService } from '../research/LiveChartTelemetryService';
 
 export interface HighFrequencyTickPacket {
   seq: number;
@@ -30,6 +30,7 @@ export interface HighFrequencyTickPacket {
   currency: string;
   candles: ChartOHLCVBar[];
   indicatorReadings: ChartIndicatorReadings;
+  priceScale?: ChartPriceScaleMetadata;
   latencyMs: number;
   transport: 'WEBSOCKET' | 'SSE_HIGH_FREQ' | 'HTTP_POLL';
   source: ChartLiveContext['source'];
@@ -250,11 +251,29 @@ export class HighFrequencyStreamClient {
       mergedCandles = copy;
     }
 
+    const resolvedSym = liveChartTelemetryService.resolveSymbol(this.symbol);
+    const dec = getAssetDecimals(resolvedSym.assetClass, resolvedSym.symbol);
+    const atr = raw.indicatorReadings?.atr14 || this.latestPacket?.indicatorReadings?.atr14 || raw.livePrice * 0.012;
+    const minCandle = mergedCandles.length > 0 ? Math.min(...mergedCandles.map((c) => c.low)) : raw.livePrice * 0.985;
+    const maxCandle = mergedCandles.length > 0 ? Math.max(...mergedCandles.map((c) => c.high)) : raw.livePrice * 1.015;
+    const computedPriceScale: ChartPriceScaleMetadata = raw.priceScale || {
+      minPrice: minCandle,
+      maxPrice: maxCandle,
+      rangeSpan: Math.max(atr, maxCandle - minCandle),
+      atr14: atr,
+      tickStep: Number((Math.pow(10, -dec) * 10).toFixed(dec)),
+      priceDecimals: dec,
+      recommendedMinY: minCandle - Math.max((maxCandle - minCandle) * 0.14, atr * 0.45),
+      recommendedMaxY: maxCandle + Math.max((maxCandle - minCandle) * 0.14, atr * 0.45),
+      supportsVerticalPan: true,
+      supportsPriceScaleDrag: true,
+    };
+
     const packet: HighFrequencyTickPacket = {
       seq,
       type: raw.type || 'TICK',
       symbol: raw.symbol || this.symbol,
-      tvSymbol: raw.tvSymbol || liveChartTelemetryService.resolveSymbol(this.symbol).tvSymbol,
+      tvSymbol: raw.tvSymbol || resolvedSym.tvSymbol,
       timeframe: raw.timeframe || this.timeframe,
       livePrice: raw.livePrice,
       open: raw.open ?? mergedCandles[mergedCandles.length - 1]?.open ?? raw.livePrice,
@@ -265,8 +284,9 @@ export class HighFrequencyStreamClient {
       volume: raw.volume ?? mergedCandles[mergedCandles.length - 1]?.volume ?? 0,
       changePercent: typeof raw.changePercent === 'number' ? raw.changePercent : 0,
       currency: raw.currency || 'USD ($)',
-      candles: mergedCandles.slice(-120),
+      candles: mergedCandles.slice(-200),
       indicatorReadings: raw.indicatorReadings || this.latestPacket?.indicatorReadings || {},
+      priceScale: computedPriceScale,
       latencyMs: measuredLatency,
       transport: sourceTransport,
       source: raw.source || 'TRADINGVIEW_SCANNER',

@@ -9,16 +9,224 @@
 
 import { CommunityChatMessage, CommunityChatTranscript, AssetClass } from './types';
 
+export interface LiveChatSyncTelemetry {
+  livePrice: number;
+  changePercent?: number;
+  timeframe?: string;
+  rsi14?: number;
+  ema20?: number;
+  ema50?: number;
+  macdHistogram?: number;
+  atr14?: number;
+  assetClass?: AssetClass;
+}
+
 export class CommunityChatEngine {
   private static instance: CommunityChatEngine;
   
   // Buffered transcripts keyed by normalized symbol
   private chatBuffers: Map<string, CommunityChatMessage[]> = new Map();
   private listeners: Set<(message: CommunityChatMessage) => void> = new Set();
-  private streamInterval: any = null;
+  private lastSyncedPriceBySymbol: Map<string, number> = new Map();
 
   private constructor() {
     this.seedDefaultChatBuffers();
+  }
+
+  private getPriceDecimals(symbol: string, assetClass?: AssetClass): number {
+    const clean = symbol.toUpperCase();
+    if (clean.includes('JPY') || clean.includes('XAG')) return 3;
+    if (clean.includes('COPPER')) return 4;
+    if (assetClass === 'FOREX' || (!assetClass && /^(EUR|GBP|AUD|NZD|USD)\/(USD|CAD|CHF|GBP|JPY)/.test(clean))) return 5;
+    return 2;
+  }
+
+  private fmtP(val: number, symbol: string, assetClass?: AssetClass): string {
+    const dec = this.getPriceDecimals(symbol, assetClass);
+    return Number.isFinite(val) ? val.toFixed(dec) : '0.00';
+  }
+
+  /**
+   * Synchronizes a symbol's community chat stream strictly to active Chart.js live price,
+   * technical indicators, and timeframe while preserving any trader-posted messages.
+   */
+  public syncWithLiveTelemetry(rawSymbol: string, ctx: LiveChatSyncTelemetry): void {
+    const cleanSym = this.canonicalizeSymbol(rawSymbol);
+    const tickerTag = this.normalizeTickerTag(cleanSym);
+    const price = ctx.livePrice;
+    if (!Number.isFinite(price) || price <= 0) return;
+
+    this.lastSyncedPriceBySymbol.set(cleanSym, price);
+    const tf = (ctx.timeframe || '1h').toUpperCase();
+    const ema20 = ctx.ema20 ?? price;
+    const ema50 = ctx.ema50 ?? price;
+    const rsi14 = ctx.rsi14 ?? 50;
+    const macdHist = ctx.macdHistogram ?? 0;
+    const changePct = ctx.changePercent ?? 0;
+    const atr = Math.max(ctx.atr14 || price * 0.012, price * 0.0015);
+    const fmt = (v: number) => this.fmtP(v, cleanSym, ctx.assetClass);
+
+    const bullPts =
+      (price >= ema20 ? 1 : -1) +
+      (ema20 >= ema50 ? 1 : -1) +
+      (rsi14 >= 53 ? 1 : rsi14 <= 46 ? -1 : 0) +
+      (macdHist > 0 ? 1 : macdHist < 0 ? -1 : 0) +
+      (changePct >= 0.3 ? 1 : changePct <= -0.3 ? -1 : 0);
+
+    const s1 = fmt(price - atr * 1.15);
+    const s2 = fmt(price - atr * 2.25);
+    const r1 = fmt(price + atr * 1.35);
+    const r2 = fmt(price + atr * 2.65);
+
+    const isBull = bullPts >= 2;
+    const isBear = bullPts <= -2;
+    const now = Date.now();
+
+    const liveSystemMessages: CommunityChatMessage[] = isBull
+      ? [
+          {
+            id: `seed_live_${cleanSym}_1`,
+            username: 'QuantumAlpha',
+            badge: 'PRO TRADER',
+            ticker: cleanSym,
+            tickerTag,
+            text: `${tickerTag} (${tf}) trading above EMA-20 (${fmt(ema20)}) at ${fmt(price)} (${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%). Support holding at ${s1}, breakout target ${r1} -> ${r2}.`,
+            timestamp: now - 180000,
+            formattedTime: '3m ago',
+            sentiment: 'BULLISH',
+            likes: 18,
+          },
+          {
+            id: `seed_live_${cleanSym}_2`,
+            username: 'ApexFlows',
+            badge: 'ALGO SCALPER',
+            ticker: cleanSym,
+            tickerTag,
+            text: `Order flow absorption detected on ${tf} above ${s1}. Momentum RSI-14 at ${rsi14.toFixed(1)} with positive MACD trend supporting continuation.`,
+            timestamp: now - 120000,
+            formattedTime: '2m ago',
+            sentiment: 'BULLISH',
+            likes: 14,
+          },
+          {
+            id: `seed_live_${cleanSym}_3`,
+            username: 'MacroVance',
+            badge: 'MACRO ANALYST',
+            ticker: cleanSym,
+            tickerTag,
+            text: `Growth & valuation multiples remain supportive relative to sector benchmarks. Keep disciplined stop loss below ${s2} if volatility widens.`,
+            timestamp: now - 75000,
+            formattedTime: '1m ago',
+            sentiment: 'BULLISH',
+            likes: 21,
+          },
+          {
+            id: `seed_live_${cleanSym}_4`,
+            username: 'RiskWatchDesk',
+            badge: 'CHARTIST',
+            ticker: cleanSym,
+            tickerTag,
+            text: `Watching resistance cluster around ${r1}. If RSI pushes overbought >72, trim partial position ahead of ${r2}.`,
+            timestamp: now - 30000,
+            formattedTime: 'Live',
+            sentiment: 'NEUTRAL',
+            likes: 9,
+          },
+        ]
+      : isBear
+      ? [
+          {
+            id: `seed_live_${cleanSym}_1`,
+            username: 'BearishSentinel',
+            badge: 'CHARTIST',
+            ticker: cleanSym,
+            tickerTag,
+            text: `${tickerTag} (${tf}) losing structure below EMA-20 (${fmt(ema20)}) at ${fmt(price)} (${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%). Resistance capping rallies at ${r1}; next support test at ${s1}.`,
+            timestamp: now - 180000,
+            formattedTime: '3m ago',
+            sentiment: 'BEARISH',
+            likes: 19,
+          },
+          {
+            id: `seed_live_${cleanSym}_2`,
+            username: 'AlgoRiskDesk',
+            badge: 'ALGO SCALPER',
+            ticker: cleanSym,
+            tickerTag,
+            text: `Negative MACD histogram (${macdHist.toFixed(4)}) and soft RSI-14 (${rsi14.toFixed(1)}) confirm distribution pressure. Bearish target zone ${s1} -> ${s2}.`,
+            timestamp: now - 120000,
+            formattedTime: '2m ago',
+            sentiment: 'BEARISH',
+            likes: 15,
+          },
+          {
+            id: `seed_live_${cleanSym}_3`,
+            username: 'MacroHedge',
+            badge: 'MACRO ANALYST',
+            ticker: cleanSym,
+            tickerTag,
+            text: `Tighten risk caps and enforce invalidation stops above ${r1} / ${r2}. Elevated downside volatility warns against premature long exposure.`,
+            timestamp: now - 70000,
+            formattedTime: '1m ago',
+            sentiment: 'BEARISH',
+            likes: 12,
+          },
+          {
+            id: `seed_live_${cleanSym}_4`,
+            username: 'LiquidityWatch',
+            badge: 'PRO TRADER',
+            ticker: cleanSym,
+            tickerTag,
+            text: `Tracking potential liquidity sweep around ${s1}. Reclaiming ${fmt(ema20)} on ${tf} close would shift bias back to neutral.`,
+            timestamp: now - 25000,
+            formattedTime: 'Live',
+            sentiment: 'NEUTRAL',
+            likes: 7,
+          },
+        ]
+      : [
+          {
+            id: `seed_live_${cleanSym}_1`,
+            username: 'StructureScanner',
+            badge: 'CHARTIST',
+            ticker: cleanSym,
+            tickerTag,
+            text: `${tickerTag} (${tf}) consolidating in balanced equilibrium near ${fmt(price)} (EMA-20: ${fmt(ema20)}, RSI-14: ${rsi14.toFixed(1)}). Range bounded by ${s1} and ${r1}.`,
+            timestamp: now - 160000,
+            formattedTime: '2m ago',
+            sentiment: 'NEUTRAL',
+            likes: 11,
+          },
+          {
+            id: `seed_live_${cleanSym}_2`,
+            username: 'BullionDesk',
+            badge: 'PRO TRADER',
+            ticker: cleanSym,
+            tickerTag,
+            text: `Buyers defending ${s1} liquidity shelf cleanly. A confirmed breakout above ${r1} targets ${r2}.`,
+            timestamp: now - 105000,
+            formattedTime: '1m ago',
+            sentiment: 'BULLISH',
+            likes: 10,
+          },
+          {
+            id: `seed_live_${cleanSym}_3`,
+            username: 'DeltaHedger',
+            badge: 'ALGO SCALPER',
+            ticker: cleanSym,
+            tickerTag,
+            text: `Upside capped near ${r1} while MACD momentum remains flat (${macdHist.toFixed(4)}). Stop loss discipline around ${s2} or ${r1} recommended.`,
+            timestamp: now - 45000,
+            formattedTime: 'Live',
+            sentiment: 'BEARISH',
+            likes: 10,
+          },
+        ];
+
+    // Preserve any messages explicitly posted by users or dynamic runtime dispatches (non-seed_live_ messages)
+    const existing = this.chatBuffers.get(cleanSym) || [];
+    const customMessages = existing.filter((m) => !m.id.startsWith('seed_live_') && !m.id.startsWith('msg_') && !m.id.startsWith('dyn_'));
+    this.chatBuffers.set(cleanSym, [...liveSystemMessages, ...customMessages]);
   }
 
   public static getInstance(): CommunityChatEngine {
@@ -198,7 +406,8 @@ export class CommunityChatEngine {
     const dominantThemes = this.extractDominantThemes(messages);
 
     // Extract community-cited numeric levels calibrated strictly around the live chart price
-    const extractedPriceLevels = this.extractCommunityPriceLevels(messages, cleanSym, livePriceHint);
+    const effectiveHint = livePriceHint ?? this.lastSyncedPriceBySymbol.get(cleanSym);
+    const extractedPriceLevels = this.extractCommunityPriceLevels(messages, cleanSym, effectiveHint);
 
     return {
       symbol: cleanSym,

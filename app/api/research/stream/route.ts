@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
         }
       };
 
-      // 1. Immediate verified SNAPSHOT frame with full OHLCV bars & indicators
+      // 1. Immediate verified SNAPSHOT frame with full OHLCV bars, indicators & MT5 price scale metadata
       sendFrame({
         seq: seq++,
         type: 'SNAPSHOT',
@@ -55,11 +55,12 @@ export async function GET(req: NextRequest) {
         currency: latestTelemetry.currency,
         candles: latestTelemetry.recentCandles || [],
         indicatorReadings: latestTelemetry.indicatorReadings,
+        priceScale: latestTelemetry.priceScale,
         source: latestTelemetry.source,
         timestamp: Date.now(),
       });
 
-      // 2. Refresh authoritative live market quote every 3.5 seconds from upstream
+      // 2. Refresh authoritative live market quote & OHLCV candles every 3.5 seconds from upstream
       const quoteRefreshInterval = setInterval(async () => {
         if (isClosed) return;
         try {
@@ -80,6 +81,21 @@ export async function GET(req: NextRequest) {
         );
         currentLivePrice = tickPrice;
 
+        const prevScale = latestTelemetry.priceScale;
+        const updatedScale = prevScale
+          ? {
+              ...prevScale,
+              minPrice: Math.min(prevScale.minPrice, currentLivePrice),
+              maxPrice: Math.max(prevScale.maxPrice, currentLivePrice),
+              rangeSpan: Math.max(
+                prevScale.atr14,
+                Math.max(prevScale.maxPrice, currentLivePrice) - Math.min(prevScale.minPrice, currentLivePrice)
+              ),
+              recommendedMinY: Math.min(prevScale.recommendedMinY, currentLivePrice - prevScale.atr14 * 0.35),
+              recommendedMaxY: Math.max(prevScale.recommendedMaxY, currentLivePrice + prevScale.atr14 * 0.35),
+            }
+          : undefined;
+
         sendFrame({
           seq: seq++,
           type: 'TICK',
@@ -96,6 +112,7 @@ export async function GET(req: NextRequest) {
           changePercent: latestTelemetry.changePercent,
           currency: latestTelemetry.currency,
           indicatorReadings: latestTelemetry.indicatorReadings,
+          priceScale: updatedScale,
           source: latestTelemetry.source,
           timestamp: Date.now(),
         });
