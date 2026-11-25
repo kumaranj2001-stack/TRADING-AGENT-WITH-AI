@@ -52,7 +52,7 @@ import {
 } from '@/lib/research/types';
 import { workflowEngine, SectorRotationItem, OptionsStrategySetup, PreEarningsAnalysis, StockScreenerResultItem } from '@/lib/research/WorkflowEngine';
 import { formatAssetPrice, liveChartTelemetryService } from '@/lib/research/LiveChartTelemetryService';
-import { ChartJsResearchChart } from './research/ChartJsResearchChart';
+import { ChartJsResearchChart } from './research/TradingViewLiveChart';
 import { CommunityLiveChatFeed } from './research/CommunityLiveChatFeed';
 
 export interface TradingResearchEngineDashboardProps {
@@ -505,7 +505,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                 </span>
               </h1>
               <p className="text-xs text-slate-400 font-mono">
-                Chart.js Open Streaming Engine • High-Frequency WS + Modular Vision Atlas Plugins • 5 Sequential Subagents
+                Unrestricted Chart.js + High-Frequency WebSocket Stream • Vision Atlas Modular Plugins • 5 Sequential Subagents
               </p>
             </div>
           </div>
@@ -614,41 +614,38 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
       </div>
 
       {/* ============================================================= */}
-      {/* 2. REAL-TIME CHART.JS OPEN STREAMING CHART & COMMUNITY CHAT FEED */}
+      {/* 2. UNRESTRICTED CHART.JS STREAMING CHART & COMMUNITY CHAT FEED */}
       {/* ============================================================= */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
-        {/* Left: Unrestricted Chart.js Financial Canvas with Vision Atlas Plugin Overlay */}
+        {/* Left: Unrestricted Chart.js Live Chart + Vision Atlas Modular Plugins */}
         <div className="xl:col-span-7 h-[520px] bg-terminal-950 border border-terminal-border rounded-xl overflow-hidden shadow-lg">
           <ChartJsResearchChart
             symbol={activeSymbol}
             timeframe={activeTimeframe}
             theme="dark"
             height={520}
-            executionLevels={
+            allowIndicatorsCustomization={true}
+            tradePlanOverlay={
               report && report.symbol === activeSymbol
                 ? {
+                    enabled: true,
+                    currency: report.brief.pricing.currency,
                     entryMin: report.technical.tradePlan.entryZone.min,
                     entryMax: report.technical.tradePlan.entryZone.max,
                     stopLoss: report.technical.tradePlan.stopLoss.price,
-                    takeProfit1: report.technical.tradePlan.target1.price,
-                    takeProfit2: report.technical.tradePlan.target2.price,
-                    bias:
-                      report.technical.trendDirection.includes('BULLISH')
-                        ? 'BUY'
-                        : report.technical.trendDirection.includes('BEARISH')
-                        ? 'SELL'
-                        : 'NEUTRAL',
+                    target1: report.technical.tradePlan.target1.price,
+                    target2: report.technical.tradePlan.target2.price,
+                    invalidationLevel: report.thesis.invalidationTrigger.priceLevel,
                   }
                 : undefined
             }
-            allowIndicatorsCustomization={true}
             onSymbolChange={handleChartSymbolChange}
             onTimeframeChange={handleChartTimeframeChange}
             onChartTelemetryUpdate={handleChartTelemetryUpdate}
           />
         </div>
 
-        {/* Right: Real-Time QuriTrader Community Live Chat Feed */}
+        {/* Right: Real-Time TradingView-Style Community Live Chat Feed */}
         <div className="xl:col-span-5 h-[520px]">
           <CommunityLiveChatFeed
             activeSymbol={activeSymbol}
@@ -773,8 +770,11 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                 <span className="text-xs px-2 py-0.5 rounded bg-cyan-950 border border-cyan-500/40 text-cyan-300 font-bold">
                   {report.assetClass}
                 </span>
+                <span className="text-xs px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-bold">
+                  CHART.JS LIVE GROUNDED
+                </span>
                 <span className="text-xs text-slate-400">
-                  Synced Chart ({report.brief.chartContext?.timeframe?.toUpperCase() || activeTimeframe.toUpperCase()}) + Community Live Chat
+                  {report.brief.chartContext?.timeframe?.toUpperCase() || activeTimeframe.toUpperCase()} Stream + Community Chat
                 </span>
                 <span className="text-xs text-slate-400">• Consensus: {report.brief.chatTranscript?.consensusStrengthPercent ?? 82}% {report.brief.chatTranscript?.consensusSentiment ?? 'BULLISH'}</span>
               </div>
@@ -1587,7 +1587,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
       <div className="p-3.5 rounded-lg bg-terminal-950 border border-terminal-border text-[11px] font-mono text-slate-400 flex items-start gap-2.5">
         <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
         <div>
-          <strong className="text-slate-300">LEGAL & RESEARCH COMPLIANCE DISCLAIMER:</strong> This platform is an automated multi-agent algorithmic research engine designed solely for institutional research, backtesting, and market observation. All analytical outputs, scores, grades, entries, and synthetic theses are synthesized strictly from the live Chart.js WebSocket/open-feed price stream and real-time community chat transcripts, strictly prohibiting hallucinated pricing. No output constitutes financial advice, recommendation, or solicitation.
+          <strong className="text-slate-300">LEGAL & RESEARCH COMPLIANCE DISCLAIMER:</strong> This platform is an automated multi-agent algorithmic research engine designed solely for institutional research, backtesting, and market observation. All analytical outputs, scores, grades, entries, and synthetic theses are strictly grounded in the real-time Chart.js WebSocket/SSE stream and community chat transcripts, strictly prohibiting hallucinated pricing. No output constitutes financial advice, recommendation, or solicitation.
         </div>
       </div>
 

@@ -2,7 +2,6 @@ import { NextRequest } from 'next/server';
 import { visionAtlasEngine } from '@/lib/visionAtlasEngine';
 import { CurrencyPair, TimeFrame } from '@/lib/types';
 import { BASE_PRICES } from '@/lib/marketData';
-import { liveChartTelemetryService } from '@/lib/research/LiveChartTelemetryService';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,20 +11,16 @@ export async function GET(req: NextRequest) {
   const rawSymbol = searchParams.get('symbol') || searchParams.get('pair') || 'XAU/USD';
   const rawTf = searchParams.get('timeframe') || '1h';
 
-  const resolved = liveChartTelemetryService.resolveSymbol(rawSymbol);
-  const symbol: CurrencyPair = (resolved.symbol in BASE_PRICES) ? (resolved.symbol as CurrencyPair) : 'XAU/USD';
+  const symbol: CurrencyPair = (rawSymbol in BASE_PRICES) ? (rawSymbol as CurrencyPair) : 'XAU/USD';
   const timeframe: TimeFrame = (['1m', '5m', '15m', '1h', '4h', '1d'].includes(rawTf)) ? (rawTf as TimeFrame) : '1h';
-
-  const initialLive = await liveChartTelemetryService.fetchLiveChartTelemetry(resolved.symbol, timeframe);
-  const liveCandles = initialLive.recentCandles || [];
 
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     start(controller) {
-      // 1. Send immediate Chart.js-grounded snapshot (0ms initial latency)
+      // 1. Send immediate verified snapshot (0ms initial latency)
       try {
-        const initialPayload = visionAtlasEngine.generateAnalysisPayload(symbol, timeframe, liveCandles as any);
+        const initialPayload = visionAtlasEngine.generateAnalysisPayload(symbol, timeframe);
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({
             type: 'SNAPSHOT',
@@ -37,21 +32,22 @@ export async function GET(req: NextRequest) {
         console.error('Vision Atlas SSE initial snapshot error:', err);
       }
 
-      // 2. High-frequency Vision Atlas live stream (400ms cadence)
+      // 2. Continuous high-frequency real-time streaming pipeline (450ms cadence)
       const interval = setInterval(() => {
         try {
           const tick = visionAtlasEngine.generateLiveStreamTick(symbol, timeframe);
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify(tick)}\n\n`)
           );
-        } catch {
+        } catch (err) {
           clearInterval(interval);
           try {
             controller.close();
           } catch {}
         }
-      }, 400);
+      }, 450);
 
+      // Handle client disconnect
       req.signal.addEventListener('abort', () => {
         clearInterval(interval);
       });

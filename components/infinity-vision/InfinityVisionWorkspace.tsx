@@ -437,7 +437,7 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
           theme={theme}
         />
 
-        {/* 📈 Central Real-Time Streaming Chart Container (Direct Chart.js & Vision Atlas Plugin Encapsulation) */}
+        {/* 📈 Central High-Frequency Chart.js Streaming Container (Modular Vision Atlas Plugins) */}
         <div className="flex-1 p-2 sm:p-3 relative flex flex-col min-w-0 min-h-0 bg-slate-100 dark:bg-terminal-950/60 overflow-hidden">
           <InfinityVisionChart
             candles={liveCandles}

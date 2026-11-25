@@ -1,8 +1,8 @@
 /**
  * Phase 1: DiscoveryBriefCompiler
- * Unified Chart.js Live Stream + Community Live Chat Grounding Orchestrator.
+ * Unified Chart + Community Live Chat Grounding Orchestrator.
  *
- * Dynamically binds Phase 1 DISCOVERY_BRIEF strictly to the active Chart.js canvas's
+ * Dynamically binds Phase 1 DISCOVERY_BRIEF strictly to the active TradingView chart's
  * live price, OHLCV bars, timeframe, and active indicator readings alongside the
  * corresponding ticker room's Community Live Chat transcript.
  * Zero hardcoded stale prices or cached cross-pair leaks.

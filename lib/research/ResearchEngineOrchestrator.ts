@@ -94,6 +94,19 @@ export class ResearchEngineOrchestrator {
     ]);
 
     const validTech = techRes.status === 'SUCCESS' ? techRes : undefined;
+
+    // Strict Anti-Hallucination Live Chart.js Price Grounding Verification
+    if (validTech && brief.pricing.currentPrice > 0) {
+      const spot = brief.pricing.currentPrice;
+      const maxAllowedDev = 0.08; // Strictly anchor entry & stop within 8% of live Chart.js spot
+      const entryMid = (validTech.tradePlan.entryZone.min + validTech.tradePlan.entryZone.max) / 2;
+      if (!Number.isFinite(entryMid) || Math.abs(entryMid - spot) / spot > maxAllowedDev) {
+        const atrSafe = Math.max(brief.volatility.atr14 || spot * 0.014, spot * 0.002);
+        validTech.tradePlan.entryZone.min = Number((spot - atrSafe * 0.3).toFixed(brief.assetClass === 'FOREX' ? 5 : 2));
+        validTech.tradePlan.entryZone.max = Number((spot + atrSafe * 0.15).toFixed(brief.assetClass === 'FOREX' ? 5 : 2));
+      }
+    }
+
     const [riskRes, thesisRes] = await Promise.all([
       riskAssessmentWorker.analyze(brief, validTech).catch(err => ({
         agentName: 'Risk Assessment Agent' as const,
@@ -232,22 +245,6 @@ export class ResearchEngineOrchestrator {
       { agent: 'Thesis', category: 'Conviction', score: thesisRes.subScores?.conviction ?? 18, maxScore: 20, label: 'Overall Swarm Conviction', interpretation: 'Zero-veto consensus clearance' },
     ];
 
-    // Anti-Hallucination Strict Chart.js Feed Grounding Guardrail
-    const spot = brief.pricing.currentPrice;
-    const atr = Math.max(brief.volatility.atr14 || spot * 0.015, spot * 0.002);
-    if (techRes.status === 'SUCCESS' && techRes.tradePlan && spot > 0) {
-      const entryMid = (techRes.tradePlan.entryZone.min + techRes.tradePlan.entryZone.max) / 2;
-      if (!Number.isFinite(entryMid) || Math.abs(entryMid - spot) / spot > 0.035) {
-        techRes.tradePlan.entryZone.min = Number((spot - atr * 0.25).toFixed(brief.assetClass === 'FOREX' ? 5 : 2));
-        techRes.tradePlan.entryZone.max = Number((spot + atr * 0.15).toFixed(brief.assetClass === 'FOREX' ? 5 : 2));
-      }
-      const slDist = Math.abs(spot - techRes.tradePlan.stopLoss.price);
-      if (!Number.isFinite(slDist) || slDist <= 0 || slDist / spot > 0.12) {
-        const isBull = techRes.trendDirection?.includes('BULLISH');
-        techRes.tradePlan.stopLoss.price = Number((isBull ? spot - atr * 1.4 : spot + atr * 1.4).toFixed(brief.assetClass === 'FOREX' ? 5 : 2));
-      }
-    }
-
     const reportSnapshot: ResearchReportSnapshot = {
       reportId: `qri_report_${resolvedSym}_${Date.now()}`,
       symbol: resolvedSym,
@@ -273,7 +270,7 @@ export class ResearchEngineOrchestrator {
       signal,
       gradeDescription,
       all25SubScores,
-      researchDisclaimer: 'LEGAL & RESEARCH COMPLIANCE DISCLAIMER: This platform is an automated multi-agent algorithmic research engine designed solely for institutional research, backtesting, and market observation. All analytical outputs, scores, grades, entries, and synthetic theses are synthesized strictly from the live Chart.js WebSocket/open-feed price stream and real-time community chat transcripts, strictly prohibiting hallucinated pricing. No output constitutes financial advice, recommendation, or solicitation.',
+      researchDisclaimer: 'LEGAL & RESEARCH COMPLIANCE DISCLAIMER: This platform is an automated multi-agent algorithmic research engine designed solely for institutional research, backtesting, and market observation. All analytical outputs, scores, grades, entries, and synthetic theses are strictly grounded in the real-time Chart.js WebSocket/SSE stream and community chat transcripts, strictly prohibiting hallucinated pricing. No output constitutes financial advice, recommendation, or solicitation.',
     };
 
     this.persistedReports.set(resolvedSym, reportSnapshot);

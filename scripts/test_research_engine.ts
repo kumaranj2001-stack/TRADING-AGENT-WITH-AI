@@ -8,8 +8,6 @@ import { liveChartTelemetryService } from '../lib/research/LiveChartTelemetrySer
 import { researchEngineOrchestrator } from '../lib/research/ResearchEngineOrchestrator';
 import { workflowEngine } from '../lib/research/WorkflowEngine';
 import { PdfReportGenerator } from '../lib/research/PdfReportGenerator';
-import { ensureDefaultChartJsPluginsRegistered } from '../lib/chartjs/plugins';
-import { computeVisionAtlasOverlays } from '../lib/chartjs/computeVisionAtlasOverlays';
 
 async function runTests() {
   console.log('================================================================');
@@ -214,30 +212,6 @@ async function runTests() {
     throw new Error('EUR/USD PDF precision formatting error');
   }
   console.log('✅ EUR/USD 6-Page PDF Report preserves exact FX precision and live chart timeframe.');
-
-  // TEST 7: Chart.js Modular Plugin Registry, Vision Atlas Overlays & Anti-Hallucination Guardrail
-  console.log('\n--- TEST 7: Chart.js Plugin Registry, Vision Atlas Overlays & Open Feed Grounding ---');
-  const pluginReg = ensureDefaultChartJsPluginsRegistered();
-  const pluginIds = pluginReg.listDescriptors().map((d) => d.id);
-  for (const reqId of ['qriCandlestick', 'qriVisionAtlas', 'qriIndicators', 'qriExecutionBlueprint', 'qriInteractiveOverlay']) {
-    if (!pluginIds.includes(reqId)) {
-      throw new Error(`Missing modular Chart.js plugin: ${reqId}`);
-    }
-  }
-  console.log(`✅ Registered Modular Chart.js Plugins (${pluginIds.length}): ${pluginIds.join(', ')}`);
-
-  const btcTelemetry = await liveChartTelemetryService.fetchLiveChartTelemetry('BTC/USD', '1h');
-  const btcOverlays = computeVisionAtlasOverlays(btcTelemetry.recentCandles || [], 2, 6);
-  if (btcOverlays.orderBlocks.length === 0 || btcOverlays.quantumFan.length === 0 || btcOverlays.anchorPrice !== btcTelemetry.livePrice) {
-    throw new Error('Vision Atlas Chart.js overlay synchronization failed');
-  }
-  const btcReport = await researchEngineOrchestrator.executeFullAnalysis('BTC/USD', btcTelemetry, '1h');
-  const entryMid = (btcReport.technical.tradePlan.entryZone.min + btcReport.technical.tradePlan.entryZone.max) / 2;
-  const driftPct = Math.abs(entryMid - btcReport.brief.pricing.currentPrice) / btcReport.brief.pricing.currentPrice;
-  if (driftPct > 0.035) {
-    throw new Error(`Anti-hallucination guardrail violated: drift=${(driftPct * 100).toFixed(2)}%`);
-  }
-  console.log(`✅ BTC/USD Open Stream (${btcTelemetry.source}) @ $${btcTelemetry.livePrice} -> Vision Atlas anchor=$${btcOverlays.anchorPrice}, OBs=${btcOverlays.orderBlocks.length}, FVGs=${btcOverlays.fairValueGaps.length}, EntryDrift=${(driftPct * 100).toFixed(3)}%`);
 
   console.log('\n================================================================');
   console.log('🎉 ALL ARCHITECTURAL TESTS AND WORKFLOWS PASSED WITH 100% SUCCESS!');

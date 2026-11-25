@@ -167,7 +167,7 @@ export const CommunityLiveChatFeed: React.FC<CommunityLiveChatFeedProps> = ({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-white text-xs tracking-wider">QURITRADER COMMUNITY LIVE CHAT</span>
+              <span className="font-bold text-white text-xs tracking-wider">TRADINGVIEW-STYLE COMMUNITY LIVE CHAT</span>
               <span className="flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 <span>LIVE FEED</span>
