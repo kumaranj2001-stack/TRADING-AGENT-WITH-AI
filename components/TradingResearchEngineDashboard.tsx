@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   Bot, 
   Search, 
@@ -52,11 +52,15 @@ import {
 } from '@/lib/research/types';
 import { workflowEngine, SectorRotationItem, OptionsStrategySetup, PreEarningsAnalysis, StockScreenerResultItem } from '@/lib/research/WorkflowEngine';
 import { formatAssetPrice, liveChartTelemetryService } from '@/lib/research/LiveChartTelemetryService';
+import { computeLivePredictiveAnalytics } from '@/lib/research/PredictiveAnalyticsEngine';
 import { ChartJsResearchChart } from './research/TradingViewLiveChart';
 import { CommunityLiveChatFeed } from './research/CommunityLiveChatFeed';
 
 export interface TradingResearchEngineDashboardProps {
   initialSymbol?: string;
+  initialTimeframe?: string;
+  sharedReport?: ResearchReportSnapshot | null;
+  onReportGenerated?: (report: ResearchReportSnapshot) => void;
   onBackToTerminal?: () => void;
   onSymbolChange?: (symbol: string) => void;
 }
@@ -70,21 +74,25 @@ export type DashboardTab =
   | 'catalyst' 
   | 'bull-bear' 
   | 'strategy' 
+  | 'predictive'
   | 'workflows';
 
 export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashboardProps> = ({
   initialSymbol = 'NVDA',
+  initialTimeframe = '1h',
+  sharedReport,
+  onReportGenerated,
   onBackToTerminal,
   onSymbolChange,
 }) => {
   const initialCanonical = liveChartTelemetryService.resolveSymbol(initialSymbol).symbol;
   const [activeSymbol, setActiveSymbol] = useState<string>(initialCanonical);
   const [symbolInput, setSymbolInput] = useState<string>(initialCanonical);
-  const [activeTimeframe, setActiveTimeframe] = useState<string>('1h');
+  const [activeTimeframe, setActiveTimeframe] = useState<string>(initialTimeframe || '1h');
   const [activeChartTelemetry, setActiveChartTelemetry] = useState<ChartLiveContext | null>(null);
   const activeChartTelemetryRef = useRef<ChartLiveContext | null>(null);
-  const [autoSyncAnalyze, setAutoSyncAnalyze] = useState<boolean>(true);
   const lastAutoTriggeredKeyRef = useRef<string>('');
+  const [quantumSeed, setQuantumSeed] = useState<number>(1);
 
   const [activeWorkflow, setActiveWorkflow] = useState<ResearchEngineWorkflow>('ANALYZE_FULL');
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
@@ -116,10 +124,27 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
   const [showPdfModal, setShowPdfModal] = useState<boolean>(false);
   const [pdfHtml, setPdfHtml] = useState<string>('');
 
-  // Run initial analysis on mount
+  // Run initial analysis on mount (or adopt matching sharedReport from Vision Atlas)
   useEffect(() => {
-    executeWorkflow('ANALYZE_FULL', initialCanonical);
+    if (sharedReport && sharedReport.symbol === initialCanonical) {
+      setReport(sharedReport);
+      setExecutionPhase('COMPLETED');
+      if (sharedReport.brief?.chartContext) {
+        setActiveChartTelemetry(sharedReport.brief.chartContext);
+        activeChartTelemetryRef.current = sharedReport.brief.chartContext;
+      }
+    } else {
+      executeWorkflow('ANALYZE_FULL', initialCanonical);
+    }
   }, []);
+
+  // Keep synchronized when sharedReport updates externally (e.g. from Vision Atlas)
+  useEffect(() => {
+    if (sharedReport && sharedReport.symbol === activeSymbol && (!report || sharedReport.timestamp > report.timestamp)) {
+      setReport(sharedReport);
+      setExecutionPhase('COMPLETED');
+    }
+  }, [sharedReport, activeSymbol]);
 
   // Bidirectional sync if parent prop initialSymbol changes (e.g. from global Header pair switcher)
   useEffect(() => {
@@ -164,7 +189,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
 
       // Deduplicate between immediate click notification and telemetry-arrival notification
       const triggerKey = `${nextCanonical}_${activeTimeframe}`;
-      if (autoSyncAnalyze && (telemetry || lastAutoTriggeredKeyRef.current !== triggerKey)) {
+      if (telemetry || lastAutoTriggeredKeyRef.current !== triggerKey) {
         lastAutoTriggeredKeyRef.current = triggerKey;
         const targetWorkflow =
           activeWorkflow === 'REPORT_PDF' || activeWorkflow === 'COMPARE_ASSETS'
@@ -173,7 +198,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
         executeWorkflow(targetWorkflow, nextCanonical, compareSymbolB, telemetry, activeTimeframe);
       }
     },
-    [activeTimeframe, activeWorkflow, autoSyncAnalyze, compareSymbolB, onSymbolChange, symbolInput]
+    [activeTimeframe, activeWorkflow, compareSymbolB, onSymbolChange, symbolInput]
   );
 
   const handleChartTimeframeChange = useCallback(
@@ -182,14 +207,12 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
       if (telemetry) {
         setActiveChartTelemetry(telemetry);
         activeChartTelemetryRef.current = telemetry;
-        if (autoSyncAnalyze) {
-          const targetWorkflow =
-            activeWorkflow === 'REPORT_PDF' ? 'ANALYZE_FULL' : activeWorkflow;
-          executeWorkflow(targetWorkflow, activeSymbol, compareSymbolB, telemetry, newTf);
-        }
+        const targetWorkflow =
+          activeWorkflow === 'REPORT_PDF' ? 'ANALYZE_FULL' : activeWorkflow;
+        executeWorkflow(targetWorkflow, activeSymbol, compareSymbolB, telemetry, newTf);
       }
     },
-    [activeSymbol, activeWorkflow, autoSyncAnalyze, compareSymbolB]
+    [activeSymbol, activeWorkflow, compareSymbolB]
   );
 
   const handleCommandSubmit = (cmdText: string) => {
@@ -266,6 +289,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             setParallelAgentsRunning({ technical: false, fundamental: false, sentiment: false, risk: false, thesis: false });
             setTimeout(() => {
               setReport(data.report);
+              onReportGenerated?.(data.report);
               if (data.report?.brief?.chartContext) {
                 setActiveChartTelemetry(data.report.brief.chartContext);
                 activeChartTelemetryRef.current = data.report.brief.chartContext;
@@ -403,6 +427,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
         if (res.ok) {
           const data = await res.json();
           setReport(data.report);
+          onReportGenerated?.(data.report);
         }
         setIsExecuting(false);
       }
@@ -461,7 +486,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
     const isBuy = signal === 'STRONG_BUY' || signal === 'BUY';
     const isHold = signal === 'HOLD_ACCUMULATE';
     const isCaution = signal === 'NEUTRAL_CAUTION' || signal === 'CAUTION';
-    
+
     return (
       <span className={`px-2.5 py-1 rounded-lg font-mono text-xs font-extrabold border inline-flex items-center gap-1.5 shadow-sm ${
         isBuy ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
@@ -485,6 +510,29 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
     report?.grade === 'B' ? '#3b82f6' :
     report?.grade === 'C' ? '#f59e0b' :
     report?.grade === 'D' ? '#f97316' : '#ef4444';
+
+  // Single-source-of-truth live Predictive Analytics (Quantum Vision, Vision Atlas Lab, Liquidity & Market DNA)
+  const predictiveSnapshot = useMemo(() => {
+    const candles =
+      activeChartTelemetry?.recentCandles?.map((c) => ({
+        time: c.timestamp || c.time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+      })) || [];
+    const liveSpot = activeChartTelemetry?.livePrice ?? report?.brief.pricing.currentPrice ?? 100;
+    return computeLivePredictiveAnalytics({
+      symbol: report?.symbol || activeSymbol,
+      timeframe: activeTimeframe,
+      candles,
+      livePrice: liveSpot,
+      horizonCandles: 10,
+      simulationNonce: quantumSeed,
+      researchReport: report,
+    });
+  }, [activeChartTelemetry, report, activeSymbol, activeTimeframe, quantumSeed]);
 
   return (
     <div className="bg-terminal-900 border border-terminal-border rounded-xl p-4 sm:p-6 shadow-2xl space-y-6 text-slate-200">
@@ -548,24 +596,12 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             />
           </div>
           <button
-            type="button"
-            onClick={() => setAutoSyncAnalyze(!autoSyncAnalyze)}
-            className={`px-3 py-2 rounded-lg border font-mono text-[11px] font-semibold transition-colors whitespace-nowrap ${
-              autoSyncAnalyze
-                ? 'bg-emerald-950/70 border-emerald-500/40 text-emerald-300'
-                : 'bg-terminal-950 border-terminal-border text-slate-400 hover:text-slate-200'
-            }`}
-            title="Automatically run 5-stage analysis whenever the chart symbol or timeframe changes"
-          >
-            {autoSyncAnalyze ? 'AUTO-SYNC: ON' : 'AUTO-SYNC: OFF'}
-          </button>
-          <button
             onClick={() => handleCommandSubmit(symbolInput)}
             disabled={isExecuting}
-            className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md disabled:opacity-50"
+            className="px-5 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md disabled:opacity-50"
           >
             <Zap className={`w-3.5 h-3.5 ${isExecuting ? 'animate-spin' : ''}`} />
-            <span>{isExecuting ? 'EXECUTING...' : 'RUN COMMAND / WORKFLOW'}</span>
+            <span>{isExecuting ? 'RUNNING...' : 'RUN'}</span>
           </button>
         </div>
 
@@ -653,9 +689,6 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               setActiveSymbol(sym);
               setSymbolInput(sym);
               onSymbolChange?.(sym);
-              executeWorkflow('ANALYZE_FULL', sym);
-            }}
-            onTriggerAnalysis={(sym) => {
               executeWorkflow('ANALYZE_FULL', sym);
             }}
             isAnalyzing={isExecuting}
@@ -880,7 +913,8 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
           { id: 'catalyst', label: '06. Catalyst Timeline' },
           { id: 'bull-bear', label: '07. Bull vs. Bear Cards' },
           { id: 'strategy', label: '08. Entry/Exit Strategy Table' },
-          { id: 'workflows', label: '09. All 16 Workflows Hub' },
+          { id: 'predictive', label: '09. Vision Atlas & Quantum Predictive' },
+          { id: 'workflows', label: '10. Active-Asset Workflows' },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -987,7 +1021,11 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             <div className="p-3 rounded-lg bg-terminal-950 border border-terminal-border space-y-1">
               <span className="text-slate-400 text-[11px]">EMA Ribbon Stack</span>
               <div className="font-bold text-white text-sm">{report.technical.emaAlignment}</div>
-              <span className="text-[10px] text-cyan-400">20: {report.technical.ema20} • 50: {report.technical.ema50} • 200: {report.technical.ema200}</span>
+              <span className="text-[10px] text-cyan-400">
+                20: {formatAssetPrice(report.technical.ema20, report.assetClass, report.symbol)} • 50:{' '}
+                {formatAssetPrice(report.technical.ema50, report.assetClass, report.symbol)} • 200:{' '}
+                {formatAssetPrice(report.technical.ema200, report.assetClass, report.symbol)}
+              </span>
             </div>
 
             <div className="p-3 rounded-lg bg-terminal-950 border border-terminal-border space-y-1">
@@ -1055,7 +1093,10 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                 {report.sentiment.wallStreetConsensus.buyCount} Buys • {report.sentiment.wallStreetConsensus.holdCount} Holds • {report.sentiment.wallStreetConsensus.sellCount} Sells
               </div>
               <div className="text-cyan-300 font-semibold">
-                Target: {report.brief.pricing.currency} {report.sentiment.wallStreetConsensus.averagePriceTarget} (+{report.sentiment.wallStreetConsensus.upsidePercent}% upside)
+                Target: {report.brief.pricing.currency}{' '}
+                {formatAssetPrice(report.sentiment.wallStreetConsensus.averagePriceTarget, report.assetClass, report.symbol)}{' '}
+                ({report.sentiment.wallStreetConsensus.upsidePercent >= 0 ? '+' : ''}
+                {report.sentiment.wallStreetConsensus.upsidePercent}% upside)
               </div>
             </div>
 
@@ -1120,8 +1161,14 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
 
             <div className="p-3 rounded-lg bg-terminal-950 border border-terminal-border space-y-1">
               <span className="text-slate-400 text-[11px]">Stress-Tested Bear-Case Drawdowns</span>
-              <div className="text-base font-bold text-rose-400">Mild (-7%): {report.brief.pricing.currency} {report.risk.bearCaseDrawdownScenario.mildCorrectionPrice}</div>
-              <div className="text-slate-400 text-[10px]">Deep (-15%): {report.brief.pricing.currency} {report.risk.bearCaseDrawdownScenario.deepCorrectionPrice}</div>
+              <div className="text-base font-bold text-rose-400">
+                Mild (-7%): {report.brief.pricing.currency}{' '}
+                {formatAssetPrice(report.risk.bearCaseDrawdownScenario.mildCorrectionPrice, report.assetClass, report.symbol)}
+              </div>
+              <div className="text-slate-400 text-[10px]">
+                Deep (-15%): {report.brief.pricing.currency}{' '}
+                {formatAssetPrice(report.risk.bearCaseDrawdownScenario.deepCorrectionPrice, report.assetClass, report.symbol)}
+              </div>
             </div>
           </div>
         </div>
@@ -1188,7 +1235,10 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                   <div key={i} className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60">
                     <strong className="text-white">{c.title}</strong>
                     <div className="text-[11px] text-slate-400 mt-1">{c.catalystExplanation}</div>
-                    <div className="text-emerald-400 font-bold mt-1.5">Target: {report.brief.pricing.currency} {c.upsideTargetPrice} (+{c.upsidePotentialPercent}%)</div>
+                    <div className="text-emerald-400 font-bold mt-1.5">
+                      Target: {report.brief.pricing.currency}{' '}
+                      {formatAssetPrice(c.upsideTargetPrice, report.assetClass, report.symbol)} (+{c.upsidePotentialPercent}%)
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1204,7 +1254,10 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                   <div key={i} className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60">
                     <strong className="text-white">{r.title}</strong>
                     <div className="text-[11px] text-slate-400 mt-1">{r.riskExplanation}</div>
-                    <div className="text-rose-400 font-bold mt-1.5">Floor: {report.brief.pricing.currency} {r.downsideTargetPrice} (-{r.downsideRiskPercent}%)</div>
+                    <div className="text-rose-400 font-bold mt-1.5">
+                      Floor: {report.brief.pricing.currency}{' '}
+                      {formatAssetPrice(r.downsideTargetPrice, report.assetClass, report.symbol)} (-{r.downsideRiskPercent}%)
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1295,37 +1348,203 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
         </div>
       )}
 
-      {/* TAB 9: ALL 16 WORKFLOWS HUB */}
+      {/* TAB 9: SYNCHRONIZED VISION ATLAS LAB, QUANTUM ANALYSIS, LIQUIDITY & MARKET DNA */}
+      {activeTab === 'predictive' && (
+        <div className="space-y-4 font-mono text-xs">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Quantum Vision Monte Carlo */}
+            <div className="p-4 rounded-xl bg-terminal-950 border border-cyan-500/30 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-cyan-400" />
+                  <span>Quantum Vision Monte Carlo ({predictiveSnapshot.symbol} • {predictiveSnapshot.timeframe})</span>
+                </h4>
+                <button
+                  onClick={() => setQuantumSeed((s) => s + 1)}
+                  className="px-2.5 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[10px] font-bold cursor-pointer"
+                >
+                  Re-Seed Paths (#{quantumSeed})
+                </button>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                <div className="p-2 rounded bg-terminal-900 border border-terminal-border">
+                  <span className="text-slate-400 block text-[10px]">Bull / Bear Edge</span>
+                  <strong className="text-emerald-400">{predictiveSnapshot.quantum.bullishProb}%</strong> /{' '}
+                  <strong className="text-rose-400">{predictiveSnapshot.quantum.bearishProb}%</strong>
+                </div>
+                <div className="p-2 rounded bg-terminal-900 border border-terminal-border">
+                  <span className="text-slate-400 block text-[10px]">Key S1 / R1</span>
+                  <strong className="text-white">
+                    {predictiveSnapshot.quantum.keySupport.toFixed(predictiveSnapshot.decimals)} /{' '}
+                    {predictiveSnapshot.quantum.keyResistance.toFixed(predictiveSnapshot.decimals)}
+                  </strong>
+                </div>
+                <div className="p-2 rounded bg-terminal-900 border border-terminal-border">
+                  <span className="text-slate-400 block text-[10px]">Touch Odds (R1 / S1)</span>
+                  <strong className="text-cyan-300">
+                    {predictiveSnapshot.quantum.touchOddsR1}% / {predictiveSnapshot.quantum.touchOddsS1}%
+                  </strong>
+                </div>
+                <div className="p-2 rounded bg-terminal-900 border border-terminal-border">
+                  <span className="text-slate-400 block text-[10px]">80% Cone Range</span>
+                  <strong className="text-amber-300">
+                    {predictiveSnapshot.quantum.rangeMin.toFixed(predictiveSnapshot.decimals)}–
+                    {predictiveSnapshot.quantum.rangeMax.toFixed(predictiveSnapshot.decimals)}
+                  </strong>
+                </div>
+              </div>
+              <div className="text-[11px] text-slate-300">
+                Directional Assessment: <strong className="text-cyan-300">{predictiveSnapshot.quantum.biasLabel}</strong> • Confidence:{' '}
+                <strong>{predictiveSnapshot.quantum.confidenceLabel}</strong>
+              </div>
+            </div>
+
+            {/* Vision Atlas Lab */}
+            <div className="p-4 rounded-xl bg-terminal-950 border border-indigo-500/30 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Compass className="w-4 h-4 text-indigo-400" />
+                  <span>Vision Atlas Lab Order Flow &amp; Signal Engine</span>
+                </h4>
+                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">
+                  CONFLUENCE {predictiveSnapshot.visionAtlasLab.signalEngine.confluenceScore}/100
+                </span>
+              </div>
+              <div className="space-y-1.5 text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Liquidity Sweep:</span>
+                  <strong className="text-white">{predictiveSnapshot.visionAtlasLab.liquiditySweepText}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Market Structure:</span>
+                  <strong className="text-cyan-300">{predictiveSnapshot.visionAtlasLab.structureText}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Signal Headline:</span>
+                  <strong className="text-emerald-300">{predictiveSnapshot.visionAtlasLab.signalEngine.headline}</strong>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-1 text-[10px]">
+                <div className="p-2 rounded bg-rose-950/30 border border-rose-500/30">
+                  <span className="text-rose-300 font-bold block">Primary Supply Zone</span>
+                  <span className="text-white">
+                    {predictiveSnapshot.visionAtlasLab.sellZones[0].low.toFixed(predictiveSnapshot.decimals)} –{' '}
+                    {predictiveSnapshot.visionAtlasLab.sellZones[0].high.toFixed(predictiveSnapshot.decimals)}
+                  </span>
+                </div>
+                <div className="p-2 rounded bg-emerald-950/30 border border-emerald-500/30">
+                  <span className="text-emerald-300 font-bold block">Primary Demand Zone</span>
+                  <span className="text-white">
+                    {predictiveSnapshot.visionAtlasLab.buyZones[0].low.toFixed(predictiveSnapshot.decimals)} –{' '}
+                    {predictiveSnapshot.visionAtlasLab.buyZones[0].high.toFixed(predictiveSnapshot.decimals)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Liquidity Heatmap */}
+            <div className="p-4 rounded-xl bg-terminal-950 border border-blue-500/30 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-blue-400" />
+                  <span>Liquidity Heatmap &amp; Resting Order Pools</span>
+                </h4>
+                <span className="text-[10px] text-cyan-300">
+                  Bid {predictiveSnapshot.liquidity.bid.toFixed(predictiveSnapshot.decimals)} / Ask{' '}
+                  {predictiveSnapshot.liquidity.ask.toFixed(predictiveSnapshot.decimals)} ({predictiveSnapshot.liquidity.spreadLabel})
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {predictiveSnapshot.liquidity.levels.slice(0, 6).map((lvl, idx) => (
+                  <div key={idx} className="flex items-center justify-between gap-2 text-[11px] bg-terminal-900 px-2.5 py-1.5 rounded border border-terminal-border/60">
+                    <span className={lvl.type === 'SELL_LIQUIDITY' ? 'text-rose-300' : 'text-blue-300'}>
+                      {lvl.label}
+                    </span>
+                    <div className="flex items-center gap-3">
+                      <strong className="text-white">{lvl.price.toFixed(predictiveSnapshot.decimals)}</strong>
+                      <div className="w-16 h-1.5 rounded bg-terminal-950 overflow-hidden">
+                        <div
+                          className={`h-full ${lvl.type === 'SELL_LIQUIDITY' ? 'bg-rose-500' : 'bg-blue-500'}`}
+                          style={{ width: `${lvl.weight}%` }}
+                        />
+                      </div>
+                      <span className="text-slate-400 w-6 text-right">{lvl.weight}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Market DNA & Walk-Forward Edge */}
+            <div className="p-4 rounded-xl bg-terminal-950 border border-amber-500/30 space-y-2.5">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Layers className="w-4 h-4 text-amber-400" />
+                <span>Market DNA Fractal Edge &amp; Backtest ({predictiveSnapshot.marketDna.backtest.totalSetups} setups)</span>
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                <div className="p-2 rounded bg-terminal-900 border border-terminal-border">
+                  <span className="text-slate-400 block text-[10px]">Similarity</span>
+                  <strong className="text-amber-300">{predictiveSnapshot.marketDna.similarityScore}%</strong>
+                </div>
+                <div className="p-2 rounded bg-terminal-900 border border-terminal-border">
+                  <span className="text-slate-400 block text-[10px]">Win Rate</span>
+                  <strong className="text-emerald-400">{predictiveSnapshot.marketDna.backtest.winRatePct}%</strong>
+                </div>
+                <div className="p-2 rounded bg-terminal-900 border border-terminal-border">
+                  <span className="text-slate-400 block text-[10px]">Avg R / PF</span>
+                  <strong className="text-cyan-300">
+                    {predictiveSnapshot.marketDna.backtest.avgRMultiple}R / {predictiveSnapshot.marketDna.backtest.profitFactor}
+                  </strong>
+                </div>
+                <div className="p-2 rounded bg-terminal-900 border border-terminal-border">
+                  <span className="text-slate-400 block text-[10px]">Bar Close</span>
+                  <strong className="text-white">{predictiveSnapshot.marketDna.nextCandleCountdown}</strong>
+                </div>
+              </div>
+              <div className="text-[11px] text-slate-300">
+                Regime: <strong className="text-white">{predictiveSnapshot.marketDna.regime}</strong> •{' '}
+                {predictiveSnapshot.marketDna.volatilityLabel}
+              </div>
+              {predictiveSnapshot.marketDna.twins.slice(0, 2).map((twin, idx) => (
+                <div key={twin.id} className="p-2 rounded bg-terminal-900 border border-terminal-border/60 flex justify-between text-[10px]">
+                  <span className="text-amber-300">Twin #{idx + 1} ({twin.similarityPercent}%) — {twin.timestampLabel}</span>
+                  <span className={twin.forwardReturnPercent >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                    {twin.forwardReturnPercent >= 0 ? '+' : ''}{twin.forwardReturnPercent}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 10: STREAMLINED ACTIVE-ASSET WORKFLOWS */}
       {activeTab === 'workflows' && (
         <div className="space-y-4 font-mono text-xs">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
             {[
-              { id: 'ANALYZE_FULL', cmd: '/trade analyze', label: '01. Flagship Full Analysis' },
-              { id: 'QUICK_SNAPSHOT', cmd: '/trade quick', label: '02. 60-Sec Snapshot' },
-              { id: 'STANDALONE_TECH', cmd: '/trade technical', label: '03. Standalone Technical' },
-              { id: 'STANDALONE_FUND', cmd: '/trade fundamental', label: '04. Standalone Fundamental' },
-              { id: 'STANDALONE_SENT', cmd: '/trade sentiment', label: '05. Standalone Sentiment' },
-              { id: 'STANDALONE_RISK', cmd: '/trade risk', label: '06. Standalone Risk' },
-              { id: 'STANDALONE_THESIS', cmd: '/trade thesis', label: '07. Standalone Thesis' },
-              { id: 'SECTOR_ROTATION', cmd: '/trade sector', label: '08. Sector Rotation' },
-              { id: 'COMPARE_ASSETS', cmd: '/trade compare', label: '09. Asset Comparison' },
-              { id: 'OPTIONS_STRATEGIES', cmd: '/trade options', label: '10. Options Strategies' },
-              { id: 'PRE_EARNINGS', cmd: '/trade earnings', label: '11. Pre-Earnings Deep-Dive' },
-              { id: 'PORTFOLIO_REBALANCE', cmd: '/trade portfolio', label: '12. Portfolio Rebalancing' },
-              { id: 'STOCK_SCREENER', cmd: '/trade screen', label: '13. Stock Screener' },
-              { id: 'SCORED_WATCHLIST', cmd: '/trade watchlist', label: '14. Scored Watchlist' },
-              { id: 'REPORT_PDF', cmd: '/trade report-pdf', label: '15. 6-Page PDF Report' },
+              { id: 'ANALYZE_FULL', cmd: `/trade analyze ${activeSymbol}`, label: '01. Flagship 5-Agent Audit' },
+              { id: 'QUICK_SNAPSHOT', cmd: `/trade quick ${activeSymbol}`, label: '02. 60-Sec Rapid Pulse' },
+              { id: 'STANDALONE_TECH', cmd: `/trade technical ${activeSymbol}`, label: '03. Standalone Technical' },
+              { id: 'STANDALONE_FUND', cmd: `/trade fundamental ${activeSymbol}`, label: '04. Standalone Fundamental' },
+              { id: 'STANDALONE_SENT', cmd: `/trade sentiment ${activeSymbol}`, label: '05. Standalone Sentiment' },
+              { id: 'STANDALONE_RISK', cmd: `/trade risk ${activeSymbol}`, label: '06. Standalone Risk' },
+              { id: 'STANDALONE_THESIS', cmd: `/trade thesis ${activeSymbol}`, label: '07. Standalone Thesis' },
+              { id: 'OPTIONS_STRATEGIES', cmd: `/trade options ${activeSymbol}`, label: '08. Options Playbook' },
+              { id: 'PRE_EARNINGS', cmd: `/trade earnings ${activeSymbol}`, label: '09. Pre-Earnings / Catalyst' },
+              { id: 'COMPARE_ASSETS', cmd: `/trade compare ${activeSymbol}`, label: '10. Head-to-Head Compare' },
+              { id: 'REPORT_PDF', cmd: `/trade report-pdf ${activeSymbol}`, label: '11. 6-Page PDF Report' },
             ].map((wf) => (
               <button
                 key={wf.id}
-                onClick={() => executeWorkflow(wf.id as any)}
-                className={`p-3 rounded-lg border text-left transition-all ${
+                onClick={() => executeWorkflow(wf.id as any, activeSymbol)}
+                className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
                   activeWorkflow === wf.id
                     ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 font-bold'
                     : 'bg-terminal-950 border-terminal-border hover:bg-terminal-800 text-slate-300'
                 }`}
               >
-                <div className="text-[10px] text-cyan-400">{wf.cmd}</div>
+                <div className="text-[10px] text-cyan-400 truncate">{wf.cmd}</div>
                 <div className="mt-1 text-xs truncate">{wf.label}</div>
               </button>
             ))}

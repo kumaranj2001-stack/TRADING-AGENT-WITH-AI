@@ -30,6 +30,14 @@ export class PdfReportGenerator {
     } = report;
 
     const fmt = (val: number) => formatAssetPrice(val, assetClass, symbol);
+    const pricePrefix =
+      assetClass === 'INDIAN_MARKET'
+        ? '₹'
+        : symbol.includes('JPY')
+        ? '¥'
+        : assetClass === 'FOREX'
+        ? ''
+        : '$';
     const activeTimeframe = brief.chartContext?.timeframe?.toUpperCase() || '1H';
     const activeIndList = brief.chartContext?.activeIndicators?.join(', ') || 'RSI, EMA20/50/200, MACD, BB';
 
@@ -283,7 +291,7 @@ export class PdfReportGenerator {
         <div class="grid-3" style="margin-bottom: 0;">
           <div>
             <strong>Pricing & Spread:</strong><br>
-            Day Range: ${brief.pricing.currency} ${brief.pricing.dayLow} - ${brief.pricing.dayHigh}<br>
+            Day Range: ${pricePrefix}${fmt(brief.pricing.dayLow)} - ${pricePrefix}${fmt(brief.pricing.dayHigh)}<br>
             Spread: ${brief.pricing.spreadPipsOrTicks} pips / ticks
           </div>
           <div>
@@ -293,13 +301,13 @@ export class PdfReportGenerator {
           </div>
           <div>
             <strong>Macro & Volatility:</strong><br>
-            ATR-14: ${brief.volatility.atr14} (${brief.volatility.atrPercent}%)<br>
+            ATR-14: ${pricePrefix}${fmt(brief.volatility.atr14)} (${brief.volatility.atrPercent}%)<br>
             Central Bank: ${brief.macro.centralBankStance} (${brief.macro.policyInterestRate}%)
           </div>
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" style="margin-bottom: 10px;">
         <div class="card-title">5-Dimension Weighted Synthesis Table & Proportional Weight Recalculation</div>
         <table>
           <thead>
@@ -330,6 +338,21 @@ export class PdfReportGenerator {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Complete 25 Sub-Scores Single-Source Audit Matrix (0-20 Scale Each)</div>
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; font-size: 8.5px;">
+          ${all25SubScores.map(sub => `
+            <div style="border: 1px solid #e2e8f0; border-radius: 4px; padding: 3px 5px; background: #f8fafc;">
+              <div style="color: #64748b; font-size: 7.5px; text-transform: uppercase;">${sub.agent}</div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-weight: 600; color: #0f172a;">${sub.category}</span>
+                <strong class="font-mono text-cyan">${sub.score}/20</strong>
+              </div>
+            </div>
+          `).join('')}
+        </div>
       </div>
     </div>
 
@@ -532,7 +555,7 @@ export class PdfReportGenerator {
           <div style="font-size: 14px; font-weight: 700; color: #059669; font-family: 'JetBrains Mono', monospace; margin-bottom: 6px;">
             ${sentiment.wallStreetConsensus.consensusRating} (${sentiment.wallStreetConsensus.buyCount} Buys / ${sentiment.wallStreetConsensus.holdCount} Holds / ${sentiment.wallStreetConsensus.sellCount} Sells)
           </div>
-          <div>Avg Price Target: <strong class="font-mono text-cyan">${sentiment.wallStreetConsensus.averagePriceTarget}</strong> (+${sentiment.wallStreetConsensus.upsidePercent}% upside)</div>
+          <div>Avg Price Target: <strong class="font-mono text-cyan">${pricePrefix}${fmt(sentiment.wallStreetConsensus.averagePriceTarget)}</strong> (${sentiment.wallStreetConsensus.upsidePercent >= 0 ? '+' : ''}${sentiment.wallStreetConsensus.upsidePercent}% upside)</div>
           <div>30-Day Revisions: <strong class="text-emerald">+${sentiment.wallStreetConsensus.recentUpgrades30d} Upgrades</strong> / <span class="text-rose">-${sentiment.wallStreetConsensus.recentDowngrades30d} Downgrade</span></div>
           <div>Sector Alpha: Outperforming sector by +${sentiment.relativeStrengthVsSector.outperformancePercent30d}%</div>
         </div>
@@ -594,8 +617,8 @@ export class PdfReportGenerator {
           <div>Half-Kelly Mathematical Ceiling: <strong>${risk.positionSizingKelly.halfKellyPercent}%</strong></div>
           <div style="margin-top: 6px; border-top: 1px dashed #e2e8f0; padding-top: 4px;">
             <strong>Stress-Tested Drawdown Thresholds:</strong><br>
-            Mild Correction (-7%): $${risk.bearCaseDrawdownScenario.mildCorrectionPrice}<br>
-            Deep Correction (-15%): $${risk.bearCaseDrawdownScenario.deepCorrectionPrice}
+            Mild Correction (-7%): ${pricePrefix}${fmt(risk.bearCaseDrawdownScenario.mildCorrectionPrice)}<br>
+            Deep Correction (-15%): ${pricePrefix}${fmt(risk.bearCaseDrawdownScenario.deepCorrectionPrice)}
           </div>
         </div>
       </div>
@@ -649,11 +672,22 @@ export class PdfReportGenerator {
         <div class="page-number">PAGE 6 OF 6</div>
       </div>
 
-      <div class="card" style="margin-bottom: 12px; background: #f8fafc;">
-        <div class="card-title">Executive Core Investment Thesis (${thesis.totalScore}/100)</div>
-        <p style="font-size: 11px; line-height: 1.5; color: #0f172a;">
-          ${thesis.executiveThesis}
-        </p>
+      <div class="grid-2">
+        <div class="card" style="background: #f8fafc;">
+          <div class="card-title">Executive Core Investment Thesis (${thesis.totalScore}/100)</div>
+          <p style="font-size: 10.5px; line-height: 1.45; color: #0f172a; margin: 0;">
+            ${thesis.executiveThesis}
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Thesis Sub-Scores (${thesis.totalScore}/100)</div>
+          <div>Catalyst Clarity (${thesis.subScores.catalystClarity}/20):<div class="bar-container"><div class="bar-fill" style="width: ${(thesis.subScores.catalystClarity / 20) * 100}%;"></div></div></div>
+          <div>Entry Timing (${thesis.subScores.timing}/20):<div class="bar-container"><div class="bar-fill" style="width: ${(thesis.subScores.timing / 20) * 100}%;"></div></div></div>
+          <div>Risk/Reward Asymmetry (${thesis.subScores.asymmetry}/20):<div class="bar-container"><div class="bar-fill" style="width: ${(thesis.subScores.asymmetry / 20) * 100}%;"></div></div></div>
+          <div>Structural Edge (${thesis.subScores.edge}/20):<div class="bar-container"><div class="bar-fill" style="width: ${(thesis.subScores.edge / 20) * 100}%;"></div></div></div>
+          <div>Synthesis Conviction (${thesis.subScores.conviction}/20):<div class="bar-container"><div class="bar-fill" style="width: ${(thesis.subScores.conviction / 20) * 100}%;"></div></div></div>
+        </div>
       </div>
 
       <div class="grid-2">
@@ -663,7 +697,7 @@ export class PdfReportGenerator {
             <div style="margin-bottom: 6px;">
               <strong class="text-emerald">${c.title}</strong><br>
               <span style="font-size: 9.5px; color: #475569;">${c.catalystExplanation}</span><br>
-              Target: <strong class="font-mono text-emerald">$${c.upsideTargetPrice} (+${c.upsidePotentialPercent}%)</strong>
+              Target: <strong class="font-mono text-emerald">${pricePrefix}${fmt(c.upsideTargetPrice)} (+${c.upsidePotentialPercent}%)</strong>
             </div>
           `).join('')}
         </div>
@@ -674,7 +708,7 @@ export class PdfReportGenerator {
             <div style="margin-bottom: 6px;">
               <strong class="text-rose">${r.title}</strong><br>
               <span style="font-size: 9.5px; color: #475569;">${r.riskExplanation}</span><br>
-              Risk Floor: <strong class="font-mono text-rose">$${r.downsideTargetPrice} (-${r.downsideRiskPercent}%)</strong>
+              Risk Floor: <strong class="font-mono text-rose">${pricePrefix}${fmt(r.downsideTargetPrice)} (-${r.downsideRiskPercent}%)</strong>
             </div>
           `).join('')}
         </div>
@@ -693,7 +727,7 @@ export class PdfReportGenerator {
 
         <div class="card">
           <div class="card-title">Strict Invalidation Trigger & Exit Protocol</div>
-          <div>Invalidation Level: <strong class="font-mono text-rose">$${thesis.invalidationTrigger.priceLevel}</strong></div>
+          <div>Invalidation Level: <strong class="font-mono text-rose">${pricePrefix}${fmt(thesis.invalidationTrigger.priceLevel)}</strong></div>
           <div>Breach Condition: ${thesis.invalidationTrigger.macroOrEventCondition}</div>
           <div style="color: #dc2626; margin-top: 4px;"><strong>Exit Action:</strong> ${thesis.invalidationTrigger.exitAction}</div>
         </div>

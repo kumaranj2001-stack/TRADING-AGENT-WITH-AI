@@ -49,7 +49,7 @@ async function handleWorkflow(
 ) {
   switch (action.toUpperCase()) {
     case 'SECTOR_ROTATION':
-      return NextResponse.json({ success: true, sectors: workflowEngine.getSectorRotation() });
+      return NextResponse.json({ success: true, sectors: await workflowEngine.getSectorRotation() });
 
     case 'COMPARE':
       const comparison = await workflowEngine.compareAssets(symbolA, symbolB);
@@ -64,13 +64,13 @@ async function handleWorkflow(
       return NextResponse.json({ success: true, earnings });
 
     case 'PORTFOLIO':
-      return NextResponse.json({ success: true, portfolio: workflowEngine.getPortfolioRebalance() });
+      return NextResponse.json({ success: true, portfolio: await workflowEngine.getPortfolioRebalance() });
 
     case 'SCREENER':
-      return NextResponse.json({ success: true, results: workflowEngine.getScreenerResults() });
+      return NextResponse.json({ success: true, results: await workflowEngine.getScreenerResults(symbol) });
 
     case 'WATCHLIST':
-      return NextResponse.json({ success: true, watchlist: workflowEngine.getScoredWatchlist() });
+      return NextResponse.json({ success: true, watchlist: await workflowEngine.getScoredWatchlist(symbol) });
 
     case 'STANDALONE_TECH':
       const techData = await workflowEngine.getStandaloneAgentView(symbol, 'tech', chartContext, timeframe);

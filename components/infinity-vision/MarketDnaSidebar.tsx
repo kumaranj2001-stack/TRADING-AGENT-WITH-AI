@@ -1,29 +1,25 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { 
-  Dna, 
-  Search, 
-  RotateCcw, 
-  Clock, 
-  CheckSquare, 
-  TrendingUp, 
-  TrendingDown, 
-  Sliders,
-  ChevronDown
-} from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Dna, Search, Clock } from 'lucide-react';
 import { CurrencyPair } from '@/lib/types';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
 import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
-import { BASE_PRICES } from '@/lib/marketData';
+import { ResearchReportSnapshot } from '@/lib/research/types';
+import {
+  computeLivePredictiveAnalytics,
+  PredictiveCandleInput,
+} from '@/lib/research/PredictiveAnalyticsEngine';
 
 export interface MarketDnaSidebarProps {
-  pair: CurrencyPair;
+  pair: CurrencyPair | string;
   timeframe: string;
   theme?: 'light' | 'dark';
   onTogglePatternOnChart?: (on: boolean) => void;
   onToggleChartMode?: (mode: 'Candles' | 'Line') => void;
   livePrice?: number;
+  candles?: PredictiveCandleInput[];
+  researchReport?: ResearchReportSnapshot | null;
 }
 
 export const MarketDnaSidebar: React.FC<MarketDnaSidebarProps> = ({
@@ -33,32 +29,92 @@ export const MarketDnaSidebar: React.FC<MarketDnaSidebarProps> = ({
   onTogglePatternOnChart,
   onToggleChartMode,
   livePrice: propLivePrice,
+  candles = [],
+  researchReport,
 }) => {
   const isLight = theme === 'light';
-  const isXau = pair.includes('XAU');
-  const isJpy = pair.includes('JPY');
-  const isIndian = pair === 'NIFTY 50' || pair === 'BANK NIFTY';
-  const decimals = isJpy ? 3 : (isXau || isIndian) ? 2 : 5;
-  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'twins' | 'entry' | 'stats' | 'confirmation' | 'replay'>('overview');
-  const [patternLength, setPatternLength] = useState<number>(40);
-  const [outcomeLength, setOutcomeLength] = useState<number>(20);
-  const [sortMethod, setSortMethod] = useState<string>('Similarity');
+  const [patternLength, setPatternLength] = useState<number>(20);
+  const [outcomeLength, setOutcomeLength] = useState<number>(10);
+  const [sortMethod, setSortMethod] = useState<'Similarity' | 'Forward Return' | 'MFE'>('Similarity');
   const [rrFilter, setRrFilter] = useState<string>('1:1 - 1:2 - 1:3');
   const [updateOnClose, setUpdateOnClose] = useState<boolean>(true);
   const [patternOnChart, setPatternOnChart] = useState<boolean>(true);
   const [chartMode, setChartMode] = useState<'Candles' | 'Line'>('Candles');
-  const [candleSeconds, setCandleSeconds] = useState<number>(368); // 6:08
+  const [searchSeed, setSearchSeed] = useState<number>(1);
+  const [countdownClock, setCountdownClock] = useState<number>(0);
 
-  // Live countdown timer for 15M candle forming
+  // Interactive Bar-by-Bar Replay State
+  const [replayIndex, setReplayIndex] = useState<number>(() => Math.max(0, candles.length - 12));
+  const [isReplaying, setIsReplaying] = useState<boolean>(false);
+
+  const activePrice =
+    propLivePrice ||
+    researchReport?.brief.pricing.currentPrice ||
+    LiveMarketFeedManager.getCanonicalPrice(pair as CurrencyPair) ||
+    liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair as CurrencyPair) ||
+    100;
+
+  // Tick real-time countdown every second
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCandleSeconds(prev => (prev > 0 ? prev - 1 : 900));
+    const id = setInterval(() => {
+      setCountdownClock((c) => c + 1);
     }, 1000);
-    return () => clearInterval(timer);
+    return () => clearInterval(id);
   }, []);
 
-  const formattedTimer = `${Math.floor(candleSeconds / 60)}:${(candleSeconds % 60).toString().padStart(2, '0')}`;
+  // Auto-advance Bar-by-Bar Replay when active
+  useEffect(() => {
+    if (!isReplaying || candles.length === 0) return;
+    const timer = setInterval(() => {
+      setReplayIndex((idx) => {
+        if (idx >= candles.length - 1) {
+          setIsReplaying(false);
+          return idx;
+        }
+        return idx + 1;
+      });
+    }, 700);
+    return () => clearInterval(timer);
+  }, [isReplaying, candles.length]);
+
+  useEffect(() => {
+    setReplayIndex(Math.max(0, candles.length - 12));
+    setIsReplaying(false);
+  }, [pair, timeframe, candles.length]);
+
+  const snapshot = useMemo(
+    () =>
+      computeLivePredictiveAnalytics({
+        symbol: pair,
+        timeframe,
+        candles,
+        livePrice: activePrice,
+        horizonCandles: outcomeLength,
+        simulationNonce: searchSeed,
+        researchReport,
+      }),
+    [pair, timeframe, candles, activePrice, outcomeLength, searchSeed, researchReport, countdownClock]
+  );
+
+  const { visionAtlasLab: lab, marketDna: dna, decimals } = snapshot;
+  const isIndian =
+    pair.includes('NIFTY') || pair.includes('RELIANCE') || pair.includes('HDFC') || pair.includes('TCS') || pair.includes('INFY');
+  const isFx = pair.includes('/') && !pair.includes('XAU') && !pair.includes('XAG') && !pair.includes('BTC');
+  const pricePrefix = isIndian ? '₹' : isFx ? '' : '$';
+  const fmt = (n: number) => `${pricePrefix}${n.toFixed(decimals)}`;
+
+  const sortedTwins = useMemo(() => {
+    const copy = [...dna.twins];
+    if (sortMethod === 'Forward Return') {
+      copy.sort((a, b) => Math.abs(b.forwardReturnPercent) - Math.abs(a.forwardReturnPercent));
+    } else if (sortMethod === 'MFE') {
+      copy.sort((a, b) => b.maxFavorableExcursionPct - a.maxFavorableExcursionPct);
+    } else {
+      copy.sort((a, b) => b.similarityPercent - a.similarityPercent);
+    }
+    return copy;
+  }, [dna.twins, sortMethod]);
 
   const handlePatternToggle = () => {
     const nextVal = !patternOnChart;
@@ -71,20 +127,24 @@ export const MarketDnaSidebar: React.FC<MarketDnaSidebarProps> = ({
     if (onToggleChartMode) onToggleChartMode(mode);
   };
 
+  const currentReplayBar = candles[Math.min(replayIndex, Math.max(0, candles.length - 1))];
+
   return (
-    <div className={`w-full h-full flex flex-col select-none overflow-y-auto custom-scrollbar font-sans text-xs ${
-      isLight ? 'text-slate-800' : 'text-slate-100'
-    }`}>
+    <div
+      className={`w-full h-full flex flex-col select-none overflow-y-auto custom-scrollbar font-sans text-xs ${
+        isLight ? 'text-slate-800' : 'text-slate-100'
+      }`}
+    >
       {/* Header */}
       <div className="p-3 border-b border-slate-200 dark:border-terminal-border">
         <div className="flex items-center gap-1.5">
           <Dna className="w-4 h-4 text-amber-500" />
           <h2 className="font-black text-xs uppercase tracking-wider text-slate-900 dark:text-white">
-            INFINITY FUSION DNA ANALYSIS
+            MARKET DNA FRACTAL ENGINE
           </h2>
         </div>
         <p className="text-[10px] text-slate-500 italic mt-0.5">
-          Historical research - not a signal - not a forecast
+          Live OHLCV Correlation &amp; Empirical Walk-Forward Edge
         </p>
       </div>
 
@@ -92,79 +152,89 @@ export const MarketDnaSidebar: React.FC<MarketDnaSidebarProps> = ({
       <div className="p-3 border-b border-slate-200 dark:border-terminal-border bg-slate-50 dark:bg-terminal-900/40 space-y-2">
         <div className="grid grid-cols-2 gap-2 text-[11px]">
           <div>
-            <label className="text-[10px] text-slate-500 block mb-0.5">Pattern length</label>
+            <label className="text-[10px] text-slate-500 block mb-0.5">Pattern window</label>
             <select
               value={patternLength}
               onChange={(e) => setPatternLength(Number(e.target.value))}
               className="w-full px-2 py-1 rounded border border-slate-300 dark:border-terminal-border bg-white dark:bg-terminal-900 text-xs font-semibold focus:outline-none"
             >
-              <option value={20}>Pattern: 20 candles</option>
-              <option value={40}>Pattern: 40 candles</option>
-              <option value={60}>Pattern: 60 candles</option>
+              <option value={12}>12 candles</option>
+              <option value={20}>20 candles</option>
+              <option value={40}>40 candles</option>
+              <option value={60}>60 candles</option>
             </select>
           </div>
-
           <div>
-            <label className="text-[10px] text-slate-500 block mb-0.5">Outcome length</label>
+            <label className="text-[10px] text-slate-500 block mb-0.5">Outcome horizon</label>
             <select
               value={outcomeLength}
               onChange={(e) => setOutcomeLength(Number(e.target.value))}
               className="w-full px-2 py-1 rounded border border-slate-300 dark:border-terminal-border bg-white dark:bg-terminal-900 text-xs font-semibold focus:outline-none"
             >
-              <option value={10}>Outcome: 10 candles</option>
-              <option value={20}>Outcome: 20 candles</option>
-              <option value={30}>Outcome: 30 candles</option>
+              <option value={5}>5 candles</option>
+              <option value={10}>10 candles</option>
+              <option value={20}>20 candles</option>
             </select>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-[11px]">
           <div>
-            <label className="text-[10px] text-slate-500 block mb-0.5">Sort</label>
+            <label className="text-[10px] text-slate-500 block mb-0.5">Sort fractals by</label>
             <select
               value={sortMethod}
-              onChange={(e) => setSortMethod(e.target.value)}
+              onChange={(e) => setSortMethod(e.target.value as any)}
               className="w-full px-2 py-1 rounded border border-slate-300 dark:border-terminal-border bg-white dark:bg-terminal-900 text-xs font-semibold focus:outline-none"
             >
-              <option>Sort: Similarity</option>
-              <option>Sort: Volatility Match</option>
-              <option>Sort: Win Rate</option>
+              <option value="Similarity">Similarity</option>
+              <option value="Forward Return">Forward Return</option>
+              <option value="MFE">MFE Excursion</option>
             </select>
           </div>
-
           <div>
-            <label className="text-[10px] text-slate-500 block mb-0.5">Target RR</label>
+            <label className="text-[10px] text-slate-500 block mb-0.5">R:R Band</label>
             <select
               value={rrFilter}
               onChange={(e) => setRrFilter(e.target.value)}
               className="w-full px-2 py-1 rounded border border-slate-300 dark:border-terminal-border bg-white dark:bg-terminal-900 text-xs font-semibold focus:outline-none"
             >
-              <option>RR: 1:1 - 1:2 - 1:3</option>
-              <option>RR: 1:2+</option>
-              <option>RR: 1:3+</option>
+              <option value="1:1 - 1:2 - 1:3">1:1 - 1:2 - 1:3</option>
+              <option value="1:2+ Only">1:2+ Only</option>
             </select>
           </div>
         </div>
 
-        <button
-          onClick={() => {}}
-          className="w-full py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-amber-600 dark:hover:bg-amber-500 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-xs"
-        >
-          <Search className="w-3.5 h-3.5" />
-          <span>Search again</span>
-        </button>
+        <div className="flex items-center justify-between pt-1">
+          <label className="flex items-center gap-1.5 text-[11px] font-medium cursor-pointer text-slate-600 dark:text-slate-300">
+            <input
+              type="checkbox"
+              checked={updateOnClose}
+              onChange={(e) => setUpdateOnClose(e.target.checked)}
+              className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+            />
+            <span>Sync on bar tick</span>
+          </label>
+
+          <button
+            onClick={() => setSearchSeed((s) => s + 1)}
+            className="px-3 py-1 rounded bg-slate-900 hover:bg-slate-800 dark:bg-cyan-600 text-white font-bold text-[11px] flex items-center gap-1 shadow-sm cursor-pointer"
+          >
+            <Search className="w-3 h-3" />
+            <span>Scan Fractals</span>
+          </button>
+        </div>
       </div>
 
-      {/* Sub-tabs: DNA Overview | Historical Twins | Entry Research | Historical Statistics | Confirmation History | Replay */}
-      <div className="flex border-b border-slate-200 dark:border-terminal-border overflow-x-auto no-scrollbar shrink-0 text-[11px] font-bold">
+      {/* Sub-navigation Tabs */}
+      <div className="flex items-center overflow-x-auto border-b border-slate-200 dark:border-terminal-border text-[11px] font-bold">
         {[
           { id: 'overview', label: 'DNA Overview' },
           { id: 'twins', label: 'Historical Twins' },
-          { id: 'entry', label: 'Entry Research' },
-          { id: 'stats', label: 'Historical Statistics' },
-          { id: 'confirmation', label: 'Confirmation History' },
+          { id: 'entry', label: 'Entry Checklist' },
+          { id: 'stats', label: 'Empirical Stats' },
+          { id: 'confirmation', label: 'Flow Log' },
           { id: 'replay', label: 'Replay' },
-        ].map(tab => (
+        ].map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveSubTab(tab.id as any)}
@@ -182,301 +252,276 @@ export const MarketDnaSidebar: React.FC<MarketDnaSidebarProps> = ({
       <div className="p-3.5 space-y-3.5 flex-1">
         {activeSubTab === 'overview' && (
           <>
-            {/* Liquidity Analysis: ESTIMATED */}
             <div className="p-2.5 rounded-lg border border-slate-200 dark:border-terminal-border space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-bold text-[11px] uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                  Liquidity analysis
+                  Liquidity &amp; Structure
                 </span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-terminal-800 font-bold text-slate-500">
-                  ESTIMATED
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 font-bold">
+                  LIVE TELEMETRY
                 </span>
               </div>
 
               <div className="space-y-1 text-[11px] font-mono">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Liquidity sweep:</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200">
-                    {isXau ? 'Sell-side swept at 3998.47 - 3 candles ago' : 'Sell-side swept at recent low'}
-                  </span>
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-500 font-sans">Liquidity sweep:</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200 text-right">{lab.liquiditySweepText}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-500 font-sans">Structure:</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200 text-right">{lab.structureText}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Structure:</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200">MSS (CHoCH) bearish - not confirming yet</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Analysis confidence:</span>
-                  <span className="font-bold text-amber-600">Low</span>
+                  <span className="text-slate-500 font-sans">Confidence:</span>
+                  <span className="font-bold text-cyan-600">{lab.confidenceText}</span>
                 </div>
               </div>
 
-              {/* Probability Split Bar */}
               <div className="space-y-1 pt-1">
                 <div className="flex justify-between text-[10px] font-bold font-mono">
-                  <span className="text-emerald-600">Bullish 47%</span>
-                  <span className="text-rose-600">Bearish 53%</span>
+                  <span className="text-emerald-600">Bullish {lab.bullishPct}%</span>
+                  <span className="text-rose-600">Bearish {lab.bearishPct}%</span>
                 </div>
                 <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-terminal-800 overflow-hidden flex">
-                  <div className="bg-emerald-500 h-full" style={{ width: '47%' }} />
-                  <div className="bg-rose-500 h-full" style={{ width: '53%' }} />
+                  <div className="bg-emerald-500 h-full" style={{ width: `${lab.bullishPct}%` }} />
+                  <div className="bg-rose-500 h-full" style={{ width: `${lab.bearishPct}%` }} />
                 </div>
-                <p className="text-[9px] text-slate-400 leading-tight">
-                  Measured on 50 past sell-side sweeps of this chart (first move of &gt;1 ATR within 12 candles). Not a guarantee.
-                </p>
               </div>
 
-              {/* Possible Reaction Zones */}
-              <div className="pt-2 border-t border-slate-200 dark:border-terminal-border space-y-1">
-                <span className="text-[10px] font-bold text-slate-500 uppercase block">Possible reaction zones</span>
-                <div className="space-y-1 text-[11px] font-mono">
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-rose-500" />
-                      <span className="text-slate-700 dark:text-slate-300">Sell-limit zone</span>
-                    </span>
-                    <span className="font-bold text-slate-900 dark:text-white">
-                      {(activePrice * 1.001).toFixed(decimals)} - {(activePrice * 1.003).toFixed(decimals)}
+              {/* Reaction Zones */}
+              <div className="pt-2 border-t border-slate-200 dark:border-terminal-border space-y-1 text-[11px] font-mono">
+                {lab.sellZones.slice(0, 2).map((z) => (
+                  <div key={z.id} className="flex items-center justify-between">
+                    <span className="text-rose-600 dark:text-rose-400">{z.strengthLabel}</span>
+                    <span className="font-bold">
+                      {fmt(z.low)} - {fmt(z.high)}
                     </span>
                   </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-amber-700" />
-                      <span className="text-slate-700 dark:text-slate-300">Sell-limit zone 2</span>
-                    </span>
-                    <span className="font-bold text-slate-900 dark:text-white">
-                      {(activePrice * 1.005).toFixed(decimals)} - {(activePrice * 1.008).toFixed(decimals)}
+                ))}
+                {lab.buyZones.slice(0, 2).map((z) => (
+                  <div key={z.id} className="flex items-center justify-between">
+                    <span className="text-emerald-600 dark:text-emerald-400">{z.strengthLabel}</span>
+                    <span className="font-bold">
+                      {fmt(z.low)} - {fmt(z.high)}
                     </span>
                   </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-blue-500" />
-                      <span className="text-slate-700 dark:text-slate-300">Sell-side liquidity</span>
-                    </span>
-                    <span className="font-bold text-slate-900 dark:text-white">
-                      {(activePrice * 0.997).toFixed(decimals)} - {(activePrice * 0.999).toFixed(decimals)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-blue-700" />
-                      <span className="text-slate-700 dark:text-slate-300">Buy-limit zone</span>
-                    </span>
-                    <span className="font-bold text-slate-900 dark:text-white">
-                      {(activePrice * 0.991).toFixed(decimals)} - {(activePrice * 0.995).toFixed(decimals)}
-                    </span>
-                  </div>
-                </div>
-                <p className="text-[9px] text-slate-400 italic pt-1">
-                  Entry areas, invalidation and targets appear only when a sweep, a structure confirmation and enough history agree.
-                </p>
+                ))}
               </div>
             </div>
 
-            {/* CANDLE 15M / RESEARCH STATUS */}
-            <div className="p-2.5 rounded-lg border border-slate-200 dark:border-terminal-border space-y-2">
-              <div className="flex items-center justify-between text-[11px] font-mono">
-                <div>
-                  <span className="text-slate-500 text-[10px] uppercase block">CANDLE 15M</span>
-                  <strong className="text-slate-900 dark:text-white font-bold">{formattedTimer} FORMING</strong>
-                </div>
-
-                <div className="text-right">
-                  <span className="text-slate-500 text-[10px] uppercase block">RESEARCH</span>
-                  <span className="text-amber-600 font-bold">WAITING</span>
-                  <span className="text-[9px] text-slate-400 block -mt-0.5">last confirmed 22:15</span>
-                </div>
-              </div>
-
-              <label className="flex items-center gap-2 text-[10px] text-slate-600 dark:text-slate-400 cursor-pointer pt-1 border-t border-slate-200 dark:border-terminal-border">
-                <input
-                  type="checkbox"
-                  checked={updateOnClose}
-                  onChange={(e) => setUpdateOnClose(e.target.checked)}
-                  className="rounded"
-                />
-                <span>Update after each closed candle</span>
-              </label>
-            </div>
-
-            {/* RESEARCH STATUS: DEVELOPING SETUP */}
+            {/* Live Candle Clock */}
             <div className="p-2.5 rounded-lg border border-slate-200 dark:border-terminal-border space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-500 uppercase">RESEARCH STATUS</span>
-                <span className="text-[11px] font-bold text-slate-900 dark:text-white">DEVELOPING SETUP</span>
+              <div className="flex items-center justify-between text-[11px] font-bold">
+                <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                  <Clock className="w-3.5 h-3.5 text-amber-500" />
+                  <span>{timeframe.toUpperCase()} Bar Closing Countdown</span>
+                </span>
+                <span className="font-mono text-amber-600">{dna.nextCandleCountdown}</span>
               </div>
+            </div>
 
-              <p className="text-[10px] text-slate-600 dark:text-slate-400 italic">
-                Historical bias: <strong>bullish</strong> - a description of what similar past patterns did, not a forecast or a trade instruction.
-              </p>
-
-              <div className="space-y-1 pt-1 text-[10px] font-sans border-t border-slate-200 dark:border-terminal-border">
+            {/* Market DNA Live Status Card */}
+            <div className="p-3 rounded-lg border border-slate-200 dark:border-terminal-border space-y-2">
+              <span className="text-xs font-bold block text-slate-900 dark:text-white">
+                Market DNA Regime — {dna.historicalBias}
+              </span>
+              <div className="space-y-1.5 text-[11px] font-mono pt-1">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Market condition:</span>
-                  <span className="text-right font-medium max-w-[190px]">Structural transition - sideways - quiet volatility</span>
+                  <span className="text-slate-500 font-sans">Market regime:</span>
+                  <span className="font-medium">{dna.regime}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Market regime:</span>
-                  <span className="font-medium">Structural transition</span>
+                  <span className="text-slate-500 font-sans">Volatility:</span>
+                  <span className="font-medium">{dna.volatilityLabel}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Session:</span>
-                  <span className="font-medium">London / New York overlap</span>
+                  <span className="text-slate-500 font-sans">Candle body strength:</span>
+                  <span className="font-medium">{dna.candleBodyStrengthPct}%</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Volatility:</span>
-                  <span className="font-medium">Quiet</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Candle strength:</span>
-                  <span className="font-medium">Moderate</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Historical similarity:</span>
-                  <span className="font-bold text-amber-600">67.3</span>
+                  <span className="text-slate-500 font-sans">Fractal similarity:</span>
+                  <span className="font-bold text-amber-600">{dna.similarityScore}%</span>
                 </div>
               </div>
             </div>
           </>
         )}
 
-        {/* Historical Twins Subtab */}
         {activeSubTab === 'twins' && (
           <div className="space-y-2">
             <span className="text-[11px] font-bold uppercase text-slate-600 dark:text-slate-400">
-              Matched Pattern Fractals (Top 3)
+              Matched Pearson Fractals ({candles.length} live bars scanned)
             </span>
-            <div className="space-y-2">
-              <div className="p-2.5 rounded border border-amber-500/40 bg-amber-500/5 space-y-1">
-                <div className="flex justify-between font-mono text-[11px]">
-                  <strong className="text-amber-700 dark:text-amber-400">Match #1 (67.3%)</strong>
-                  <span>2025-10-29 14:00</span>
-                </div>
-                <p className="text-[10px] text-slate-600 dark:text-slate-400">
-                  Reaction: +2.4R bullish expansion after sweeping London S1.
-                </p>
+            {sortedTwins.length === 0 ? (
+              <div className="p-3 rounded border border-slate-200 dark:border-terminal-border text-slate-500">
+                Waiting for sufficient OHLCV bar depth ({candles.length} bars loaded)...
               </div>
-
-              <div className="p-2.5 rounded border border-slate-200 dark:border-terminal-border space-y-1">
-                <div className="flex justify-between font-mono text-[11px]">
-                  <strong className="text-slate-800 dark:text-slate-200">Match #2 (64.1%)</strong>
-                  <span>2025-08-14 09:15</span>
+            ) : (
+              sortedTwins.map((twin, idx) => (
+                <div
+                  key={twin.id}
+                  className={`p-2.5 rounded border space-y-1 ${
+                    idx === 0
+                      ? 'border-amber-500/40 bg-amber-500/5'
+                      : 'border-slate-200 dark:border-terminal-border'
+                  }`}
+                >
+                  <div className="flex justify-between font-mono text-[11px]">
+                    <strong className={idx === 0 ? 'text-amber-700 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}>
+                      Match #{idx + 1} ({twin.similarityPercent}%)
+                    </strong>
+                    <span className="text-slate-500">{twin.timestampLabel}</span>
+                  </div>
+                  <p className="text-[10px] font-mono text-slate-600 dark:text-slate-400">
+                    Fwd Return:{' '}
+                    <strong className={twin.forwardReturnPercent >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                      {twin.forwardReturnPercent >= 0 ? '+' : ''}
+                      {twin.forwardReturnPercent}%
+                    </strong>{' '}
+                    | MFE: +{twin.maxFavorableExcursionPct}% | MAE: {twin.maxAdverseExcursionPct}%
+                  </p>
                 </div>
-                <p className="text-[10px] text-slate-600 dark:text-slate-400">
-                  Reaction: -1.0R stop out during Asian range contraction.
-                </p>
-              </div>
-
-              <div className="p-2.5 rounded border border-slate-200 dark:border-terminal-border space-y-1">
-                <div className="flex justify-between font-mono text-[11px]">
-                  <strong className="text-slate-800 dark:text-slate-200">Match #3 (61.8%)</strong>
-                  <span>2025-06-03 16:30</span>
-                </div>
-                <p className="text-[10px] text-slate-600 dark:text-slate-400">
-                  Reaction: +3.1R target hit at NY session close.
-                </p>
-              </div>
-            </div>
+              ))
+            )}
           </div>
         )}
 
-        {/* Entry Research Subtab */}
         {activeSubTab === 'entry' && (
           <div className="space-y-2.5">
             <span className="text-[11px] font-bold uppercase text-slate-600 dark:text-slate-400">
-              High-Confluence Criteria Checklist
+              High-Confluence Checklist (Live Sync)
             </span>
             <div className="space-y-1.5 text-[11px]">
               <div className="p-2 rounded bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between">
-                <span>Sell-side liquidity sweep</span>
-                <span className="font-bold text-emerald-600">CONFIRMED</span>
-              </div>
-              <div className="p-2 rounded bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between">
-                <span>Premium/Discount alignment</span>
-                <span className="font-bold text-emerald-600">PREMIUM (68%)</span>
+                <span>Liquidity Sweep Probe</span>
+                <span className="font-bold text-emerald-600">{fmt(lab.sweepPrice)}</span>
               </div>
               <div className="p-2 rounded bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-between">
-                <span>Bearish FVG at 61.8% Fib</span>
-                <span className="font-bold text-cyan-600">OVERLAPPING</span>
+                <span>EMA20 / EMA50 Trend</span>
+                <span className="font-bold text-cyan-600">
+                  {snapshot.ema20 >= snapshot.ema50 ? 'BULLISH STACK' : 'BEARISH STACK'}
+                </span>
               </div>
-              <div className="p-2 rounded bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
-                <span>15m candle close below S1</span>
-                <span className="font-bold text-amber-600">PENDING (WAITING)</span>
+              <div className="p-2 rounded bg-slate-100 dark:bg-terminal-900 border border-slate-200 dark:border-terminal-border flex items-center justify-between">
+                <span>RSI-14 Equilibrium</span>
+                <span className="font-bold">{snapshot.rsi14}</span>
               </div>
-            </div>
-            <div className="p-2 rounded border border-slate-200 dark:border-terminal-border text-[10px] text-slate-500">
-              Calculated RR Ratio: <strong>1:3.2</strong> · Institutional Confidence Grade: <strong>A+</strong>
+              {researchReport && (
+                <div className="p-2 rounded bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-between">
+                  <span>Multi-Agent Grade</span>
+                  <span className="font-bold text-indigo-500">
+                    {researchReport.grade} ({researchReport.compositeScore}/100) • R:R 1:
+                    {researchReport.technical.tradePlan.target1.riskRewardRatio}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Historical Statistics Subtab */}
         {activeSubTab === 'stats' && (
           <div className="space-y-2">
             <span className="text-[11px] font-bold uppercase text-slate-600 dark:text-slate-400">
-              Walk-Forward Permutation Statistics
+              Walk-Forward Backtest ({dna.backtest.totalSetups} empirical setups)
             </span>
             <div className="grid grid-cols-2 gap-2 text-center font-mono">
               <div className="p-2 rounded border border-slate-200 dark:border-terminal-border">
                 <span className="text-[10px] text-slate-500 block">Win Rate</span>
-                <strong className="text-emerald-600 text-sm">68.2%</strong>
+                <strong className="text-emerald-600 text-sm">{dna.backtest.winRatePct}%</strong>
               </div>
               <div className="p-2 rounded border border-slate-200 dark:border-terminal-border">
                 <span className="text-[10px] text-slate-500 block">Avg R-Multiple</span>
-                <strong className="text-cyan-600 text-sm">2.15R</strong>
+                <strong className="text-cyan-600 text-sm">
+                  {dna.backtest.avgRMultiple >= 0 ? '+' : ''}
+                  {dna.backtest.avgRMultiple}R
+                </strong>
               </div>
               <div className="p-2 rounded border border-slate-200 dark:border-terminal-border">
-                <span className="text-[10px] text-slate-500 block">Max Drawdown</span>
-                <strong className="text-amber-600 text-sm">0.85 ATR</strong>
+                <span className="text-[10px] text-slate-500 block">ATR-14 Unit</span>
+                <strong className="text-amber-600 text-sm">{fmt(snapshot.atr)}</strong>
               </div>
               <div className="p-2 rounded border border-slate-200 dark:border-terminal-border">
                 <span className="text-[10px] text-slate-500 block">Profit Factor</span>
-                <strong className="text-slate-900 dark:text-white text-sm">2.41</strong>
+                <strong className="text-slate-900 dark:text-white text-sm">{dna.backtest.profitFactor}</strong>
               </div>
             </div>
           </div>
         )}
 
-        {/* Confirmation History Subtab */}
         {activeSubTab === 'confirmation' && (
           <div className="space-y-2">
             <span className="text-[11px] font-bold uppercase text-slate-600 dark:text-slate-400">
-              Confirmation Log
+              Live Structure Confirmation Log
             </span>
             <div className="space-y-1.5 font-mono text-[11px]">
-              <div className="p-2 rounded border border-slate-200 dark:border-terminal-border flex justify-between">
-                <span>22:15 UTC</span>
-                <span className="font-bold text-emerald-600">Sweep Low Confirmed</span>
-              </div>
-              <div className="p-2 rounded border border-slate-200 dark:border-terminal-border flex justify-between">
-                <span>20:30 UTC</span>
-                <span className="font-bold text-rose-600">Internal CHoCH Reversal</span>
-              </div>
-              <div className="p-2 rounded border border-slate-200 dark:border-terminal-border flex justify-between">
-                <span>19:45 UTC</span>
-                <span className="font-bold text-purple-600">Bearish Order Block Formed</span>
-              </div>
+              {dna.confirmationLog.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="p-2 rounded border border-slate-200 dark:border-terminal-border flex flex-col gap-0.5"
+                >
+                  <span className="text-[9px] text-slate-400">{item.time}</span>
+                  <span
+                    className={`font-bold ${
+                      item.bias === 'BULL'
+                        ? 'text-emerald-600'
+                        : item.bias === 'BEAR'
+                        ? 'text-rose-600'
+                        : 'text-cyan-600'
+                    }`}
+                  >
+                    {item.message}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {/* Replay Subtab */}
         {activeSubTab === 'replay' && (
-          <div className="p-3 rounded-lg border border-slate-200 dark:border-terminal-border space-y-2 text-center">
+          <div className="p-3 rounded-lg border border-slate-200 dark:border-terminal-border space-y-2.5 text-center">
             <span className="font-bold text-xs uppercase block text-slate-700 dark:text-slate-300">
               Bar-by-Bar Replay Simulator
             </span>
-            <p className="text-[10px] text-slate-500">
-              Replay historical candle progression step-by-step with real-time indicators.
-            </p>
+            {currentReplayBar ? (
+              <div className="p-2 rounded bg-slate-50 dark:bg-terminal-900 font-mono text-[11px] space-y-1 text-left">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Bar Index:</span>
+                  <strong>
+                    #{replayIndex + 1} / {candles.length}
+                  </strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">OHLC:</span>
+                  <strong>
+                    {fmt(currentReplayBar.open)} / {fmt(currentReplayBar.high)} / {fmt(currentReplayBar.low)} /{' '}
+                    {fmt(currentReplayBar.close)}
+                  </strong>
+                </div>
+              </div>
+            ) : (
+              <p className="text-[10px] text-slate-500">Awaiting live candles...</p>
+            )}
             <div className="flex items-center justify-center gap-2 pt-1">
-              <button className="px-3 py-1 rounded bg-slate-900 text-white font-bold text-xs">
-                ▶ Start Replay
+              <button
+                onClick={() => setIsReplaying((v) => !v)}
+                className="px-3 py-1 rounded bg-slate-900 dark:bg-cyan-600 text-white font-bold text-xs cursor-pointer"
+              >
+                {isReplaying ? '⏸ Pause' : '▶ Start Replay'}
               </button>
-              <button className="px-2 py-1 rounded border border-slate-300 text-xs">
-                Next Step ⏩
+              <button
+                onClick={() => setReplayIndex((i) => Math.min(Math.max(0, candles.length - 1), i + 1))}
+                className="px-2 py-1 rounded border border-slate-300 dark:border-terminal-border text-xs cursor-pointer"
+              >
+                Next ⏩
+              </button>
+              <button
+                onClick={() => {
+                  setIsReplaying(false);
+                  setReplayIndex(Math.max(0, candles.length - 12));
+                }}
+                className="px-2 py-1 rounded border border-slate-300 dark:border-terminal-border text-xs cursor-pointer"
+              >
+                Reset
               </button>
             </div>
           </div>
@@ -488,29 +533,30 @@ export const MarketDnaSidebar: React.FC<MarketDnaSidebarProps> = ({
             <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">Pattern on chart</span>
             <button
               onClick={handlePatternToggle}
-              className={`w-9 h-5 rounded-full p-0.5 transition-colors ${
+              className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
                 patternOnChart ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-terminal-800'
               }`}
             >
-              <div className={`w-4 h-4 rounded-full bg-white transition-transform ${
-                patternOnChart ? 'translate-x-4' : 'translate-x-0'
-              }`} />
+              <div
+                className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                  patternOnChart ? 'translate-x-4' : 'translate-x-0'
+                }`}
+              />
             </button>
           </div>
 
           <div className="flex items-center p-0.5 rounded border border-slate-200 dark:border-terminal-border text-[10px] font-bold">
-            <button
-              onClick={() => handleChartModeChange('Candles')}
-              className={`px-2 py-0.5 rounded ${chartMode === 'Candles' ? 'bg-white dark:bg-terminal-800 text-slate-900 dark:text-white shadow-xs' : 'text-slate-400'}`}
-            >
-              Candles
-            </button>
-            <button
-              onClick={() => handleChartModeChange('Line')}
-              className={`px-2 py-0.5 rounded ${chartMode === 'Line' ? 'bg-white dark:bg-terminal-800 text-slate-900 dark:text-white shadow-xs' : 'text-slate-400'}`}
-            >
-              Line
-            </button>
+            {(['Candles', 'Line'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => handleChartModeChange(m)}
+                className={`px-2 py-0.5 rounded ${
+                  chartMode === m ? 'bg-white dark:bg-terminal-800 text-slate-900 dark:text-white' : 'text-slate-400'
+                }`}
+              >
+                {m}
+              </button>
+            ))}
           </div>
         </div>
       </div>

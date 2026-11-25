@@ -64,6 +64,7 @@ import { preExecutionVerificationEngine } from '@/lib/preExecutionVerificationEn
 import { tradingStore } from '@/lib/tradingStore';
 import { AutonomousEcosystemDashboard } from '@/components/AutonomousEcosystemDashboard';
 import { TradingResearchEngineDashboard } from '@/components/TradingResearchEngineDashboard';
+import { ResearchReportSnapshot } from '@/lib/research/types';
 
 const executionTelemetryEngine = ExecutionTelemetryEngine.getInstance();
 
@@ -85,6 +86,7 @@ export default function Home() {
 
   // Swarm State (5 Specialized Roles)
   const [consensus, setConsensus] = useState<SwarmConsensusResult | null>(null);
+  const [sharedResearchReport, setSharedResearchReport] = useState<ResearchReportSnapshot | null>(null);
   const [swarmTelemetry, setSwarmTelemetry] = useState<AutonomousSwarmTelemetry | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [isDebating, setIsDebating] = useState<boolean>(false);
@@ -1328,6 +1330,8 @@ export default function Home() {
             pair={selectedPair}
             timeframe={timeframe}
             candles={candles}
+            sharedReport={sharedResearchReport}
+            onReportGenerated={setSharedResearchReport}
             onSelectPair={handleSelectPair}
             onSelectTimeframe={handleSelectTimeframe}
             onClose={() => setActiveTab('terminal')}
@@ -1346,6 +1350,9 @@ export default function Home() {
         {activeTab === 'agent' && (
           <TradingResearchEngineDashboard
             initialSymbol={selectedPair}
+            initialTimeframe={timeframe}
+            sharedReport={sharedResearchReport}
+            onReportGenerated={setSharedResearchReport}
             onSymbolChange={(sym) => {
               if (sym in BASE_PRICES) {
                 setSelectedPair(sym as CurrencyPair);

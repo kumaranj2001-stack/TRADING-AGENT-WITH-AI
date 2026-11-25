@@ -63,11 +63,14 @@ import { FUNDAMENTAL_KNOWLEDGE_BASE } from '@/lib/knowledge/fundamentalKnowledge
 import { knowledgeEngine } from '@/lib/knowledge/KnowledgeEngine';
 import { diagnosticReasoningEngine } from '@/lib/diagnosticReasoningEngine';
 import { InfinityVisionWorkspace } from './infinity-vision/InfinityVisionWorkspace';
+import { ResearchReportSnapshot } from '@/lib/research/types';
 
 export interface VisionAtlasWorkspaceProps {
   pair: CurrencyPair;
   timeframe: TimeFrame;
   candles?: Candle[];
+  sharedReport?: ResearchReportSnapshot | null;
+  onReportGenerated?: (report: ResearchReportSnapshot) => void;
   onSelectPair?: (pair: CurrencyPair) => void;
   onSelectTimeframe?: (tf: TimeFrame) => void;
   onClose?: () => void;
@@ -87,6 +90,8 @@ export const VisionAtlasWorkspace: React.FC<VisionAtlasWorkspaceProps> = ({
   pair: initialPair = 'XAU/USD',
   timeframe: initialTf = '1h',
   candles: initialCandles = [],
+  sharedReport,
+  onReportGenerated,
   onSelectPair,
   onSelectTimeframe,
   onClose,
@@ -99,6 +104,7 @@ export const VisionAtlasWorkspace: React.FC<VisionAtlasWorkspaceProps> = ({
   const [selectedTimeframe, setSelectedTimeframe] = useState<TimeFrame>(initialTf);
   const [workspaceMode, setWorkspaceMode] = useState<'infinity-vision' | 'confluence-matrix'>('infinity-vision');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [syncReport, setSyncReport] = useState<ResearchReportSnapshot | null>(sharedReport || null);
 
   // Payload state
   const [payload, setPayload] = useState<VisionAtlasPayload | null>(null);
@@ -368,6 +374,11 @@ export const VisionAtlasWorkspace: React.FC<VisionAtlasWorkspaceProps> = ({
           pair={selectedPair}
           timeframe={selectedTimeframe}
           candles={initialCandles}
+          sharedReport={syncReport || sharedReport}
+          onReportGenerated={(r) => {
+            setSyncReport(r);
+            onReportGenerated?.(r);
+          }}
           onSelectPair={(p) => {
             setSelectedPair(p);
             if (onSelectPair) onSelectPair(p);
@@ -609,12 +620,12 @@ export const VisionAtlasWorkspace: React.FC<VisionAtlasWorkspaceProps> = ({
             {/* Right: Dynamic Weight Pill & Sync Action */}
             <div className="flex items-center gap-2">
               <div className="hidden sm:flex items-center gap-2 bg-terminal-950/80 px-2.5 py-1 rounded-lg border border-terminal-border text-[11px]">
-                <span className="text-slate-400 font-mono">SCORE:</span>
+                <span className="text-slate-400 font-mono">AI SCORE:</span>
                 <span className="font-bold text-cyan-300 font-mono">
-                  {payload?.multiFactorConfluence?.compositeScore || payload?.confidenceBreakdown.percentage || 94.2}%
+                  {syncReport?.compositeScore ?? sharedReport?.compositeScore ?? payload?.multiFactorConfluence?.compositeScore ?? payload?.confidenceBreakdown.percentage ?? 0}/100
                 </span>
                 <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold text-[10px] border border-cyan-500/40">
-                  GRADE {payload?.multiFactorConfluence?.grade || 'A+'}
+                  GRADE {syncReport?.grade ?? sharedReport?.grade ?? payload?.multiFactorConfluence?.grade ?? 'B'}
                 </span>
               </div>
 
