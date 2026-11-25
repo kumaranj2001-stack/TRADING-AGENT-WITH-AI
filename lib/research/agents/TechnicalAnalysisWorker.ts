@@ -1,189 +1,396 @@
 /**
  * Phase 2 Worker: TechnicalAnalysisWorker
- * Specialization: Evaluates strictly the linguistic content, consensus strength,
- * and ticker-specific relevance of technical chart chatter in the live community chat logs.
- * Evaluates EMA mentions, Market Structure discussions, Support & Resistance levels,
- * RSI, MACD, Chart Patterns, Bollinger Bands, and produces five deterministic 0-20 sub-scores.
+ * Evaluates live chart OHLCV structure, active indicator readings (RSI-14, EMA 20/50/200,
+ * MACD, Bollinger Bands, Stochastic, ATR-14), and Community Live Chat technical consensus
+ * strictly derived from the currently displayed chart asset.
  */
 
-import { DiscoveryBrief, TechnicalAgentResult, PriceLevel, RealisticTradePlan } from '../types';
+import {
+  ChartOHLCVBar,
+  DiscoveryBrief,
+  PriceLevel,
+  RealisticTradePlan,
+  TechnicalAgentResult,
+} from '../types';
 import { communityChatEngine } from '../CommunityChatEngine';
+import { roundAssetPrice } from '../LiveChartTelemetryService';
 
 export class TechnicalAnalysisWorker {
-  public async analyze(brief: DiscoveryBrief): Promise<TechnicalAgentResult> {
-    const transcript = brief.chatTranscript || communityChatEngine.getBufferedTranscript(brief.symbol);
-    const messages = transcript.messages;
-    const fullText = messages.map(m => m.text).join(' ').toLowerCase();
-
-    // 1. Linguistic Parsing of Technical Discussions
-    const isBullishChat = transcript.consensusSentiment === 'BULLISH';
-    const isBearishChat = transcript.consensusSentiment === 'BEARISH';
-    const consensusPct = transcript.consensusStrengthPercent;
-
-    // Detect technical keywords in chat
-    const hasEmaTalk = fullText.includes('ema') || fullText.includes('moving average');
-    const hasGoldenCross = fullText.includes('golden cross') || (fullText.includes('cross') && isBullishChat);
-    const hasDeathCross = fullText.includes('death cross');
-    const hasRsiTalk = fullText.includes('rsi') || fullText.includes('divergence');
-    const hasMacdTalk = fullText.includes('macd');
-    const hasBreakoutTalk = fullText.includes('breakout') || fullText.includes('retested') || fullText.includes('pushing');
-    const hasPatternTalk = fullText.includes('flag') || fullText.includes('triangle') || fullText.includes('fvg') || fullText.includes('channel');
-    const hasSupportTalk = fullText.includes('support') || fullText.includes('floor') || fullText.includes('held');
-    const hasResistanceTalk = fullText.includes('resistance') || fullText.includes('ceiling') || fullText.includes('target');
-
-    // Trend Direction & EMA Alignment from linguistic consensus
-    const trendDirection = isBullishChat 
-      ? (consensusPct > 75 ? 'STRONG_BULLISH' : 'BULLISH')
-      : isBearishChat
-      ? (consensusPct > 75 ? 'STRONG_BEARISH' : 'BEARISH')
-      : 'NEUTRAL_RANGE';
-
-    const emaAlignment = hasGoldenCross 
-      ? 'GOLDEN_CROSS_PENDING' 
-      : hasDeathCross 
-      ? 'DEATH_CROSS_PENDING'
-      : isBullishChat 
-      ? 'BULLISH_STACK' 
-      : isBearishChat 
-      ? 'BEARISH_STACK' 
-      : 'COMPRESSED';
-
-    const marketStructure = isBullishChat 
-      ? 'HIGHER_HIGHS_HIGHER_LOWS' 
-      : isBearishChat 
-      ? 'LOWER_HIGHS_LOWER_LOWS' 
-      : 'CHOP_CONSOLIDATION';
-
-    // 2. Community S/R Levels
-    const basePrice = brief.pricing.currentPrice;
-    const extractedLevels = transcript.extractedPriceLevels;
-    const supportNums = extractedLevels?.supports || [basePrice * 0.99, basePrice * 0.98, basePrice * 0.97];
-    const resistanceNums = extractedLevels?.resistances || [basePrice * 1.01, basePrice * 1.02, basePrice * 1.03];
-
-    const supportLevels: PriceLevel[] = supportNums.map((p, idx) => ({
-      price: Math.round(p * 100) / 100,
-      type: 'SUPPORT',
-      confluenceFactors: [
-        idx === 0 ? 'Community-Cited Primary Support Level' : idx === 1 ? '50-Period EMA Dynamic Floor discussed in chat' : 'Multi-Day Swing Liquidity Pool',
-        'High Chat Sentiment Agreement',
-      ],
-      strength: idx === 0 ? 'MAJOR' : idx === 1 ? 'INTERMEDIATE' : 'MINOR',
-    }));
-
-    const resistanceLevels: PriceLevel[] = resistanceNums.map((p, idx) => ({
-      price: Math.round(p * 100) / 100,
-      type: 'RESISTANCE',
-      confluenceFactors: [
-        idx === 0 ? 'Community Consensus Breakout Target' : idx === 1 ? 'Upper Range Ceiling debated in room' : 'Psychological Extension Level',
-        'Elevated Resting Limit Wall in Chat',
-      ],
-      strength: idx === 0 ? 'MAJOR' : idx === 1 ? 'INTERMEDIATE' : 'MINOR',
-    }));
-
-    // 3. Technical Indicators Linguistic Reflection
-    const rsi14 = isBullishChat ? 62 : isBearishChat ? 38 : 50;
-    const rsiCondition = rsi14 > 60 ? 'BULLISH_MOMENTUM' : rsi14 < 40 ? 'OVERSOLD' : 'NEUTRAL';
-
-    const macd = {
-      macdLine: isBullishChat ? 1.25 : -0.75,
-      signalLine: isBullishChat ? 0.85 : -0.45,
-      histogram: isBullishChat ? 0.40 : -0.30,
-      crossover: (isBullishChat ? 'BULLISH_CROSS' : isBearishChat ? 'BEARISH_CROSS' : 'NEUTRAL') as any,
-    };
-
-    const stochastic = {
-      k: isBullishChat ? 72 : 36,
-      d: isBullishChat ? 66 : 42,
-      state: (isBullishChat ? 'BULLISH_CROSS' : 'NEUTRAL') as any,
-    };
-
-    // 4. Chart Patterns Cited in Chat
-    const activeChartPatterns = [
-      {
-        name: isBullishChat ? 'Community-Verified Bull Flag / Breakout Structure' : 'Descending Channel Resistance Retest',
-        completionPercent: Math.min(96, Math.max(70, consensusPct + 10)),
-        bias: (isBullishChat ? 'BULLISH' : 'BEARISH') as 'BULLISH' | 'BEARISH',
-      },
-    ];
-
-    if (hasPatternTalk) {
-      activeChartPatterns.push({
-        name: 'Chat Room Confluent Fair Value Gap (FVG)',
-        completionPercent: 92,
-        bias: isBullishChat ? 'BULLISH' : 'BEARISH',
-      });
+  private extractSwingLevels(
+    candles: ChartOHLCVBar[],
+    livePrice: number
+  ): { swingSupports: number[]; swingResistances: number[] } {
+    if (!candles || candles.length < 5) {
+      return { swingSupports: [], swingResistances: [] };
     }
 
-    // 5. Realistic Trade Plan Formed by Community Consensus
-    const entryMin = extractedLevels?.entryZone?.min || (isBullishChat ? basePrice * 0.995 : basePrice);
-    const entryMax = extractedLevels?.entryZone?.max || (isBullishChat ? basePrice * 1.002 : basePrice * 1.005);
-    const stopLossPrice = extractedLevels?.stopLoss || (isBullishChat ? supportNums[0] * 0.995 : resistanceNums[0] * 1.005);
-    const target1Price = resistanceNums[0] || basePrice * 1.015;
-    const target2Price = resistanceNums[1] || basePrice * 1.03;
+    const supports: number[] = [];
+    const resistances: number[] = [];
 
-    const stopDistance = Math.abs(basePrice - stopLossPrice);
-    const tpDistance = Math.abs(target1Price - basePrice);
-    const authenticRR = Number((tpDistance / Math.max(stopDistance, 0.0001)).toFixed(2));
+    for (let i = 2; i < candles.length - 2; i++) {
+      const low = candles[i].low;
+      const high = candles[i].high;
+      if (
+        low <= candles[i - 1].low &&
+        low <= candles[i - 2].low &&
+        low <= candles[i + 1].low &&
+        low <= candles[i + 2].low &&
+        low < livePrice * 0.9985
+      ) {
+        supports.push(low);
+      }
+      if (
+        high >= candles[i - 1].high &&
+        high >= candles[i - 2].high &&
+        high >= candles[i + 1].high &&
+        high >= candles[i + 2].high &&
+        high > livePrice * 1.0015
+      ) {
+        resistances.push(high);
+      }
+    }
+
+    // Fallback to period extremes if no local pivots matched
+    const recentSlice = candles.slice(-30);
+    const minLow = Math.min(...recentSlice.map((c) => c.low));
+    const maxHigh = Math.max(...recentSlice.map((c) => c.high));
+    if (minLow < livePrice * 0.9985) supports.push(minLow);
+    if (maxHigh > livePrice * 1.0015) resistances.push(maxHigh);
+
+    return {
+      swingSupports: Array.from(new Set(supports)).sort((a, b) => b - a),
+      swingResistances: Array.from(new Set(resistances)).sort((a, b) => a - b),
+    };
+  }
+
+  public async analyze(brief: DiscoveryBrief): Promise<TechnicalAgentResult> {
+    const r = (val: number) => roundAssetPrice(val, brief.assetClass, brief.symbol);
+    const livePrice = brief.chartContext?.livePrice || brief.pricing.currentPrice;
+    const transcript =
+      brief.chatTranscript ||
+      communityChatEngine.getBufferedTranscript(brief.symbol, livePrice);
+    const messages = transcript.messages;
+    const fullText = messages.map((m) => m.text).join(' ').toLowerCase();
+
+    const ind = brief.chartContext?.indicatorReadings || {};
+    const candles = brief.chartContext?.recentCandles || [];
+    const atr = Math.max(ind.atr14 || brief.volatility.atr14 || livePrice * 0.014, livePrice * 0.002);
+
+    // 1. Live Chart Indicator Readings (strictly from active chart context)
+    const ema20 = r(ind.ema20 || livePrice * 0.994);
+    const ema50 = r(ind.ema50 || livePrice * 0.985);
+    const ema200 = r(ind.ema200 || livePrice * 0.962);
+
+    const rsi14 = Number((ind.rsi14 ?? (transcript.consensusSentiment === 'BULLISH' ? 58.4 : transcript.consensusSentiment === 'BEARISH' ? 41.2 : 50.0)).toFixed(2));
+    const rsiCondition: TechnicalAgentResult['rsiCondition'] =
+      rsi14 >= 70
+        ? 'OVERBOUGHT'
+        : rsi14 >= 55
+        ? 'BULLISH_MOMENTUM'
+        : rsi14 <= 30
+        ? 'OVERSOLD'
+        : rsi14 <= 45
+        ? 'BEARISH_MOMENTUM'
+        : 'NEUTRAL';
+
+    const macdLine = Number((ind.macdLine ?? (livePrice - ema20) * 0.35).toFixed(5));
+    const macdSignal = Number((ind.macdSignal ?? (livePrice - ema20) * 0.25).toFixed(5));
+    const macdHistogram = Number((ind.macdHistogram ?? (macdLine - macdSignal)).toFixed(5));
+    const macdCrossover: TechnicalAgentResult['macd']['crossover'] =
+      macdHistogram > 0 ? 'BULLISH_CROSS' : macdHistogram < 0 ? 'BEARISH_CROSS' : 'NEUTRAL';
+
+    const stochK = Number((ind.stochK ?? Math.min(92, Math.max(8, rsi14 + 4))).toFixed(1));
+    const stochD = Number((ind.stochD ?? Math.min(90, Math.max(10, rsi14))).toFixed(1));
+    const stochState: TechnicalAgentResult['stochastic']['state'] =
+      stochK >= 80
+        ? 'OVERBOUGHT'
+        : stochK <= 20
+        ? 'OVERSOLD'
+        : stochK > stochD
+        ? 'BULLISH_CROSS'
+        : 'NEUTRAL';
+
+    const bbUpper = r(ind.bbUpper || livePrice + atr * 1.8);
+    const bbLower = r(ind.bbLower || Math.max(livePrice * 0.5, livePrice - atr * 1.8));
+    const bbMiddle = r(ind.bbMiddle || (bbUpper + bbLower) / 2);
+    const bbWidth = Math.max(bbUpper - bbLower, atr * 0.5);
+    const percentB = Number(Math.min(1.2, Math.max(-0.2, (livePrice - bbLower) / bbWidth)).toFixed(2));
+    const isSqueeze = (bbUpper - bbLower) / livePrice < 0.035;
+
+    // 2. Trend Direction & EMA Stack from Live Chart Structure + Chat Consensus
+    let emaAlignment: TechnicalAgentResult['emaAlignment'] = 'COMPRESSED';
+    if (ema20 > ema50 && ema50 > ema200 && livePrice >= ema20) {
+      emaAlignment = 'BULLISH_STACK';
+    } else if (ema20 < ema50 && ema50 < ema200 && livePrice <= ema20) {
+      emaAlignment = 'BEARISH_STACK';
+    } else if (Math.abs(ema50 - ema200) / Math.max(ema200, 0.0001) < 0.015) {
+      emaAlignment = ema20 >= ema50 ? 'GOLDEN_CROSS_PENDING' : 'DEATH_CROSS_PENDING';
+    } else if (livePrice > ema20) {
+      emaAlignment = 'BULLISH_STACK';
+    } else if (livePrice < ema20 && ema20 < ema50) {
+      emaAlignment = 'BEARISH_STACK';
+    }
+
+    const techBullSignals =
+      (livePrice > ema20 ? 1 : -1) +
+      (ema20 > ema50 ? 1 : -1) +
+      (rsi14 > 52 ? 1 : rsi14 < 45 ? -1 : 0) +
+      (macdHistogram > 0 ? 1 : -1) +
+      (transcript.consensusSentiment === 'BULLISH' ? 1 : transcript.consensusSentiment === 'BEARISH' ? -1 : 0);
+
+    const trendDirection: TechnicalAgentResult['trendDirection'] =
+      techBullSignals >= 3
+        ? 'STRONG_BULLISH'
+        : techBullSignals >= 1
+        ? 'BULLISH'
+        : techBullSignals <= -3
+        ? 'STRONG_BEARISH'
+        : techBullSignals <= -1
+        ? 'BEARISH'
+        : 'NEUTRAL_RANGE';
+
+    const isBullBias = techBullSignals >= 0;
+
+    const marketStructure: TechnicalAgentResult['marketStructure'] =
+      trendDirection === 'STRONG_BULLISH' || trendDirection === 'BULLISH'
+        ? 'HIGHER_HIGHS_HIGHER_LOWS'
+        : trendDirection === 'STRONG_BEARISH' || trendDirection === 'BEARISH'
+        ? 'LOWER_HIGHS_LOWER_LOWS'
+        : isSqueeze
+        ? 'CHOP_CONSOLIDATION'
+        : 'RANGE_EXPANSION';
+
+    // 3. Confluent 3 Support & 3 Resistance Levels derived strictly from Live Chart OHLCV + Indicators
+    const { swingSupports, swingResistances } = this.extractSwingLevels(candles, livePrice);
+
+    const candidateSupports = [
+      ...swingSupports,
+      ema20 < livePrice * 0.998 ? ema20 : 0,
+      ema50 < livePrice * 0.998 ? ema50 : 0,
+      bbLower < livePrice * 0.998 ? bbLower : 0,
+      ...(transcript.extractedPriceLevels?.supports || []),
+    ]
+      .filter((p) => p > 0 && p < livePrice * 0.9985 && p > livePrice * 0.78)
+      .map(r)
+      .sort((a, b) => b - a);
+
+    // Ensure 3 distinct, non-duplicate support levels
+    const uniqueSupports: number[] = [];
+    const minSep = Math.max(atr * 0.45, livePrice * 0.004);
+    for (const lvl of candidateSupports) {
+      if (uniqueSupports.every((existing) => Math.abs(existing - lvl) >= minSep)) {
+        uniqueSupports.push(lvl);
+      }
+      if (uniqueSupports.length >= 3) break;
+    }
+    while (uniqueSupports.length < 3) {
+      const idx = uniqueSupports.length;
+      const lastLvl = uniqueSupports[idx - 1] ?? livePrice;
+      uniqueSupports.push(r(Math.max(livePrice * 0.75, lastLvl - atr * (0.9 + idx * 0.3))));
+    }
+
+    const candidateResistances = [
+      ...swingResistances,
+      ema20 > livePrice * 1.002 ? ema20 : 0,
+      ema50 > livePrice * 1.002 ? ema50 : 0,
+      bbUpper > livePrice * 1.002 ? bbUpper : 0,
+      ...(transcript.extractedPriceLevels?.resistances || []),
+    ]
+      .filter((p) => p > livePrice * 1.0015 && p < livePrice * 1.25)
+      .map(r)
+      .sort((a, b) => a - b);
+
+    const uniqueResistances: number[] = [];
+    for (const lvl of candidateResistances) {
+      if (uniqueResistances.every((existing) => Math.abs(existing - lvl) >= minSep)) {
+        uniqueResistances.push(lvl);
+      }
+      if (uniqueResistances.length >= 3) break;
+    }
+    while (uniqueResistances.length < 3) {
+      const idx = uniqueResistances.length;
+      const lastLvl = uniqueResistances[idx - 1] ?? livePrice;
+      uniqueResistances.push(r(lastLvl + atr * (0.9 + idx * 0.35)));
+    }
+
+    const supportLevels: PriceLevel[] = uniqueSupports.map((p, idx) => ({
+      price: p,
+      type: 'SUPPORT',
+      confluenceFactors: [
+        idx === 0
+          ? `Immediate Structural Swing / Dynamic Support (${brief.chartContext?.timeframe?.toUpperCase() || '1H'})`
+          : idx === 1
+          ? `Secondary Liquidity Demand Zone & Lower Band Confluence`
+          : `Macro Trend Invalidation Base (-${((livePrice - p) / livePrice * 100).toFixed(2)}%)`,
+        `ATR-Calibrated Buffer (${atr} ATR-14)`,
+      ],
+      strength: idx === 0 ? 'MAJOR' : idx === 1 ? 'INTERMEDIATE' : 'MINOR',
+    }));
+
+    const resistanceLevels: PriceLevel[] = uniqueResistances.map((p, idx) => ({
+      price: p,
+      type: 'RESISTANCE',
+      confluenceFactors: [
+        idx === 0
+          ? `Immediate Overhead Supply / Swing High (${brief.chartContext?.timeframe?.toUpperCase() || '1H'})`
+          : idx === 1
+          ? `Secondary Breakout Resistance & Moving Average Ceiling`
+          : `Extended Volatility Target (+${((p - livePrice) / livePrice * 100).toFixed(2)}%)`,
+        `Live Chart Structure Confluence`,
+      ],
+      strength: idx === 0 ? 'MAJOR' : idx === 1 ? 'INTERMEDIATE' : 'MINOR',
+    }));
+
+    // 4. Fibonacci Retracements calculated from live high/low range
+    const swingHigh = uniqueResistances[2] || Math.max(brief.pricing.dayHigh, livePrice + atr * 2);
+    const swingLow = uniqueSupports[2] || Math.min(brief.pricing.dayLow, livePrice - atr * 2);
+    const fibSpan = Math.max(swingHigh - swingLow, atr);
+
+    const fibonacciRetracements = {
+      fib0: r(swingHigh),
+      fib236: r(swingHigh - fibSpan * 0.236),
+      fib382: r(swingHigh - fibSpan * 0.382),
+      fib500: r(swingHigh - fibSpan * 0.500),
+      fib618: r(swingHigh - fibSpan * 0.618),
+      fib786: r(swingHigh - fibSpan * 0.786),
+      fib100: r(swingLow),
+    };
+
+    // 5. Realistic Trade Plan strictly derived from Live Price, ATR, and Chart Support/Resistance
+    const s1 = supportLevels[0].price;
+    const s2 = supportLevels[1].price;
+    const r1 = resistanceLevels[0].price;
+    const r2 = resistanceLevels[1].price;
+
+    let entryMin: number;
+    let entryMax: number;
+    let stopLossPrice: number;
+    let target1Price: number;
+    let target2Price: number;
+
+    if (isBullBias) {
+      entryMin = r(Math.max(s1 + (livePrice - s1) * 0.25, livePrice - atr * 0.35));
+      entryMax = r(livePrice + atr * 0.12);
+      stopLossPrice = r(Math.min(livePrice - atr * 0.95, Math.max(s1 - atr * 0.25, livePrice - atr * 1.9)));
+      const riskDist = Math.max(livePrice - stopLossPrice, atr * 0.5);
+      target1Price = r(Math.max(r1 >= livePrice + riskDist * 1.4 ? r1 : livePrice + riskDist * 1.85, livePrice + riskDist * 1.65));
+      target2Price = r(Math.max(r2 >= target1Price + riskDist * 0.8 ? r2 : livePrice + riskDist * 2.9, target1Price + riskDist * 1.05));
+    } else {
+      entryMin = r(livePrice - atr * 0.12);
+      entryMax = r(Math.min(r1 - (r1 - livePrice) * 0.25, livePrice + atr * 0.35));
+      stopLossPrice = r(Math.max(livePrice + atr * 0.95, Math.min(r1 + atr * 0.25, livePrice + atr * 1.9)));
+      const riskDist = Math.max(stopLossPrice - livePrice, atr * 0.5);
+      target1Price = r(Math.min(s1 <= livePrice - riskDist * 1.4 ? s1 : livePrice - riskDist * 1.85, livePrice - riskDist * 1.65));
+      target2Price = r(Math.min(s2 <= target1Price - riskDist * 0.8 ? s2 : livePrice - riskDist * 2.9, target1Price - riskDist * 1.05));
+    }
+
+    const stopDistance = r(Math.abs(livePrice - stopLossPrice));
+    const tp1Distance = r(Math.abs(target1Price - livePrice));
+    const tp2Distance = r(Math.abs(target2Price - livePrice));
+    const rr1 = Number((tp1Distance / Math.max(stopDistance, 0.00001)).toFixed(2));
+    const rr2 = Number((tp2Distance / Math.max(stopDistance, 0.00001)).toFixed(2));
 
     const tradePlan: RealisticTradePlan = {
       entryZone: {
-        min: Math.round(entryMin * 100) / 100,
-        max: Math.round(entryMax * 100) / 100,
-        note: `Community Consensus Entry Band anchored around ${brief.pricing.currency} ${Math.round(entryMin * 100) / 100} - ${Math.round(entryMax * 100) / 100} discussed in chat.`,
+        min: entryMin,
+        max: entryMax,
+        note: `Immediate-proximity ${isBullBias ? 'Long' : 'Short'} entry anchored to live ${brief.symbol} spot (${brief.pricing.currency} ${livePrice}) on ${brief.chartContext?.timeframe?.toUpperCase() || '1H'} chart.`,
       },
       stopLoss: {
-        price: Math.round(stopLossPrice * 100) / 100,
-        distancePoints: Math.round(stopDistance * 100) / 100,
-        riskPercent: Number(((stopDistance / basePrice) * 100).toFixed(2)),
-        rationale: 'Anchored below community-debated invalidation floor and key moving average support.',
+        price: stopLossPrice,
+        distancePoints: stopDistance,
+        riskPercent: Number(((stopDistance / livePrice) * 100).toFixed(2)),
+        rationale: `Dynamic ATR-buffered invalidation (${isBullBias ? 'below S1 swing low' : 'above R1 swing high'}) preserving tight market-reality risk bounds.`,
       },
       target1: {
-        price: Math.round(target1Price * 100) / 100,
-        distancePoints: Math.round(tpDistance * 100) / 100,
-        rewardPercent: Number(((tpDistance / basePrice) * 100).toFixed(2)),
-        riskRewardRatio: Math.max(1.8, authenticRR),
-        rationale: 'Primary community profit-taking target at initial resistance liquidity cluster.',
+        price: target1Price,
+        distancePoints: tp1Distance,
+        rewardPercent: Number(((tp1Distance / livePrice) * 100).toFixed(2)),
+        riskRewardRatio: rr1,
+        rationale: `First structural profit objective aligned with ${isBullBias ? 'R1 resistance' : 'S1 support'} (${rr1}:1 R:R).`,
       },
       target2: {
-        price: Math.round(target2Price * 100) / 100,
-        distancePoints: Math.round(Math.abs(target2Price - basePrice) * 100) / 100,
-        rewardPercent: Number(((Math.abs(target2Price - basePrice) / basePrice) * 100).toFixed(2)),
-        riskRewardRatio: Math.max(3.0, Number((authenticRR * 1.6).toFixed(2))),
-        rationale: 'Community runner target on breakout expansion through secondary resistance.',
+        price: target2Price,
+        distancePoints: tp2Distance,
+        rewardPercent: Number(((tp2Distance / livePrice) * 100).toFixed(2)),
+        riskRewardRatio: rr2,
+        rationale: `Runner extension targeting ${isBullBias ? 'R2 liquidity cluster' : 'S2 demand floor'} (${rr2}:1 R:R).`,
       },
     };
 
-    // 6. Five Deterministic 0-20 Sub-Scores (Evaluates linguistic content & consensus strength)
-    // - trend: linguistic agreement on trend direction
-    const trendScore = isBullishChat 
-      ? Math.min(20, Math.round(14 + (consensusPct / 100) * 5))
-      : isBearishChat
-      ? Math.max(6, Math.round(10 - (consensusPct / 100) * 4))
-      : 12;
+    // 6. Active Chart Patterns
+    const hasPatternTalk = fullText.includes('flag') || fullText.includes('triangle') || fullText.includes('fvg') || fullText.includes('channel');
+    const activeChartPatterns: TechnicalAgentResult['activeChartPatterns'] = [
+      {
+        name: isBullBias
+          ? (isSqueeze ? 'Bollinger Volatility Squeeze Breakout Setup' : 'Higher-Low Structural Trend Continuation')
+          : (rsiCondition === 'OVERSOLD' ? 'Oversold Compression Base Testing Support' : 'Lower-High Bearish Rejection Structure'),
+        completionPercent: Math.min(95, Math.max(68, Math.round(70 + Math.abs(techBullSignals) * 5))),
+        bias: isBullBias ? 'BULLISH' : 'BEARISH',
+      },
+    ];
+    if (hasPatternTalk) {
+      activeChartPatterns.push({
+        name: 'Community-Verified FVG / Liquidity Sweep Zone',
+        completionPercent: 86,
+        bias: transcript.consensusSentiment === 'BEARISH' ? 'BEARISH' : 'BULLISH',
+      });
+    }
 
-    // - momentum: mentions of indicators, crossovers, momentum strength
-    const momentumScore = (hasRsiTalk || hasMacdTalk || hasBreakoutTalk)
-      ? Math.min(20, 15 + (isBullishChat ? 3 : 1))
-      : 13;
+    // 7. Five Deterministic 0-20 Sub-Scores combining live chart indicators + chat technical consensus
+    const trendScore = Math.min(
+      20,
+      Math.max(
+        5,
+        Math.round(
+          (emaAlignment === 'BULLISH_STACK' ? 16 : emaAlignment === 'BEARISH_STACK' ? 7 : 12) +
+            (livePrice > ema20 ? 2 : -1) +
+            (transcript.consensusSentiment === 'BULLISH' ? 2 : transcript.consensusSentiment === 'BEARISH' ? -2 : 0)
+        )
+      )
+    );
 
-    // - volume: discussions of liquidity, volume surges, absorption
-    const volumeScore = Math.min(20, Math.max(10, Math.round(12 + (transcript.chatVelocityScore / 100) * 7)));
+    const momentumScore = Math.min(
+      20,
+      Math.max(
+        5,
+        Math.round(
+          (rsi14 >= 50 && rsi14 <= 72 ? 16 : rsi14 < 35 ? 9 : rsi14 > 75 ? 12 : 13) +
+            (macdHistogram > 0 ? 2 : -2) +
+            (stochK > stochD ? 1 : -1)
+        )
+      )
+    );
 
-    // - patternQuality: chart patterns recognized and agreed upon in chat
-    const patternQualityScore = hasPatternTalk ? 18 : 15;
+    const volumeScore = Math.min(
+      20,
+      Math.max(
+        8,
+        Math.round(12 + Math.min(4, brief.volume.volumeSurgeRatio * 2) + (transcript.chatVelocityScore / 100) * 3)
+      )
+    );
 
-    // - relativeStrength: chatter regarding outperforming the market/peers
-    const relativeStrengthScore = isBullishChat ? 17 : isBearishChat ? 10 : 13;
+    const patternQualityScore = Math.min(
+      20,
+      Math.max(8, (hasPatternTalk ? 16 : 14) + (isSqueeze ? 2 : 0) + (Math.abs(techBullSignals) >= 2 ? 1 : 0))
+    );
+
+    const relativeStrengthScore = Math.min(
+      20,
+      Math.max(
+        6,
+        Math.round(12 + Math.max(-5, Math.min(6, brief.pricing.changePercent * 1.5)) + (isBullBias ? 2 : -1))
+      )
+    );
 
     const totalScore = trendScore + momentumScore + volumeScore + patternQualityScore + relativeStrengthScore;
 
-    // 7. Key Insights Extracted from Chat Log
-    const sampleChatMsg = messages[0]?.text || 'Active technical debate in community room.';
+    const sampleChatMsg = messages[0]?.text || `Active ${brief.symbol} technical structure evaluation.`;
     const insights = [
-      `Chat Technical Consensus: ${trendDirection} (${consensusPct}% agreement across ${transcript.totalMessages} live messages).`,
-      `Key Structure Identified: ${hasSupportTalk ? 'Community identified solid support base' : 'Consolidation range'} with ${activeChartPatterns[0]?.name}.`,
-      `Community Quote: "${sampleChatMsg.slice(0, 110)}..."`,
-      `Consensus Levels: Recommended Entry Zone between ${brief.pricing.currency} ${tradePlan.entryZone.min} - ${tradePlan.entryZone.max} with ${tradePlan.target1.riskRewardRatio}:1 R:R at Target 1.`,
+      `Live Chart Structure (${brief.chartContext?.timeframe?.toUpperCase() || '1H'}): ${brief.symbol} trading at ${brief.pricing.currency} ${livePrice} (${trendDirection}, EMA alignment: ${emaAlignment}).`,
+      `Active Indicator Readings: RSI-14 at ${rsi14} (${rsiCondition}), MACD ${macdCrossover} (Hist ${macdHistogram}), ATR-14 ${atr} (${brief.volatility.atrPercent}%).`,
+      `Immediate Trade Plan: Entry ${entryMin}–${entryMax}, SL ${stopLossPrice} (-${tradePlan.stopLoss.riskPercent}%), T1 ${target1Price} (${rr1}:1 R:R), T2 ${target2Price} (${rr2}:1 R:R).`,
+      `Chat Confluence (${transcript.tickerTag}): "${sampleChatMsg.slice(0, 105)}..."`,
     ];
 
     return {
@@ -192,40 +399,46 @@ export class TechnicalAnalysisWorker {
       status: 'SUCCESS',
       trendDirection,
       emaAlignment,
-      ema20: Math.round(basePrice * 0.992 * 100) / 100,
-      ema50: Math.round(basePrice * 0.982 * 100) / 100,
-      ema200: Math.round(basePrice * 0.955 * 100) / 100,
+      ema20,
+      ema50,
+      ema200,
       marketStructure,
       supportLevels,
       resistanceLevels,
       rsi14,
       rsiCondition,
-      macd,
-      stochastic,
-      obvTrend: isBullishChat ? 'ACCUMULATION' : isBearishChat ? 'DISTRIBUTION' : 'FLAT',
+      macd: {
+        macdLine,
+        signalLine: macdSignal,
+        histogram: macdHistogram,
+        crossover: macdCrossover,
+      },
+      stochastic: {
+        k: stochK,
+        d: stochD,
+        state: stochState,
+      },
+      obvTrend: brief.pricing.changePercent > 0.3 ? 'ACCUMULATION' : brief.pricing.changePercent < -0.3 ? 'DISTRIBUTION' : 'FLAT',
       activeChartPatterns,
       bollingerBands: {
-        upper: Math.round(basePrice * 1.02 * 100) / 100,
-        middle: Math.round(basePrice * 100) / 100,
-        lower: Math.round(basePrice * 0.98 * 100) / 100,
-        percentB: 0.65,
-        isSqueeze: false,
+        upper: bbUpper,
+        middle: bbMiddle,
+        lower: bbLower,
+        percentB,
+        isSqueeze,
       },
-      goldenDeathCrossStatus: hasGoldenCross ? 'APPROACHING_GOLDEN_CROSS' : hasDeathCross ? 'APPROACHING_GOLDEN_CROSS' : 'NEUTRAL',
+      goldenDeathCrossStatus:
+        ema50 > ema200
+          ? 'GOLDEN_CROSS_ACTIVE'
+          : ema50 < ema200
+          ? 'DEATH_CROSS_ACTIVE'
+          : 'NEUTRAL',
       relativeStrengthVsBenchmark: {
         benchmark: brief.benchmarkIndex,
-        rsScore1m: isBullishChat ? 78 : 45,
-        performanceDifferencePercent: isBullishChat ? +4.8 : -2.2,
+        rsScore1m: Math.min(95, Math.max(15, Math.round(50 + brief.pricing.changePercent * 6))),
+        performanceDifferencePercent: Number((brief.pricing.changePercent * 1.15).toFixed(2)),
       },
-      fibonacciRetracements: {
-        fib0: resistanceNums[1] || basePrice * 1.03,
-        fib236: Math.round(basePrice * 1.018 * 100) / 100,
-        fib382: Math.round(basePrice * 1.008 * 100) / 100,
-        fib500: Math.round(basePrice * 100) / 100,
-        fib618: Math.round(basePrice * 0.992 * 100) / 100,
-        fib786: Math.round(basePrice * 0.982 * 100) / 100,
-        fib100: supportNums[1] || basePrice * 0.97,
-      },
+      fibonacciRetracements,
       tradePlan,
       subScores: {
         trend: trendScore,

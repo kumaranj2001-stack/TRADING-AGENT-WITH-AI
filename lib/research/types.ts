@@ -102,6 +102,53 @@ export interface CommunityChatTranscript {
   timestamp: number;
 }
 
+export interface ChartIndicatorReadings {
+  rsi14?: number;
+  ema20?: number;
+  ema50?: number;
+  ema200?: number;
+  macdLine?: number;
+  macdSignal?: number;
+  macdHistogram?: number;
+  bbUpper?: number;
+  bbMiddle?: number;
+  bbLower?: number;
+  atr14?: number;
+  stochK?: number;
+  stochD?: number;
+}
+
+export interface ChartOHLCVBar {
+  timestamp: number;
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface ChartLiveContext {
+  symbol: string;
+  tvSymbol: string;
+  name?: string;
+  timeframe: string;
+  livePrice: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  prevClose?: number;
+  volume: number;
+  changePercent: number;
+  currency?: string;
+  activeIndicators: string[];
+  indicatorReadings: ChartIndicatorReadings;
+  recentCandles?: ChartOHLCVBar[];
+  source: 'CHART_WIDGET_EVENT' | 'TRADINGVIEW_SCANNER' | 'YAHOO_FINANCE' | 'SYNTHETIC_FALLBACK';
+  timestamp: number;
+}
+
 export interface DiscoveryBrief {
   symbol: string;
   name: string;
@@ -114,6 +161,7 @@ export interface DiscoveryBrief {
   macro: MacroeconomicBenchmarks;
   summary: string;
   chatTranscript?: CommunityChatTranscript;
+  chartContext?: ChartLiveContext;
 }
 
 // -------------------------------------------------------------

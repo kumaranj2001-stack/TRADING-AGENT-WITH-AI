@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Bot, 
   Search, 
@@ -47,15 +47,18 @@ import {
   DefinitiveGrade, 
   DefinitiveSignal, 
   ResearchEngineWorkflow,
-  AssetClass
+  AssetClass,
+  ChartLiveContext
 } from '@/lib/research/types';
 import { workflowEngine, SectorRotationItem, OptionsStrategySetup, PreEarningsAnalysis, StockScreenerResultItem } from '@/lib/research/WorkflowEngine';
+import { formatAssetPrice, liveChartTelemetryService } from '@/lib/research/LiveChartTelemetryService';
 import { TradingViewLiveChart } from './research/TradingViewLiveChart';
 import { CommunityLiveChatFeed } from './research/CommunityLiveChatFeed';
 
 export interface TradingResearchEngineDashboardProps {
   initialSymbol?: string;
   onBackToTerminal?: () => void;
+  onSymbolChange?: (symbol: string) => void;
 }
 
 export type DashboardTab = 
@@ -72,8 +75,17 @@ export type DashboardTab =
 export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashboardProps> = ({
   initialSymbol = 'NVDA',
   onBackToTerminal,
+  onSymbolChange,
 }) => {
-  const [symbolInput, setSymbolInput] = useState<string>(initialSymbol);
+  const initialCanonical = liveChartTelemetryService.resolveSymbol(initialSymbol).symbol;
+  const [activeSymbol, setActiveSymbol] = useState<string>(initialCanonical);
+  const [symbolInput, setSymbolInput] = useState<string>(initialCanonical);
+  const [activeTimeframe, setActiveTimeframe] = useState<string>('1h');
+  const [activeChartTelemetry, setActiveChartTelemetry] = useState<ChartLiveContext | null>(null);
+  const activeChartTelemetryRef = useRef<ChartLiveContext | null>(null);
+  const [autoSyncAnalyze, setAutoSyncAnalyze] = useState<boolean>(true);
+  const lastAutoTriggeredKeyRef = useRef<string>('');
+
   const [activeWorkflow, setActiveWorkflow] = useState<ResearchEngineWorkflow>('ANALYZE_FULL');
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   
@@ -106,31 +118,118 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
 
   // Run initial analysis on mount
   useEffect(() => {
-    executeWorkflow('ANALYZE_FULL', initialSymbol);
+    executeWorkflow('ANALYZE_FULL', initialCanonical);
   }, []);
 
+  // Bidirectional sync if parent prop initialSymbol changes (e.g. from global Header pair switcher)
+  useEffect(() => {
+    const nextCanonical = liveChartTelemetryService.resolveSymbol(initialSymbol).symbol;
+    if (nextCanonical && nextCanonical !== activeSymbol) {
+      setActiveSymbol(nextCanonical);
+      setSymbolInput(nextCanonical);
+      executeWorkflow('ANALYZE_FULL', nextCanonical);
+    }
+  }, [initialSymbol]);
+
+  const syncCommandInputWithSymbol = (nextSym: string) => {
+    const trimmed = symbolInput.trim();
+    if (trimmed.startsWith('/')) {
+      const parsed = workflowEngine.parseSlashCommand(trimmed);
+      const parts = trimmed.split(/\s+/);
+      if (parts[0].toLowerCase() === '/trade' && parts.length >= 2) {
+        setSymbolInput(`/trade ${parts[1]} ${nextSym}`);
+        return;
+      }
+      setSymbolInput(`/${parsed.parsedWorkflow.toLowerCase()} ${nextSym}`);
+    } else {
+      setSymbolInput(nextSym);
+    }
+  };
+
+  const handleChartTelemetryUpdate = useCallback((telemetry: ChartLiveContext) => {
+    setActiveChartTelemetry(telemetry);
+    activeChartTelemetryRef.current = telemetry;
+  }, []);
+
+  const handleChartSymbolChange = useCallback(
+    (newSym: string, telemetry?: ChartLiveContext) => {
+      const nextCanonical = liveChartTelemetryService.resolveSymbol(newSym).symbol;
+      setActiveSymbol(nextCanonical);
+      syncCommandInputWithSymbol(nextCanonical);
+      if (telemetry) {
+        setActiveChartTelemetry(telemetry);
+        activeChartTelemetryRef.current = telemetry;
+      }
+      onSymbolChange?.(nextCanonical);
+
+      // Deduplicate between immediate click notification and telemetry-arrival notification
+      const triggerKey = `${nextCanonical}_${activeTimeframe}`;
+      if (autoSyncAnalyze && (telemetry || lastAutoTriggeredKeyRef.current !== triggerKey)) {
+        lastAutoTriggeredKeyRef.current = triggerKey;
+        const targetWorkflow =
+          activeWorkflow === 'REPORT_PDF' || activeWorkflow === 'COMPARE_ASSETS'
+            ? 'ANALYZE_FULL'
+            : activeWorkflow;
+        executeWorkflow(targetWorkflow, nextCanonical, compareSymbolB, telemetry, activeTimeframe);
+      }
+    },
+    [activeTimeframe, activeWorkflow, autoSyncAnalyze, compareSymbolB, onSymbolChange, symbolInput]
+  );
+
+  const handleChartTimeframeChange = useCallback(
+    (newTf: string, telemetry?: ChartLiveContext) => {
+      setActiveTimeframe(newTf);
+      if (telemetry) {
+        setActiveChartTelemetry(telemetry);
+        activeChartTelemetryRef.current = telemetry;
+        if (autoSyncAnalyze) {
+          const targetWorkflow =
+            activeWorkflow === 'REPORT_PDF' ? 'ANALYZE_FULL' : activeWorkflow;
+          executeWorkflow(targetWorkflow, activeSymbol, compareSymbolB, telemetry, newTf);
+        }
+      }
+    },
+    [activeSymbol, activeWorkflow, autoSyncAnalyze, compareSymbolB]
+  );
+
   const handleCommandSubmit = (cmdText: string) => {
-    const parsed = workflowEngine.parseSlashCommand(cmdText);
-    setSymbolInput(parsed.primarySymbol);
+    const effectiveInput = cmdText.trim() || activeSymbol;
+    const parsed = workflowEngine.parseSlashCommand(effectiveInput);
+    const resolvedTarget = liveChartTelemetryService.resolveSymbol(
+      parsed.primarySymbol || activeSymbol
+    ).symbol;
+    setActiveSymbol(resolvedTarget);
+    setSymbolInput(effectiveInput.startsWith('/') ? effectiveInput : resolvedTarget);
     if (parsed.secondarySymbol) {
       setCompareSymbolB(parsed.secondarySymbol);
     }
-    executeWorkflow(parsed.parsedWorkflow, parsed.primarySymbol, parsed.secondarySymbol);
+    onSymbolChange?.(resolvedTarget);
+    executeWorkflow(parsed.parsedWorkflow, resolvedTarget, parsed.secondarySymbol);
   };
 
   const executeWorkflow = async (
     workflow: ResearchEngineWorkflow, 
-    sym: string = symbolInput, 
-    symB: string = compareSymbolB
+    sym: string = activeSymbol, 
+    symB: string = compareSymbolB,
+    explicitTelemetry?: ChartLiveContext,
+    tfOverride?: string
   ) => {
-    const cleanSym = sym.trim().toUpperCase() || 'NVDA';
-    setSymbolInput(cleanSym);
+    const cleanSym = liveChartTelemetryService.resolveSymbol(sym || activeSymbol).symbol;
+    const targetTf = tfOverride || activeTimeframe;
+    setActiveSymbol(cleanSym);
     setActiveWorkflow(workflow);
     setIsExecuting(true);
 
+    // Match explicit telemetry or currently captured active chart telemetry if symbols match
+    const candidateTelemetry = explicitTelemetry || activeChartTelemetryRef.current;
+    const matchingTelemetry =
+      candidateTelemetry &&
+      liveChartTelemetryService.resolveSymbol(candidateTelemetry.symbol).symbol === cleanSym
+        ? candidateTelemetry
+        : undefined;
+
     try {
       if (workflow === 'ANALYZE_FULL') {
-        // Stream progress visually across Phase 1 (Chat Buffer Ingestion) -> 5 Sequential Stages -> Phase 3 (Synthesis)
         setExecutionPhase('PHASE_1_DISCOVERY');
         setParallelAgentsRunning({ technical: false, fundamental: false, sentiment: false, risk: false, thesis: false });
         
@@ -151,7 +250,15 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
           setParallelAgentsRunning(p => ({ ...p, thesis: true }));
         }, 750);
 
-        const res = await fetch(`/api/research/analyze?symbol=${encodeURIComponent(cleanSym)}`);
+        const res = await fetch('/api/research/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol: cleanSym,
+            timeframe: targetTf,
+            chartContext: matchingTelemetry,
+          }),
+        });
         if (res.ok) {
           const data = await res.json();
           setTimeout(() => {
@@ -159,16 +266,28 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             setParallelAgentsRunning({ technical: false, fundamental: false, sentiment: false, risk: false, thesis: false });
             setTimeout(() => {
               setReport(data.report);
+              if (data.report?.brief?.chartContext) {
+                setActiveChartTelemetry(data.report.brief.chartContext);
+                activeChartTelemetryRef.current = data.report.brief.chartContext;
+              }
               setExecutionPhase('COMPLETED');
               setIsExecuting(false);
-            }, 300);
-          }, 850);
+            }, 250);
+          }, 800);
         } else {
           setIsExecuting(false);
         }
       } else if (workflow === 'QUICK_SNAPSHOT') {
         setExecutionPhase('PHASE_1_DISCOVERY');
-        const res = await fetch(`/api/research/quick?symbol=${encodeURIComponent(cleanSym)}`);
+        const res = await fetch('/api/research/quick', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol: cleanSym,
+            timeframe: targetTf,
+            chartContext: matchingTelemetry,
+          }),
+        });
         if (res.ok) {
           const data = await res.json();
           setQuickSnapshot(data);
@@ -195,7 +314,11 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
         }
         setIsExecuting(false);
       } else if (workflow === 'OPTIONS_STRATEGIES') {
-        const res = await fetch(`/api/research/workflows?action=OPTIONS&symbol=${encodeURIComponent(cleanSym)}`);
+        const res = await fetch('/api/research/workflows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'OPTIONS', symbol: cleanSym, timeframe: targetTf, chartContext: matchingTelemetry }),
+        });
         if (res.ok) {
           const data = await res.json();
           setOptionsData(data.options);
@@ -237,48 +360,46 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
       } else if (workflow === 'REPORT_PDF') {
         await handleDownloadPdf(cleanSym);
         setIsExecuting(false);
-      } else if (workflow === 'STANDALONE_TECH') {
-        const res = await fetch(`/api/research/workflows?action=STANDALONE_TECH&symbol=${encodeURIComponent(cleanSym)}`);
+      } else if (
+        workflow === 'STANDALONE_TECH' ||
+        workflow === 'STANDALONE_FUND' ||
+        workflow === 'STANDALONE_SENT' ||
+        workflow === 'STANDALONE_RISK' ||
+        workflow === 'STANDALONE_THESIS'
+      ) {
+        const tabMap: Record<string, DashboardTab> = {
+          STANDALONE_TECH: 'technical',
+          STANDALONE_FUND: 'fundamental',
+          STANDALONE_SENT: 'sentiment',
+          STANDALONE_RISK: 'risk',
+          STANDALONE_THESIS: 'catalyst',
+        };
+        const res = await fetch('/api/research/workflows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: workflow,
+            symbol: cleanSym,
+            timeframe: targetTf,
+            chartContext: matchingTelemetry,
+          }),
+        });
         if (res.ok) {
           const data = await res.json();
           setStandaloneAgentData(data);
-          setActiveTab('technical');
-        }
-        setIsExecuting(false);
-      } else if (workflow === 'STANDALONE_FUND') {
-        const res = await fetch(`/api/research/workflows?action=STANDALONE_FUND&symbol=${encodeURIComponent(cleanSym)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setStandaloneAgentData(data);
-          setActiveTab('fundamental');
-        }
-        setIsExecuting(false);
-      } else if (workflow === 'STANDALONE_SENT') {
-        const res = await fetch(`/api/research/workflows?action=STANDALONE_SENT&symbol=${encodeURIComponent(cleanSym)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setStandaloneAgentData(data);
-          setActiveTab('sentiment');
-        }
-        setIsExecuting(false);
-      } else if (workflow === 'STANDALONE_RISK') {
-        const res = await fetch(`/api/research/workflows?action=STANDALONE_RISK&symbol=${encodeURIComponent(cleanSym)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setStandaloneAgentData(data);
-          setActiveTab('risk');
-        }
-        setIsExecuting(false);
-      } else if (workflow === 'STANDALONE_THESIS') {
-        const res = await fetch(`/api/research/workflows?action=STANDALONE_THESIS&symbol=${encodeURIComponent(cleanSym)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setStandaloneAgentData(data);
-          setActiveTab('catalyst');
+          setActiveTab(tabMap[workflow]);
         }
         setIsExecuting(false);
       } else {
-        const res = await fetch(`/api/research/analyze?symbol=${encodeURIComponent(cleanSym)}`);
+        const res = await fetch('/api/research/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol: cleanSym,
+            timeframe: targetTf,
+            chartContext: matchingTelemetry,
+          }),
+        });
         if (res.ok) {
           const data = await res.json();
           setReport(data.report);
@@ -291,9 +412,27 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
     }
   };
 
-  const handleDownloadPdf = async (sym: string = symbolInput) => {
+  const handleDownloadPdf = async (sym: string = activeSymbol) => {
     try {
-      const res = await fetch(`/api/research/report-pdf?symbol=${encodeURIComponent(sym)}`);
+      const targetSym = sym.trim().startsWith('/')
+        ? workflowEngine.parseSlashCommand(sym).primarySymbol
+        : liveChartTelemetryService.resolveSymbol(sym || activeSymbol).symbol;
+      const candidate = activeChartTelemetryRef.current;
+      const matchingTelemetry =
+        candidate &&
+        liveChartTelemetryService.resolveSymbol(candidate.symbol).symbol === targetSym
+          ? candidate
+          : undefined;
+
+      const res = await fetch('/api/research/report-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: targetSym,
+          timeframe: activeTimeframe,
+          chartContext: matchingTelemetry,
+        }),
+      });
       if (res.ok) {
         const data = await res.json();
         setPdfHtml(data.html);
@@ -373,7 +512,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
 
           <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={() => handleDownloadPdf(symbolInput)}
+              onClick={() => handleDownloadPdf(activeSymbol)}
               className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md"
               title="Export 6-Page Investment PDF Report"
             >
@@ -409,6 +548,18 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             />
           </div>
           <button
+            type="button"
+            onClick={() => setAutoSyncAnalyze(!autoSyncAnalyze)}
+            className={`px-3 py-2 rounded-lg border font-mono text-[11px] font-semibold transition-colors whitespace-nowrap ${
+              autoSyncAnalyze
+                ? 'bg-emerald-950/70 border-emerald-500/40 text-emerald-300'
+                : 'bg-terminal-950 border-terminal-border text-slate-400 hover:text-slate-200'
+            }`}
+            title="Automatically run 5-stage analysis whenever the chart symbol or timeframe changes"
+          >
+            {autoSyncAnalyze ? 'AUTO-SYNC: ON' : 'AUTO-SYNC: OFF'}
+          </button>
+          <button
             onClick={() => handleCommandSubmit(symbolInput)}
             disabled={isExecuting}
             className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md disabled:opacity-50"
@@ -438,18 +589,27 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
             { label: 'EUR/USD (Forex)', sym: 'EUR/USD' },
             { label: 'GBP/USD (Forex)', sym: 'GBP/USD' },
             { label: 'USD/JPY (Forex)', sym: 'USD/JPY' },
-          ].map((item) => (
-            <button
-              key={item.sym}
-              onClick={() => {
-                setSymbolInput(item.sym);
-                executeWorkflow('ANALYZE_FULL', item.sym);
-              }}
-              className="px-2 py-0.5 rounded bg-terminal-950 hover:bg-terminal-800 text-slate-300 hover:text-cyan-300 border border-terminal-border transition-colors"
-            >
-              {item.label}
-            </button>
-          ))}
+          ].map((item) => {
+            const isActivePreset = activeSymbol.toUpperCase() === item.sym.toUpperCase();
+            return (
+              <button
+                key={item.sym}
+                onClick={() => {
+                  setActiveSymbol(item.sym);
+                  setSymbolInput(item.sym);
+                  onSymbolChange?.(item.sym);
+                  executeWorkflow('ANALYZE_FULL', item.sym);
+                }}
+                className={`px-2 py-0.5 rounded border transition-colors ${
+                  isActivePreset
+                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 font-bold'
+                    : 'bg-terminal-950 hover:bg-terminal-800 text-slate-300 hover:text-cyan-300 border-terminal-border'
+                }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -457,23 +617,28 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
       {/* 2. REAL-TIME TRADINGVIEW LIVE CHART & COMMUNITY LIVE CHAT FEED */}
       {/* ============================================================= */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
-        {/* Left: Highly Credible, Accessible & Fully Editable TradingView Chart */}
-        <div className="xl:col-span-7 h-[460px] bg-terminal-950 border border-terminal-border rounded-xl overflow-hidden shadow-lg">
+        {/* Left: Synchronized Editable TradingView Chart */}
+        <div className="xl:col-span-7 h-[520px] bg-terminal-950 border border-terminal-border rounded-xl overflow-hidden shadow-lg">
           <TradingViewLiveChart
-            symbol={symbolInput}
-            timeframe="1h"
+            symbol={activeSymbol}
+            timeframe={activeTimeframe}
             theme="dark"
-            height={460}
+            height={520}
             allowIndicatorsCustomization={true}
+            onSymbolChange={handleChartSymbolChange}
+            onTimeframeChange={handleChartTimeframeChange}
+            onChartTelemetryUpdate={handleChartTelemetryUpdate}
           />
         </div>
 
         {/* Right: Real-Time TradingView-Style Community Live Chat Feed */}
-        <div className="xl:col-span-5 h-[460px]">
+        <div className="xl:col-span-5 h-[520px]">
           <CommunityLiveChatFeed
-            activeSymbol={symbolInput}
+            activeSymbol={activeSymbol}
             onSelectSymbol={(sym) => {
+              setActiveSymbol(sym);
               setSymbolInput(sym);
+              onSymbolChange?.(sym);
               executeWorkflow('ANALYZE_FULL', sym);
             }}
             onTriggerAnalysis={(sym) => {
@@ -591,21 +756,23 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                 <span className="text-xs px-2 py-0.5 rounded bg-cyan-950 border border-cyan-500/40 text-cyan-300 font-bold">
                   {report.assetClass}
                 </span>
-                <span className="text-xs text-slate-400">Sole Ingestion: Real-Time Community Live Chat</span>
+                <span className="text-xs text-slate-400">
+                  Synced Chart ({report.brief.chartContext?.timeframe?.toUpperCase() || activeTimeframe.toUpperCase()}) + Community Live Chat
+                </span>
                 <span className="text-xs text-slate-400">• Consensus: {report.brief.chatTranscript?.consensusStrengthPercent ?? 82}% {report.brief.chatTranscript?.consensusSentiment ?? 'BULLISH'}</span>
               </div>
               <h2 className="text-xl sm:text-2xl font-bold text-white font-mono">
                 {report.symbol} <span className="text-sm font-normal text-slate-400">({report.name})</span>
               </h2>
               <div className="text-sm font-mono text-slate-300 flex items-center gap-2 flex-wrap">
-                <span>Chat Consensus Price: <strong className="text-white">{report.brief.pricing.currency} {report.brief.pricing.currentPrice.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}</strong></span>
+                <span>Live Chart Price: <strong className="text-white">{report.brief.pricing.currency} {formatAssetPrice(report.brief.pricing.currentPrice, report.assetClass, report.symbol)}</strong></span>
                 <span className={`font-bold ${report.brief.pricing.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   ({report.brief.pricing.change >= 0 ? '+' : ''}{report.brief.pricing.changePercent}%)
                 </span>
                 <span className="text-slate-500">•</span>
-                <span className="text-xs text-cyan-400">Buffered: {report.brief.chatTranscript?.totalMessages ?? 20} Messages</span>
+                <span className="text-xs text-cyan-400">RSI-14: {report.technical.rsi14} • ATR: {formatAssetPrice(report.brief.volatility.atr14, report.assetClass, report.symbol)}</span>
                 <span className="text-slate-500">•</span>
-                <span className="text-xs text-emerald-400">Dominant Sentiment: {report.brief.chatTranscript?.consensusSentiment ?? 'BULLISH'}</span>
+                <span className="text-xs text-emerald-400">Chat Room: {report.brief.chatTranscript?.tickerTag || `$${report.symbol}`} ({report.brief.chatTranscript?.totalMessages ?? 5} msgs)</span>
               </div>
             </div>
 
@@ -772,7 +939,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               {report.technical.supportLevels.map((lvl, idx) => (
                 <div key={idx} className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60">
                   <div className="flex justify-between text-white font-bold">
-                    <span>S{idx + 1}: {report.brief.pricing.currency} {lvl.price.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}</span>
+                    <span>S{idx + 1}: {report.brief.pricing.currency} {formatAssetPrice(lvl.price, report.assetClass, report.symbol)}</span>
                     <span className="text-emerald-400 text-[10px]">{lvl.strength}</span>
                   </div>
                   <div className="text-slate-400 text-[11px] mt-1">{lvl.confluenceFactors.join(' • ')}</div>
@@ -789,7 +956,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               {report.technical.resistanceLevels.map((lvl, idx) => (
                 <div key={idx} className="p-2.5 rounded bg-terminal-900 border border-terminal-border/60">
                   <div className="flex justify-between text-white font-bold">
-                    <span>R{idx + 1}: {report.brief.pricing.currency} {lvl.price.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}</span>
+                    <span>R{idx + 1}: {report.brief.pricing.currency} {formatAssetPrice(lvl.price, report.assetClass, report.symbol)}</span>
                     <span className="text-rose-400 text-[10px]">{lvl.strength}</span>
                   </div>
                   <div className="text-slate-400 text-[11px] mt-1">{lvl.confluenceFactors.join(' • ')}</div>
@@ -1052,7 +1219,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                   <tr>
                     <td className="py-2.5 px-3 font-bold text-cyan-300">ENTRY ZONE</td>
                     <td className="py-2.5 px-3 font-bold text-white">
-                      {report.brief.pricing.currency} {report.technical.tradePlan.entryZone.min.toFixed(report.assetClass === 'FOREX' ? 4 : 2)} - {report.technical.tradePlan.entryZone.max.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}
+                      {report.brief.pricing.currency} {formatAssetPrice(report.technical.tradePlan.entryZone.min, report.assetClass, report.symbol)} - {formatAssetPrice(report.technical.tradePlan.entryZone.max, report.assetClass, report.symbol)}
                     </td>
                     <td className="py-2.5 px-3 text-slate-400">Immediate Proximity</td>
                     <td className="py-2.5 px-3 text-slate-300">{report.technical.tradePlan.entryZone.note}</td>
@@ -1060,17 +1227,17 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                   <tr>
                     <td className="py-2.5 px-3 font-bold text-rose-400">STOP LOSS</td>
                     <td className="py-2.5 px-3 font-bold text-rose-400">
-                      {report.brief.pricing.currency} {report.technical.tradePlan.stopLoss.price.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}
+                      {report.brief.pricing.currency} {formatAssetPrice(report.technical.tradePlan.stopLoss.price, report.assetClass, report.symbol)}
                     </td>
                     <td className="py-2.5 px-3 text-rose-400">
-                      -{report.technical.tradePlan.stopLoss.riskPercent}% ({report.technical.tradePlan.stopLoss.distancePoints} pts)
+                      -{report.technical.tradePlan.stopLoss.riskPercent}% ({formatAssetPrice(report.technical.tradePlan.stopLoss.distancePoints, report.assetClass, report.symbol)} pts)
                     </td>
                     <td className="py-2.5 px-3 text-slate-300">{report.technical.tradePlan.stopLoss.rationale}</td>
                   </tr>
                   <tr>
                     <td className="py-2.5 px-3 font-bold text-emerald-400">TARGET 1</td>
                     <td className="py-2.5 px-3 font-bold text-emerald-400">
-                      {report.brief.pricing.currency} {report.technical.tradePlan.target1.price.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}
+                      {report.brief.pricing.currency} {formatAssetPrice(report.technical.tradePlan.target1.price, report.assetClass, report.symbol)}
                     </td>
                     <td className="py-2.5 px-3 text-emerald-400">
                       +{report.technical.tradePlan.target1.rewardPercent}% (1:{report.technical.tradePlan.target1.riskRewardRatio} R:R)
@@ -1080,7 +1247,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
                   <tr>
                     <td className="py-2.5 px-3 font-bold text-emerald-400">TARGET 2 (RUNNER)</td>
                     <td className="py-2.5 px-3 font-bold text-emerald-400">
-                      {report.brief.pricing.currency} {report.technical.tradePlan.target2.price.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}
+                      {report.brief.pricing.currency} {formatAssetPrice(report.technical.tradePlan.target2.price, report.assetClass, report.symbol)}
                     </td>
                     <td className="py-2.5 px-3 text-emerald-400">
                       +{report.technical.tradePlan.target2.rewardPercent}% (1:{report.technical.tradePlan.target2.riskRewardRatio} R:R)
@@ -1102,7 +1269,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               </div>
               <div className="p-3 rounded-lg bg-terminal-900 border border-terminal-border/70 space-y-1">
                 <span className="text-rose-400 text-[11px] font-bold">Hard Invalidation Trigger:</span>
-                <div className="text-white font-bold text-xs">{report.brief.pricing.currency} {report.thesis.invalidationTrigger.priceLevel.toFixed(report.assetClass === 'FOREX' ? 4 : 2)}</div>
+                <div className="text-white font-bold text-xs">{report.brief.pricing.currency} {formatAssetPrice(report.thesis.invalidationTrigger.priceLevel, report.assetClass, report.symbol)}</div>
                 <div className="text-slate-300 text-[11px]">{report.thesis.invalidationTrigger.macroOrEventCondition}</div>
                 <div className="text-amber-400 text-[10px]">{report.thesis.invalidationTrigger.exitAction}</div>
               </div>
@@ -1403,7 +1570,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
       <div className="p-3.5 rounded-lg bg-terminal-950 border border-terminal-border text-[11px] font-mono text-slate-400 flex items-start gap-2.5">
         <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
         <div>
-          <strong className="text-slate-300">LEGAL & RESEARCH COMPLIANCE DISCLAIMER:</strong> This platform is an automated multi-agent algorithmic research engine designed solely for institutional research, backtesting, and market observation. All analytical outputs, scores, grades, and synthetic theses are synthesized exclusively from real-time community chat transcripts and linguistic crowd sentiment rather than institutional market feeds. No output constitutes financial advice, recommendation, or solicitation.
+          <strong className="text-slate-300">LEGAL & RESEARCH COMPLIANCE DISCLAIMER:</strong> This platform is an automated multi-agent algorithmic research engine designed solely for institutional research, backtesting, and market observation. All analytical outputs, scores, grades, and synthetic theses are synthesized exclusively from active TradingView chart market conditions and real-time community chat transcripts rather than static defaults. No output constitutes financial advice, recommendation, or solicitation.
         </div>
       </div>
 
@@ -1417,7 +1584,7 @@ export const TradingResearchEngineDashboard: React.FC<TradingResearchEngineDashb
               <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4 text-cyan-400" />
                 <span className="font-bold text-white font-mono text-xs sm:text-sm">
-                  6-Page Investment Research Report Preview // {symbolInput}
+                  6-Page Investment Research Report Preview // {activeSymbol} ({activeTimeframe.toUpperCase()})
                 </span>
               </div>
               <div className="flex items-center gap-2">

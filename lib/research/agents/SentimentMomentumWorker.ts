@@ -8,10 +8,13 @@
 
 import { DiscoveryBrief, SentimentAgentResult } from '../types';
 import { communityChatEngine } from '../CommunityChatEngine';
+import { roundAssetPrice } from '../LiveChartTelemetryService';
 
 export class SentimentMomentumWorker {
   public async analyze(brief: DiscoveryBrief): Promise<SentimentAgentResult> {
-    const transcript = brief.chatTranscript || communityChatEngine.getBufferedTranscript(brief.symbol);
+    const r = (val: number) => roundAssetPrice(val, brief.assetClass, brief.symbol);
+    const basePrice = brief.chartContext?.livePrice || brief.pricing.currentPrice;
+    const transcript = brief.chatTranscript || communityChatEngine.getBufferedTranscript(brief.symbol, basePrice);
     const messages = transcript.messages;
     const fullText = messages.map(m => m.text).join(' ').toLowerCase();
 
@@ -30,17 +33,16 @@ export class SentimentMomentumWorker {
     const newsToneScore = isBullishChat ? 0.72 : isBearishChat ? -0.45 : 0.15;
     const socialBuzzScore = Number((((transcript.bullishCount - transcript.bearishCount) / Math.max(1, transcript.totalMessages))).toFixed(2));
 
-    // Wall Street Analyst Consensus discussed by community
-    const basePrice = brief.pricing.currentPrice;
-    const targetPrice = Math.round(basePrice * (isBullishChat ? 1.18 : 1.05) * 100) / 100;
+    // Wall Street Analyst Consensus anchored strictly to live chart price
+    const targetPrice = r(basePrice * (isBullishChat ? 1.14 : isBearishChat ? 0.94 : 1.05));
     const wallStreetConsensus: SentimentAgentResult['wallStreetConsensus'] = {
       totalAnalysts: 34,
-      buyCount: isBullishChat ? 28 : 15,
-      holdCount: isBullishChat ? 5 : 12,
-      sellCount: isBullishChat ? 1 : 7,
+      buyCount: isBullishChat ? 28 : isBearishChat ? 9 : 15,
+      holdCount: isBullishChat ? 5 : 14,
+      sellCount: isBullishChat ? 1 : isBearishChat ? 11 : 5,
       consensusRating: isBullishChat ? 'STRONG_BUY' : isBearishChat ? 'MODERATE_SELL' : 'HOLD',
       averagePriceTarget: targetPrice,
-      upsidePercent: Math.round(((targetPrice - basePrice) / basePrice) * 10000) / 100,
+      upsidePercent: Number((((targetPrice - basePrice) / basePrice) * 100).toFixed(2)),
       recentUpgrades30d: isBullishChat ? 5 : 1,
       recentDowngrades30d: isBullishChat ? 1 : 4,
     };

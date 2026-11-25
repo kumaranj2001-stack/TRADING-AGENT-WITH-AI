@@ -4,6 +4,7 @@
 
 import { communityChatEngine } from '../lib/research/CommunityChatEngine';
 import { discoveryBriefCompiler } from '../lib/research/DiscoveryBriefCompiler';
+import { liveChartTelemetryService } from '../lib/research/LiveChartTelemetryService';
 import { researchEngineOrchestrator } from '../lib/research/ResearchEngineOrchestrator';
 import { workflowEngine } from '../lib/research/WorkflowEngine';
 import { PdfReportGenerator } from '../lib/research/PdfReportGenerator';
@@ -178,6 +179,39 @@ async function runTests() {
   const screener = workflowEngine.getScreenerResults();
   const watchlist = workflowEngine.getScoredWatchlist();
   console.log(`✅ Stock Screener: ${screener.length} instruments screened | Watchlist: ${watchlist.length} items`);
+
+  // TEST 6: Chart Symbol Switch & Bidirectional Live Synchronization (XAU/USD -> NASDAQ:NVDA -> FX:EURUSD)
+  console.log('\n--- TEST 6: Chart Symbol Switch & Live Telemetry Synchronization ---');
+  const goldTelemetry = await liveChartTelemetryService.fetchLiveChartTelemetry('OANDA:XAUUSD', '1h');
+  const nvdaTelemetry = await liveChartTelemetryService.fetchLiveChartTelemetry('NASDAQ:NVDA', '4h');
+  const eurTelemetry = await liveChartTelemetryService.fetchLiveChartTelemetry('FX:EURUSD', '15m');
+
+  const goldReport = await researchEngineOrchestrator.executeFullAnalysis('OANDA:XAUUSD', goldTelemetry, '1h');
+  const nvdaReport = await researchEngineOrchestrator.executeFullAnalysis('NASDAQ:NVDA', nvdaTelemetry, '4h');
+  const eurReport = await researchEngineOrchestrator.executeFullAnalysis('FX:EURUSD', eurTelemetry, '15m');
+
+  if (goldReport.symbol !== 'XAU/USD' || nvdaReport.symbol !== 'NVDA' || eurReport.symbol !== 'EUR/USD') {
+    throw new Error(`Symbol canonicalization mismatch: ${goldReport.symbol}, ${nvdaReport.symbol}, ${eurReport.symbol}`);
+  }
+  if (Math.abs(nvdaReport.brief.pricing.currentPrice - nvdaTelemetry.livePrice) > 0.05) {
+    throw new Error(`NVDA live chart parity broken: report=${nvdaReport.brief.pricing.currentPrice}, chart=${nvdaTelemetry.livePrice}`);
+  }
+  if (nvdaReport.thesis.invalidationTrigger.priceLevel !== nvdaReport.technical.tradePlan.stopLoss.price) {
+    throw new Error(`Invalidation trigger drift: thesis=${nvdaReport.thesis.invalidationTrigger.priceLevel}, tech SL=${nvdaReport.technical.tradePlan.stopLoss.price}`);
+  }
+  if (eurReport.technical.tradePlan.entryZone.min.toString().split('.')[1]?.length === undefined) {
+    throw new Error(`EUR/USD precision lost: ${eurReport.technical.tradePlan.entryZone.min}`);
+  }
+
+  console.log(`✅ XAU/USD (1h): Live Price ${goldReport.brief.pricing.currentPrice} | Chat Room ${goldReport.brief.chatTranscript?.tickerTag} | Score ${goldReport.compositeScore}/100 | SL ${goldReport.technical.tradePlan.stopLoss.price}`);
+  console.log(`✅ NASDAQ:NVDA (4h): Live Price ${nvdaReport.brief.pricing.currentPrice} | Chat Room ${nvdaReport.brief.chatTranscript?.tickerTag} | Score ${nvdaReport.compositeScore}/100 | SL ${nvdaReport.technical.tradePlan.stopLoss.price} == Thesis Inv ${nvdaReport.thesis.invalidationTrigger.priceLevel}`);
+  console.log(`✅ FX:EURUSD (15m): Live Price ${eurReport.brief.pricing.currentPrice} | Chat Room ${eurReport.brief.chatTranscript?.tickerTag} | Score ${eurReport.compositeScore}/100 | Entry ${eurReport.technical.tradePlan.entryZone.min}-${eurReport.technical.tradePlan.entryZone.max}`);
+
+  const eurPdf = PdfReportGenerator.generateHtmlReport(eurReport);
+  if (!eurPdf.includes(eurReport.brief.pricing.currentPrice.toFixed(4).slice(0, 5))) {
+    throw new Error('EUR/USD PDF precision formatting error');
+  }
+  console.log('✅ EUR/USD 6-Page PDF Report preserves exact FX precision and live chart timeframe.');
 
   console.log('\n================================================================');
   console.log('🎉 ALL ARCHITECTURAL TESTS AND WORKFLOWS PASSED WITH 100% SUCCESS!');

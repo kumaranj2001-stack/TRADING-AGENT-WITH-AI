@@ -16,9 +16,11 @@ import {
   ThesisAgentResult,
   DefinitiveGrade,
   DefinitiveSignal,
-  AgentWeightBreakdown
+  AgentWeightBreakdown,
+  ChartLiveContext
 } from './types';
 import { discoveryBriefCompiler } from './DiscoveryBriefCompiler';
+import { liveChartTelemetryService } from './LiveChartTelemetryService';
 import { technicalAnalysisWorker } from './agents/TechnicalAnalysisWorker';
 import { fundamentalAnalysisWorker } from './agents/FundamentalAnalysisWorker';
 import { sentimentMomentumWorker } from './agents/SentimentMomentumWorker';
@@ -39,18 +41,27 @@ export class ResearchEngineOrchestrator {
   }
 
   /**
-   * Flagship Execution: Runs Phase 1 -> Phase 2 (Parallel) -> Phase 3 (Synthesis)
+   * Flagship Execution: Runs Phase 1 (Live Chart + Chat Grounding) -> Phase 2 (5 Subagents) -> Phase 3 (Synthesis)
    */
-  public async executeFullAnalysis(symbol: string): Promise<ResearchReportSnapshot> {
+  public async executeFullAnalysis(
+    symbol: string,
+    chartContext?: ChartLiveContext,
+    timeframe: string = '1h'
+  ): Promise<ResearchReportSnapshot> {
     const startTime = performance.now();
+    const resolvedSym = liveChartTelemetryService.resolveSymbol(symbol).symbol;
 
     // -------------------------------------------------------------
-    // PHASE 1: DISCOVERY BRIEF COMPILATION
+    // PHASE 1: DISCOVERY BRIEF COMPILATION (Active Chart + Chat Room)
     // -------------------------------------------------------------
-    const brief = await discoveryBriefCompiler.compileBrief(symbol);
+    const brief = await discoveryBriefCompiler.compileBrief(
+      resolvedSym,
+      chartContext,
+      chartContext?.timeframe || timeframe
+    );
 
     // -------------------------------------------------------------
-    // PHASE 2: PARALLEL AGENT DEPLOYMENT (5 CONCURRENT SUBAGENTS)
+    // PHASE 2: SUBAGENT DEPLOYMENT (5 SPECIALIZED WORKERS)
     // -------------------------------------------------------------
     const baseWeights = {
       technical: 0.25,
@@ -60,8 +71,8 @@ export class ResearchEngineOrchestrator {
       thesis: 0.15,
     };
 
-    // Execute concurrently with safety wrappers for proportional weight recalculation
-    const [techRes, fundRes, sentRes, riskRes, thesisRes] = await Promise.all([
+    // Run Technical, Fundamental, and Sentiment concurrently first so Risk & Thesis strictly align with Technical's live trade plan
+    const [techRes, fundRes, sentRes] = await Promise.all([
       technicalAnalysisWorker.analyze(brief).catch(err => ({
         agentName: 'Technical Analysis Agent' as const,
         weight: baseWeights.technical,
@@ -80,13 +91,17 @@ export class ResearchEngineOrchestrator {
         status: 'FAILED' as const,
         error: err.message,
       } as any)),
-      riskAssessmentWorker.analyze(brief).catch(err => ({
+    ]);
+
+    const validTech = techRes.status === 'SUCCESS' ? techRes : undefined;
+    const [riskRes, thesisRes] = await Promise.all([
+      riskAssessmentWorker.analyze(brief, validTech).catch(err => ({
         agentName: 'Risk Assessment Agent' as const,
         weight: baseWeights.risk,
         status: 'FAILED' as const,
         error: err.message,
       } as any)),
-      thesisSynthesisWorker.analyze(brief).catch(err => ({
+      thesisSynthesisWorker.analyze(brief, validTech).catch(err => ({
         agentName: 'Thesis Synthesis Agent' as const,
         weight: baseWeights.thesis,
         status: 'FAILED' as const,
@@ -218,8 +233,8 @@ export class ResearchEngineOrchestrator {
     ];
 
     const reportSnapshot: ResearchReportSnapshot = {
-      reportId: `qri_report_${symbol.toUpperCase()}_${Date.now()}`,
-      symbol: symbol.toUpperCase(),
+      reportId: `qri_report_${resolvedSym}_${Date.now()}`,
+      symbol: resolvedSym,
       name: brief.name,
       assetClass: brief.assetClass,
       timestamp: Date.now(),
@@ -242,17 +257,21 @@ export class ResearchEngineOrchestrator {
       signal,
       gradeDescription,
       all25SubScores,
-      researchDisclaimer: 'LEGAL & RESEARCH COMPLIANCE DISCLAIMER: This platform is an automated multi-agent algorithmic research engine designed solely for institutional research, backtesting, and market observation. All analytical outputs, scores, grades, and synthetic theses are synthesized exclusively from real-time community chat transcripts and linguistic crowd sentiment rather than institutional market feeds. No output constitutes financial advice, recommendation, or solicitation.',
+      researchDisclaimer: 'LEGAL & RESEARCH COMPLIANCE DISCLAIMER: This platform is an automated multi-agent algorithmic research engine designed solely for institutional research, backtesting, and market observation. All analytical outputs, scores, grades, and synthetic theses are synthesized exclusively from active TradingView chart market conditions and real-time community chat transcripts rather than static defaults. No output constitutes financial advice, recommendation, or solicitation.',
     };
 
-    this.persistedReports.set(symbol.toUpperCase(), reportSnapshot);
+    this.persistedReports.set(resolvedSym, reportSnapshot);
     return reportSnapshot;
   }
 
   /**
    * 60-Second Snapshot without subagents (/trade quick)
    */
-  public async executeQuickSnapshot(symbol: string): Promise<{
+  public async executeQuickSnapshot(
+    symbol: string,
+    chartContext?: ChartLiveContext,
+    timeframe: string = '1h'
+  ): Promise<{
     symbol: string;
     brief: DiscoveryBrief;
     quickScore: number;
@@ -260,7 +279,12 @@ export class ResearchEngineOrchestrator {
     quickSignal: DefinitiveSignal;
     summary: string;
   }> {
-    const brief = await discoveryBriefCompiler.compileBrief(symbol);
+    const resolvedSym = liveChartTelemetryService.resolveSymbol(symbol).symbol;
+    const brief = await discoveryBriefCompiler.compileBrief(
+      resolvedSym,
+      chartContext,
+      chartContext?.timeframe || timeframe
+    );
     const priceChange = brief.pricing.changePercent;
     const volSurge = brief.volume.volumeSurgeRatio;
 
@@ -280,17 +304,18 @@ export class ResearchEngineOrchestrator {
     else { quickGrade = 'F'; quickSignal = 'AVOID'; }
 
     return {
-      symbol: symbol.toUpperCase(),
+      symbol: resolvedSym,
       brief,
       quickScore,
       quickGrade,
       quickSignal,
-      summary: `60-Second Rapid Pulse: ${symbol.toUpperCase()} Community Sentiment is ${brief.chatTranscript?.consensusSentiment || 'BULLISH'} (${brief.chatTranscript?.consensusStrengthPercent || 76}% consensus strength across ${brief.chatTranscript?.totalMessages || 5} live messages). Quick Score: ${quickScore}/100 [Grade ${quickGrade} - ${quickSignal}]. Synthesized exclusively from real-time community chat transcripts.`,
+      summary: `60-Second Rapid Pulse (${brief.chartContext?.timeframe?.toUpperCase() || '1H'} @ ${brief.pricing.currency} ${brief.pricing.currentPrice}): ${resolvedSym} Community Sentiment is ${brief.chatTranscript?.consensusSentiment || 'BULLISH'} (${brief.chatTranscript?.consensusStrengthPercent || 76}% consensus strength across ${brief.chatTranscript?.totalMessages || 5} live messages). Quick Score: ${quickScore}/100 [Grade ${quickGrade} - ${quickSignal}].`,
     };
   }
 
   public getPersistedReport(symbol: string): ResearchReportSnapshot | undefined {
-    return this.persistedReports.get(symbol.toUpperCase());
+    const resolvedSym = liveChartTelemetryService.resolveSymbol(symbol).symbol;
+    return this.persistedReports.get(resolvedSym);
   }
 
   public getAllPersistedReports(): ResearchReportSnapshot[] {

@@ -5,6 +5,7 @@
  */
 
 import { ResearchReportSnapshot } from './types';
+import { formatAssetPrice } from './LiveChartTelemetryService';
 
 export class PdfReportGenerator {
   public static generateHtmlReport(report: ResearchReportSnapshot): string {
@@ -27,6 +28,10 @@ export class PdfReportGenerator {
       all25SubScores,
       researchDisclaimer,
     } = report;
+
+    const fmt = (val: number) => formatAssetPrice(val, assetClass, symbol);
+    const activeTimeframe = brief.chartContext?.timeframe?.toUpperCase() || '1H';
+    const activeIndList = brief.chartContext?.activeIndicators?.join(', ') || 'RSI, EMA20/50/200, MACD, BB';
 
     const gradeColor = 
       grade === 'A+' ? '#10b981' :
@@ -247,13 +252,16 @@ export class PdfReportGenerator {
               ${symbol} <span style="font-size: 15px; color: #64748b; font-weight: 400;">(${name})</span>
             </h1>
             <div class="font-mono" style="font-size: 11px; color: #475569;">
-              Asset Class: <strong>${assetClass}</strong> • Benchmark: <strong>${brief.benchmarkIndex}</strong> • Date: ${formattedDate}
+              Asset Class: <strong>${assetClass}</strong> • Timeframe: <strong>${activeTimeframe}</strong> • Benchmark: <strong>${brief.benchmarkIndex}</strong> • Date: ${formattedDate}
             </div>
             <div style="margin-top: 8px; font-size: 14px;" class="font-mono">
-              Market Price: <strong>${brief.pricing.currency} ${brief.pricing.currentPrice.toFixed(2)}</strong> 
+              Live Chart Price: <strong>${brief.pricing.currency} ${fmt(brief.pricing.currentPrice)}</strong> 
               <span class="${brief.pricing.change >= 0 ? 'text-emerald' : 'text-rose'}">
                 (${brief.pricing.change >= 0 ? '+' : ''}${brief.pricing.changePercent}%)
               </span>
+            </div>
+            <div style="margin-top: 4px; font-size: 9.5px; color: #64748b;" class="font-mono">
+              Active Indicators: ${activeIndList}
             </div>
           </div>
 
@@ -359,12 +367,13 @@ export class PdfReportGenerator {
 
         <div class="card">
           <div class="card-title">Trend & Moving Average Ribbon</div>
-          <div>EMA-20: <strong class="font-mono">${technical.ema20.toFixed(2)}</strong></div>
-          <div>EMA-50: <strong class="font-mono">${technical.ema50.toFixed(2)}</strong></div>
-          <div>EMA-200: <strong class="font-mono">${technical.ema200.toFixed(2)}</strong></div>
+          <div>EMA-20: <strong class="font-mono">${fmt(technical.ema20)}</strong></div>
+          <div>EMA-50: <strong class="font-mono">${fmt(technical.ema50)}</strong></div>
+          <div>EMA-200: <strong class="font-mono">${fmt(technical.ema200)}</strong></div>
           <div>Alignment: <strong class="text-cyan">${technical.emaAlignment}</strong></div>
           <div>Structure: <strong>${technical.marketStructure}</strong></div>
-          <div>Bollinger Bands: [${technical.bollingerBands.lower.toFixed(2)} - ${technical.bollingerBands.upper.toFixed(2)}] %B: ${technical.bollingerBands.percentB}</div>
+          <div>RSI-14: <strong>${technical.rsi14} (${technical.rsiCondition})</strong></div>
+          <div>Bollinger Bands: [${fmt(technical.bollingerBands.lower)} - ${fmt(technical.bollingerBands.upper)}] %B: ${technical.bollingerBands.percentB}</div>
         </div>
       </div>
 
@@ -373,7 +382,7 @@ export class PdfReportGenerator {
           <div class="card-title">3 Confluent Support Levels</div>
           ${technical.supportLevels.map((lvl, idx) => `
             <div style="margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px dashed #e2e8f0;">
-              <strong class="font-mono text-emerald">S${idx + 1}: ${lvl.price.toFixed(2)}</strong> (${lvl.strength})<br>
+              <strong class="font-mono text-emerald">S${idx + 1}: ${fmt(lvl.price)}</strong> (${lvl.strength})<br>
               <span style="font-size: 9.5px; color: #475569;">${lvl.confluenceFactors.join(' • ')}</span>
             </div>
           `).join('')}
@@ -383,7 +392,7 @@ export class PdfReportGenerator {
           <div class="card-title">3 Confluent Resistance Levels</div>
           ${technical.resistanceLevels.map((lvl, idx) => `
             <div style="margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px dashed #e2e8f0;">
-              <strong class="font-mono text-rose">R${idx + 1}: ${lvl.price.toFixed(2)}</strong> (${lvl.strength})<br>
+              <strong class="font-mono text-rose">R${idx + 1}: ${fmt(lvl.price)}</strong> (${lvl.strength})<br>
               <span style="font-size: 9.5px; color: #475569;">${lvl.confluenceFactors.join(' • ')}</span>
             </div>
           `).join('')}
@@ -404,25 +413,25 @@ export class PdfReportGenerator {
           <tbody>
             <tr>
               <td><strong>ENTRY ZONE</strong></td>
-              <td class="font-mono text-cyan">${technical.tradePlan.entryZone.min.toFixed(2)} - ${technical.tradePlan.entryZone.max.toFixed(2)}</td>
+              <td class="font-mono text-cyan">${fmt(technical.tradePlan.entryZone.min)} - ${fmt(technical.tradePlan.entryZone.max)}</td>
               <td>Immediate Market</td>
               <td>${technical.tradePlan.entryZone.note}</td>
             </tr>
             <tr>
               <td><strong>STOP LOSS</strong></td>
-              <td class="font-mono text-rose">${technical.tradePlan.stopLoss.price.toFixed(2)}</td>
-              <td class="text-rose font-mono">-${technical.tradePlan.stopLoss.riskPercent}% (${technical.tradePlan.stopLoss.distancePoints} pts)</td>
+              <td class="font-mono text-rose">${fmt(technical.tradePlan.stopLoss.price)}</td>
+              <td class="text-rose font-mono">-${technical.tradePlan.stopLoss.riskPercent}% (${fmt(technical.tradePlan.stopLoss.distancePoints)} pts)</td>
               <td>${technical.tradePlan.stopLoss.rationale}</td>
             </tr>
             <tr>
               <td><strong>TARGET 1</strong></td>
-              <td class="font-mono text-emerald">${technical.tradePlan.target1.price.toFixed(2)}</td>
+              <td class="font-mono text-emerald">${fmt(technical.tradePlan.target1.price)}</td>
               <td class="text-emerald font-mono">+${technical.tradePlan.target1.rewardPercent}% (1:${technical.tradePlan.target1.riskRewardRatio})</td>
               <td>${technical.tradePlan.target1.rationale}</td>
             </tr>
             <tr>
               <td><strong>TARGET 2 (RUNNER)</strong></td>
-              <td class="font-mono text-emerald">${technical.tradePlan.target2.price.toFixed(2)}</td>
+              <td class="font-mono text-emerald">${fmt(technical.tradePlan.target2.price)}</td>
               <td class="text-emerald font-mono">+${technical.tradePlan.target2.rewardPercent}% (1:${technical.tradePlan.target2.riskRewardRatio})</td>
               <td>${technical.tradePlan.target2.rationale}</td>
             </tr>

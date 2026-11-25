@@ -29,10 +29,43 @@ export class CommunityChatEngine {
   }
 
   /**
+   * Normalizes any exchange-prefixed or alias symbol (e.g. 'NASDAQ:NVDA' -> 'NVDA', 'OANDA:XAUUSD' -> 'XAU/USD')
+   */
+  public canonicalizeSymbol(symbol: string): string {
+    const clean = (symbol || 'NVDA').toUpperCase().trim().replace(/^\$/, '');
+    const alias: Record<string, string> = {
+      'NASDAQ:NVDA': 'NVDA',
+      'NVIDIA': 'NVDA',
+      'OANDA:XAUUSD': 'XAU/USD',
+      'XAUUSD': 'XAU/USD',
+      'GOLD': 'XAU/USD',
+      'FX:EURUSD': 'EUR/USD',
+      'OANDA:EURUSD': 'EUR/USD',
+      'EURUSD': 'EUR/USD',
+      'OANDA:XAGUSD': 'XAG/USD',
+      'XAGUSD': 'XAG/USD',
+      'FX:GBPUSD': 'GBP/USD',
+      'GBPUSD': 'GBP/USD',
+      'FX:USDJPY': 'USD/JPY',
+      'USDJPY': 'USD/JPY',
+      'NSE:NIFTY': 'NIFTY 50',
+      'NIFTY': 'NIFTY 50',
+      'NSE:BANKNIFTY': 'BANK NIFTY',
+      'BANKNIFTY': 'BANK NIFTY',
+      'NSE:RELIANCE': 'RELIANCE',
+      'NSE:HDFCBANK': 'HDFC BANK',
+    };
+    if (alias[clean]) return alias[clean];
+    if (clean.includes(':')) return clean.split(':')[1] || clean;
+    return clean;
+  }
+
+  /**
    * Helper to normalize symbol to tag, e.g. 'NVDA' -> '$NVDA', 'XAU/USD' -> '$XAUUSD'
    */
   public normalizeTickerTag(symbol: string): string {
-    const clean = symbol.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const canonical = this.canonicalizeSymbol(symbol);
+    const clean = canonical.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     return `$${clean}`;
   }
 
@@ -48,7 +81,7 @@ export class CommunityChatEngine {
     badge?: CommunityChatMessage['badge'];
     badges?: any[];
   }): CommunityChatMessage {
-    const cleanSym = params.symbol.toUpperCase().trim() || 'NVDA';
+    const cleanSym = this.canonicalizeSymbol(params.symbol);
     const tickerTag = this.normalizeTickerTag(cleanSym);
     const now = Date.now();
     const textContent = params.text || params.message || '';
@@ -103,7 +136,7 @@ export class CommunityChatEngine {
    * Retrieves all buffered chat messages for a symbol or filtered by tag
    */
   public getMessagesForSymbol(symbol: string, tagFilter?: string): CommunityChatMessage[] {
-    const cleanSym = symbol.toUpperCase().trim();
+    const cleanSym = this.canonicalizeSymbol(symbol);
     let msgs: CommunityChatMessage[] = [];
     
     if (this.chatBuffers.has(cleanSym)) {
@@ -137,8 +170,8 @@ export class CommunityChatEngine {
   /**
    * Compiles the buffered chat transcript into the primary input payload for the multi-agent pipeline
    */
-  public getBufferedTranscript(symbol: string): CommunityChatTranscript {
-    const cleanSym = symbol.toUpperCase().trim();
+  public getBufferedTranscript(symbol: string, livePriceHint?: number): CommunityChatTranscript {
+    const cleanSym = this.canonicalizeSymbol(symbol);
     const tickerTag = this.normalizeTickerTag(cleanSym);
     const messages = this.getMessagesForSymbol(cleanSym);
 
@@ -164,8 +197,8 @@ export class CommunityChatEngine {
     // Extract dominant linguistic themes from chat text
     const dominantThemes = this.extractDominantThemes(messages);
 
-    // Extract community-cited numeric levels from chat discussions
-    const extractedPriceLevels = this.extractCommunityPriceLevels(messages, cleanSym);
+    // Extract community-cited numeric levels calibrated strictly around the live chart price
+    const extractedPriceLevels = this.extractCommunityPriceLevels(messages, cleanSym, livePriceHint);
 
     return {
       symbol: cleanSym,
@@ -226,7 +259,7 @@ export class CommunityChatEngine {
   /**
    * Community-Cited Price Levels Extractor
    */
-  private extractCommunityPriceLevels(messages: CommunityChatMessage[], symbol: string): {
+  private extractCommunityPriceLevels(messages: CommunityChatMessage[], symbol: string, livePriceHint?: number): {
     supports: number[];
     resistances: number[];
     entryZone?: { min: number; max: number };
@@ -234,36 +267,49 @@ export class CommunityChatEngine {
     targets?: number[];
   } {
     const fullText = messages.map(m => m.text).join(' ');
-    // Match numbers like 140, 142.50, 3538, 25800, etc.
-    const numberMatches = fullText.match(/\$?\b\d+(\.\d{1,4})?\b/g) || [];
+    const numberMatches = fullText.match(/\$?\b\d+(\.\d{1,5})?\b/g) || [];
     const validNums = numberMatches
       .map(n => parseFloat(n.replace('$', '')))
       .filter(n => Number.isFinite(n) && n > 0 && n < 1000000);
 
-    // Default base price by instrument
-    let fallbackBase = 142.0;
-    if (symbol.includes('XAU')) fallbackBase = 3538.0;
-    else if (symbol.includes('EUR')) fallbackBase = 1.0950;
-    else if (symbol.includes('GBP')) fallbackBase = 1.3020;
-    else if (symbol.includes('JPY')) fallbackBase = 152.40;
-    else if (symbol.includes('NIFTY')) fallbackBase = 25800.0;
-    else if (symbol.includes('RELIANCE')) fallbackBase = 1265.0;
-    else if (symbol.includes('TSLA')) fallbackBase = 215.0;
-    else if (symbol.includes('AAPL')) fallbackBase = 228.0;
+    // Anchor around live chart price when available; otherwise sensible market baseline
+    let anchorBase = livePriceHint && livePriceHint > 0 ? livePriceHint : 155.0;
+    if (!livePriceHint || livePriceHint <= 0) {
+      if (symbol.includes('XAU')) anchorBase = 3536.0;
+      else if (symbol.includes('XAG')) anchorBase = 41.2;
+      else if (symbol.includes('EUR')) anchorBase = 1.0958;
+      else if (symbol.includes('GBP')) anchorBase = 1.3086;
+      else if (symbol.includes('JPY')) anchorBase = 158.56;
+      else if (symbol.includes('NIFTY')) anchorBase = 25350.0;
+      else if (symbol.includes('RELIANCE')) anchorBase = 1351.0;
+      else if (symbol.includes('TSLA')) anchorBase = 345.0;
+      else if (symbol.includes('AAPL')) anchorBase = 228.5;
+    }
 
-    const nearbyNums = validNums.filter(n => Math.abs(n - fallbackBase) / fallbackBase < 0.20);
-    const sorted = nearbyNums.length >= 3 ? nearbyNums.sort((a, b) => a - b) : [fallbackBase * 0.985, fallbackBase, fallbackBase * 1.015];
+    const nearbyNums = Array.from(
+      new Set(validNums.filter(n => Math.abs(n - anchorBase) / anchorBase < 0.12))
+    ).sort((a, b) => a - b);
 
-    const mid = sorted[Math.floor(sorted.length / 2)] || fallbackBase;
-    const supports = sorted.filter(n => n < mid).slice(-3);
-    const resistances = sorted.filter(n => n > mid).slice(0, 3);
+    const supports = nearbyNums.filter(n => n < anchorBase * 0.999).slice(-3).reverse();
+    const resistances = nearbyNums.filter(n => n > anchorBase * 1.001).slice(0, 3);
+
+    const finalSupports = [
+      supports[0] ?? anchorBase * 0.988,
+      supports[1] ?? anchorBase * 0.976,
+      supports[2] ?? anchorBase * 0.962,
+    ];
+    const finalResistances = [
+      resistances[0] ?? anchorBase * 1.015,
+      resistances[1] ?? anchorBase * 1.032,
+      resistances[2] ?? anchorBase * 1.050,
+    ];
 
     return {
-      supports: supports.length > 0 ? supports : [mid * 0.99, mid * 0.98, mid * 0.97],
-      resistances: resistances.length > 0 ? resistances : [mid * 1.01, mid * 1.02, mid * 1.03],
-      entryZone: { min: mid * 0.998, max: mid * 1.002 },
-      stopLoss: supports[0] ? supports[0] * 0.995 : mid * 0.985,
-      targets: resistances.length > 0 ? resistances : [mid * 1.015, mid * 1.03],
+      supports: finalSupports,
+      resistances: finalResistances,
+      entryZone: { min: anchorBase * 0.996, max: anchorBase * 1.002 },
+      stopLoss: finalSupports[0] * 0.994,
+      targets: finalResistances,
     };
   }
 

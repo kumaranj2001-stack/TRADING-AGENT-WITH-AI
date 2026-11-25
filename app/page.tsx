@@ -49,7 +49,7 @@ import { JournalModal } from '@/components/JournalModal';
 import { HistoricalJournalDesk } from '@/components/HistoricalJournalDesk';
 import { SevenStagePipelineVisualizer } from '@/components/SevenStagePipelineVisualizer';
 import { JournalStorageManager } from '@/lib/journalStorage';
-import { getMarketSegmentForSymbol, PIP_VALUES, generateCandles } from '@/lib/marketData';
+import { BASE_PRICES, getMarketSegmentForSymbol, PIP_VALUES, generateCandles } from '@/lib/marketData';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
 import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 import { MarketSessionInfo, TradeHistoryItem } from '@/lib/types';
@@ -1346,6 +1346,11 @@ export default function Home() {
         {activeTab === 'agent' && (
           <TradingResearchEngineDashboard
             initialSymbol={selectedPair}
+            onSymbolChange={(sym) => {
+              if (sym in BASE_PRICES) {
+                setSelectedPair(sym as CurrencyPair);
+              }
+            }}
             onBackToTerminal={() => setActiveTab('terminal')}
           />
         )}

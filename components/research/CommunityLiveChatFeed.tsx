@@ -72,10 +72,11 @@ export const CommunityLiveChatFeed: React.FC<CommunityLiveChatFeedProps> = ({
   const [onlineCount, setOnlineCount] = useState<number>(1428);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
-  // Sync symbol changes
+  // Sync symbol changes & reset active tag filter to new chart room
   useEffect(() => {
     const msgs = communityChatEngine.getMessagesForSymbol(activeSymbol);
     setMessages(msgs);
+    setActiveTagFilter('ALL');
   }, [activeSymbol]);
 
   // Subscribe to new real-time messages
@@ -157,7 +158,7 @@ export const CommunityLiveChatFeed: React.FC<CommunityLiveChatFeedProps> = ({
   const activeTag = communityChatEngine.normalizeTickerTag(activeSymbol);
 
   return (
-    <div className="bg-terminal-950 border border-terminal-border rounded-xl flex flex-col shadow-xl overflow-hidden font-mono text-xs">
+    <div className="bg-terminal-950 border border-terminal-border rounded-xl flex flex-col h-full shadow-xl overflow-hidden font-mono text-xs">
       {/* 1. Community Header Bar */}
       <div className="px-3.5 py-2.5 bg-terminal-900 border-b border-terminal-border flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -231,7 +232,19 @@ export const CommunityLiveChatFeed: React.FC<CommunityLiveChatFeedProps> = ({
           <Filter className="w-3 h-3 text-cyan-400" />
           <span>Filter Tag:</span>
         </span>
-        {PRESET_TAG_FILTERS.map((item) => {
+        {(() => {
+          const hasActivePreset = PRESET_TAG_FILTERS.some(
+            (p) => p.tag === activeTag || (p.sym && p.sym.toUpperCase() === activeSymbol.toUpperCase())
+          );
+          const dynamicFilters = hasActivePreset
+            ? PRESET_TAG_FILTERS
+            : [
+                PRESET_TAG_FILTERS[0],
+                { label: activeTag, tag: activeTag, sym: activeSymbol },
+                ...PRESET_TAG_FILTERS.slice(1),
+              ];
+          return dynamicFilters;
+        })().map((item) => {
           const isSelected = activeTagFilter === item.tag;
           return (
             <button

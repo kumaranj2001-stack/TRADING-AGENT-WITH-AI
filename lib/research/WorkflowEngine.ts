@@ -9,7 +9,8 @@ import {
   ResearchReportSnapshot,
   DiscoveryBrief,
   DefinitiveGrade,
-  DefinitiveSignal
+  DefinitiveSignal,
+  ChartLiveContext
 } from './types';
 import { researchEngineOrchestrator } from './ResearchEngineOrchestrator';
 import { discoveryBriefCompiler } from './DiscoveryBriefCompiler';
@@ -74,22 +75,22 @@ export class WorkflowEngine {
   // -------------------------------------------------------------
   // WORKFLOW 1: FLAGSHIP FULL 5-AGENT ANALYSIS
   // -------------------------------------------------------------
-  public async runFullAnalysis(symbol: string): Promise<ResearchReportSnapshot> {
-    return researchEngineOrchestrator.executeFullAnalysis(symbol);
+  public async runFullAnalysis(symbol: string, chartContext?: ChartLiveContext, timeframe?: string): Promise<ResearchReportSnapshot> {
+    return researchEngineOrchestrator.executeFullAnalysis(symbol, chartContext, timeframe);
   }
 
   // -------------------------------------------------------------
   // WORKFLOW 2: 60-SECOND RAPID PULSE SNAPSHOT
   // -------------------------------------------------------------
-  public async runQuickSnapshot(symbol: string) {
-    return researchEngineOrchestrator.executeQuickSnapshot(symbol);
+  public async runQuickSnapshot(symbol: string, chartContext?: ChartLiveContext, timeframe?: string) {
+    return researchEngineOrchestrator.executeQuickSnapshot(symbol, chartContext, timeframe);
   }
 
   // -------------------------------------------------------------
   // WORKFLOWS 3 - 7: STANDALONE INDIVIDUAL AGENT VIEWS
   // -------------------------------------------------------------
-  public async getStandaloneAgentView(symbol: string, agentType: 'tech' | 'fund' | 'sent' | 'risk' | 'thesis') {
-    const report = await researchEngineOrchestrator.executeFullAnalysis(symbol);
+  public async getStandaloneAgentView(symbol: string, agentType: 'tech' | 'fund' | 'sent' | 'risk' | 'thesis', chartContext?: ChartLiveContext, timeframe?: string) {
+    const report = await researchEngineOrchestrator.executeFullAnalysis(symbol, chartContext, timeframe);
     switch (agentType) {
       case 'tech': return report.technical;
       case 'fund': return report.fundamental;
@@ -161,13 +162,13 @@ export class WorkflowEngine {
   // -------------------------------------------------------------
   // WORKFLOW 10: OPTIONS STRATEGIES (/trade options)
   // -------------------------------------------------------------
-  public async getOptionsStrategies(symbol: string): Promise<{
+  public async getOptionsStrategies(symbol: string, chartContext?: ChartLiveContext): Promise<{
     symbol: string;
     impliedVolPercent: number;
     ivRank: number;
     recommendedStrategies: OptionsStrategySetup[];
   }> {
-    const brief = await discoveryBriefCompiler.compileBrief(symbol);
+    const brief = await discoveryBriefCompiler.compileBrief(symbol, chartContext);
     const price = brief.pricing.currentPrice;
 
     return {
@@ -273,8 +274,8 @@ export class WorkflowEngine {
   // -------------------------------------------------------------
   // WORKFLOW 15: 6-PAGE PDF REPORT EXPORT (/trade report-pdf)
   // -------------------------------------------------------------
-  public async generateReportPdfHtml(symbol: string): Promise<string> {
-    const report = await researchEngineOrchestrator.executeFullAnalysis(symbol);
+  public async generateReportPdfHtml(symbol: string, chartContext?: ChartLiveContext, timeframe?: string): Promise<string> {
+    const report = await researchEngineOrchestrator.executeFullAnalysis(symbol, chartContext, timeframe);
     return PdfReportGenerator.generateHtmlReport(report);
   }
 
