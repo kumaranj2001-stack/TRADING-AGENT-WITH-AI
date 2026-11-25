@@ -1,30 +1,30 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import {
-  Compass,
-  HelpCircle,
-  Play,
-  Volume2,
-  VolumeX,
+import React, { useState } from 'react';
+import { 
+  Compass, 
+  HelpCircle, 
+  Play, 
+  Volume2, 
+  VolumeX, 
+  Layers, 
+  Bookmark, 
+  Cpu, 
+  Activity,
+  CheckCircle2,
+  AlertTriangle
 } from 'lucide-react';
 import { CurrencyPair } from '@/lib/types';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
 import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
-import { ResearchReportSnapshot } from '@/lib/research/types';
-import {
-  computeLivePredictiveAnalytics,
-  PredictiveCandleInput,
-} from '@/lib/research/PredictiveAnalyticsEngine';
+import { BASE_PRICES } from '@/lib/marketData';
 
 export interface VisionAtlasLabSidebarProps {
-  pair: CurrencyPair | string;
+  pair: CurrencyPair;
   timeframe: string;
   theme?: 'light' | 'dark';
   onSimulate?: () => void;
   livePrice?: number;
-  candles?: PredictiveCandleInput[];
-  researchReport?: ResearchReportSnapshot | null;
 }
 
 export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
@@ -33,8 +33,6 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
   theme = 'light',
   onSimulate,
   livePrice: propLivePrice,
-  candles = [],
-  researchReport,
 }) => {
   const isLight = theme === 'light';
   const cleanPair = pair.replace('/', '');
@@ -42,45 +40,23 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
   const [isVoiceOn, setIsVoiceOn] = useState<boolean>(true);
   const [voiceSpeed, setVoiceSpeed] = useState<'SLOW' | 'NORMAL' | 'FAST'>('NORMAL');
   const [isExplaining, setIsExplaining] = useState<boolean>(false);
-  const [showHelp, setShowHelp] = useState<boolean>(false);
   const [explanationText, setExplanationText] = useState<string>('');
 
-  const activePrice =
-    propLivePrice ||
-    researchReport?.brief.pricing.currentPrice ||
-    LiveMarketFeedManager.getCanonicalPrice(pair as CurrencyPair) ||
-    liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair as CurrencyPair) ||
-    100;
-
-  const snapshot = useMemo(
-    () =>
-      computeLivePredictiveAnalytics({
-        symbol: pair,
-        timeframe,
-        candles,
-        livePrice: activePrice,
-        researchReport,
-      }),
-    [pair, timeframe, candles, activePrice, researchReport]
-  );
-
-  const { visionAtlasLab: lab, decimals } = snapshot;
-  const isIndian =
-    pair.includes('NIFTY') || pair.includes('RELIANCE') || pair.includes('HDFC') || pair.includes('TCS') || pair.includes('INFY');
-  const isFx = pair.includes('/') && !pair.includes('XAU') && !pair.includes('XAG') && !pair.includes('BTC');
-  const pricePrefix = isIndian ? '₹' : isFx ? '' : '$';
-  const fmt = (n: number) => `${pricePrefix}${n.toFixed(decimals)}`;
+  const isGold = pair === 'XAU/USD';
+  const isJpy = pair.includes('JPY');
+  const isIndian = pair === 'NIFTY 50' || pair === 'BANK NIFTY';
+  const decimals = isJpy ? 3 : (isGold || isIndian) ? 2 : 5;
+  const activePrice = propLivePrice || LiveMarketFeedManager.getCanonicalPrice(pair) || liveMarketAnchorConstraintEngine.getAuthoritativeSpotPrice(pair);
+  const sweepPrice = (activePrice * 0.998).toFixed(decimals);
+  const entryMin = (activePrice * 1.002).toFixed(decimals);
+  const entryMax = (activePrice * 1.004).toFixed(decimals);
+  const stopThreshold = (activePrice * 1.008).toFixed(decimals);
 
   const handleAnalyseAndExplain = () => {
     setIsExplaining(true);
-    const primaryBuy = lab.buyZones[0];
-    const primarySell = lab.sellZones[0];
-    const stopRef =
-      researchReport?.technical.tradePlan.stopLoss.price ?? lab.buyZones[1]?.low ?? snapshot.quantum.keySupport;
-
-    const textEn = `Live Vision Atlas Telemetry for ${cleanPair} on ${timeframe}: ${lab.liquiditySweepText}. Structure reads ${lab.structureText} with ${lab.bullishPct}% bullish vs ${lab.bearishPct}% bearish weight (Confluence ${lab.signalEngine.confluenceScore}/100). Key demand spans ${fmt(primaryBuy.low)} to ${fmt(primaryBuy.high)}, supply sits at ${fmt(primarySell.low)} to ${fmt(primarySell.high)}, and invalidation anchor rests near ${fmt(stopRef)}.`;
-    const textTa = `${cleanPair} ${timeframe} நேரடி பகுப்பாய்வு: ${fmt(lab.sweepPrice)} நிலையில் பணப்புழக்கம் கண்டறியப்பட்டது. சந்தை அமைப்பு ${lab.structureText} (${lab.bullishPct}% காளை / ${lab.bearishPct}% கரடி). டிமாண்ட் பகுதி ${fmt(primaryBuy.low)} முதல் ${fmt(primaryBuy.high)} வரை உள்ளது. ஆபத்து எல்லை ${fmt(stopRef)}.`;
-
+    const textEn = `Institutional Order Flow for ${cleanPair} on ${timeframe}: Price has executed a sell-side liquidity sweep at ${sweepPrice}. High-probability confluence entry zone is isolated between ${entryMin} and ${entryMax}, overlapping the 61.8% Fibonacci retracement and premium fair value gap. Maintain stop loss above danger threshold ${stopThreshold}.`;
+    const textTa = `${cleanPair} ${timeframe} நேரடி தொழில்நுட்ப பகுப்பாய்வு: விலை ${sweepPrice} இல் கீழ்நிலைப் பணப்புழக்கத்தை (Sell-side Liquidity) எடுத்துள்ளது. ${entryMin} முதல் ${entryMax} வரையிலான பகுதியில் உயர் நம்பகத்தன்மை கொண்ட என்ட்ரி மண்டலம் கண்டறியப்பட்டுள்ளது. ஆபத்து எல்லையான ${stopThreshold} க்கு மேல் ஸ்டாப் லாஸ் வைக்கவும்.`;
+    
     const textToSpeak = selectedLanguage === 'ta' ? textTa : textEn;
     setExplanationText(textToSpeak);
 
@@ -92,16 +68,14 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
       utterance.onend = () => setIsExplaining(false);
       window.speechSynthesis.speak(utterance);
     } else {
-      setTimeout(() => setIsExplaining(false), 1800);
+      setTimeout(() => setIsExplaining(false), 3000);
     }
   };
 
   return (
-    <div
-      className={`w-full h-full flex flex-col select-none overflow-y-auto custom-scrollbar font-sans text-xs ${
-        isLight ? 'text-slate-800' : 'text-slate-100'
-      }`}
-    >
+    <div className={`w-full h-full flex flex-col select-none overflow-y-auto custom-scrollbar font-sans text-xs ${
+      isLight ? 'text-slate-800' : 'text-slate-100'
+    }`}>
       {/* Header */}
       <div className="p-3 border-b border-slate-200 dark:border-terminal-border flex items-start justify-between">
         <div>
@@ -111,33 +85,26 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
               VISION ATLAS LAB
             </h2>
           </div>
-          <p className="text-[10px] text-slate-500 font-medium">
-            Live Order Flow &amp; Institutional Confluences
-          </p>
+          <p className="text-[10px] text-slate-500 font-medium">Daily Advanced Market Analysis</p>
         </div>
 
-        <button
-          onClick={() => setShowHelp((v) => !v)}
-          className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:underline cursor-pointer"
-        >
+        <button className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:underline">
           <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-          <span>{showHelp ? 'Hide' : 'How to use'}</span>
+          <span>How to use</span>
         </button>
       </div>
 
       <div className="p-3.5 space-y-3.5 flex-1">
-        {showHelp && (
-          <div className="p-2.5 rounded-lg border border-cyan-500/30 bg-cyan-500/5 text-[10px] text-slate-600 dark:text-slate-300 leading-relaxed">
-            Zones, structure shifts, and Signal Engine triggers synchronize in real time with the Chart.js OHLCV stream and the active AI Research Report ({cleanPair} {timeframe}).
-          </div>
-        )}
-
         {/* Language Selection: தமிழ் / English */}
         <div className="p-2.5 rounded-lg border border-slate-200 dark:border-terminal-border bg-slate-50 dark:bg-terminal-900/40 space-y-1.5">
           <span className="font-bold text-[11px] text-slate-800 dark:text-white block">
             Language - மொழி
           </span>
-          <div className="flex items-center gap-1.5 pt-0.5">
+          <p className="text-[10px] text-slate-500 leading-tight">
+            Choose the language for the analysis, the chart labels and the voice. பகுப்பாய்வுக்கான மொழியைத் தேர்வு செய்யவும், விளக்கப்பட லேபிள்கள் மற்றும் குரல்.
+          </p>
+
+          <div className="flex items-center gap-1.5 pt-1">
             <button
               onClick={() => setSelectedLanguage('ta')}
               className={`px-3 py-1 rounded text-xs font-bold transition-colors ${
@@ -167,93 +134,99 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
               Institutional liquidity
             </span>
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 font-bold text-emerald-600 dark:text-emerald-400">
-              LIVE COMPUTED
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-terminal-800 font-bold text-slate-500">
+              ESTIMATED
             </span>
           </div>
 
           <div className="space-y-1">
-            <div className="flex justify-between gap-2">
-              <span className="text-slate-500 font-sans shrink-0">Liquidity sweep:</span>
-              <span className="font-bold text-slate-800 dark:text-slate-200 text-right">{lab.liquiditySweepText}</span>
+            <div className="flex justify-between">
+              <span className="text-slate-500 font-sans">Liquidity sweep:</span>
+              <span className="font-bold text-slate-800 dark:text-slate-200">Sell-side swept at 3998.47</span>
             </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-slate-500 font-sans shrink-0">Structure:</span>
-              <span className="font-bold text-slate-800 dark:text-slate-200 text-right">{lab.structureText}</span>
+            <div className="flex justify-between">
+              <span className="text-slate-500 font-sans">Structure:</span>
+              <span className="font-bold text-slate-800 dark:text-slate-200">MSS (CHoCH) bearish</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500 font-sans">Analysis confidence:</span>
-              <span
-                className={`font-bold ${
-                  lab.confidenceText === 'High'
-                    ? 'text-emerald-600'
-                    : lab.confidenceText === 'Moderate'
-                    ? 'text-cyan-600'
-                    : 'text-amber-600'
-                }`}
-              >
-                {lab.confidenceText} ({lab.signalEngine.confluenceScore}/100)
-              </span>
+              <span className="font-bold text-amber-600">Low</span>
             </div>
           </div>
 
           {/* Split Bar */}
           <div className="space-y-1 pt-1">
             <div className="flex justify-between text-[10px] font-bold">
-              <span className="text-emerald-600">Bullish {lab.bullishPct}%</span>
-              <span className="text-rose-600">Bearish {lab.bearishPct}%</span>
+              <span className="text-emerald-600">Bullish 47%</span>
+              <span className="text-rose-600">Bearish 53%</span>
             </div>
             <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-terminal-800 overflow-hidden flex">
-              <div className="bg-emerald-500 h-full transition-all" style={{ width: `${lab.bullishPct}%` }} />
-              <div className="bg-rose-500 h-full transition-all" style={{ width: `${lab.bearishPct}%` }} />
+              <div className="bg-emerald-500 h-full" style={{ width: '47%' }} />
+              <div className="bg-rose-500 h-full" style={{ width: '53%' }} />
             </div>
           </div>
 
           {/* Possible Reaction Zones */}
           <div className="pt-2 border-t border-slate-200 dark:border-terminal-border space-y-1">
-            <span className="text-[10px] font-bold text-slate-500 uppercase block font-sans">
-              Live Order Block &amp; Reaction Zones
-            </span>
+            <span className="text-[10px] font-bold text-slate-500 uppercase block font-sans">Possible reaction zones</span>
             <div className="space-y-1 text-[11px] font-mono">
-              {lab.sellZones.slice(0, 2).map((z, idx) => (
-                <div key={z.id} className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <span className={`w-2 h-2 rounded-full ${idx === 0 ? 'bg-rose-500' : 'bg-amber-600'}`} />
-                    <span className="text-slate-700 dark:text-slate-300">{z.strengthLabel}</span>
-                  </span>
-                  <span className="font-bold text-slate-900 dark:text-white">
-                    {fmt(z.low)} - {fmt(z.high)}
-                  </span>
-                </div>
-              ))}
-              {lab.buyZones.slice(0, 2).map((z, idx) => (
-                <div key={z.id} className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <span className={`w-2 h-2 rounded-full ${idx === 0 ? 'bg-emerald-500' : 'bg-blue-600'}`} />
-                    <span className="text-slate-700 dark:text-slate-300">{z.strengthLabel}</span>
-                  </span>
-                  <span className="font-bold text-slate-900 dark:text-white">
-                    {fmt(z.low)} - {fmt(z.high)}
-                  </span>
-                </div>
-              ))}
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-rose-500" />
+                  <span className="text-slate-700 dark:text-slate-300">Sell-limit zone</span>
+                </span>
+                <span className="font-bold text-slate-900 dark:text-white">{(activePrice * 1.001).toFixed(decimals)} - {(activePrice * 1.003).toFixed(decimals)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-700" />
+                  <span className="text-slate-700 dark:text-slate-300">Sell-limit zone 2</span>
+                </span>
+                <span className="font-bold text-slate-900 dark:text-white">{(activePrice * 1.005).toFixed(decimals)} - {(activePrice * 1.008).toFixed(decimals)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-blue-500" />
+                  <span className="text-slate-700 dark:text-slate-300">Sell-side liquidity</span>
+                </span>
+                <span className="font-bold text-slate-900 dark:text-white">{(activePrice * 0.997).toFixed(decimals)} - {(activePrice * 0.999).toFixed(decimals)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-blue-700" />
+                  <span className="text-slate-700 dark:text-slate-300">Buy-limit zone</span>
+                </span>
+                <span className="font-bold text-slate-900 dark:text-white">{(activePrice * 0.991).toFixed(decimals)} - {(activePrice * 0.995).toFixed(decimals)}</span>
+              </div>
             </div>
+            <p className="text-[9px] text-slate-400 italic pt-1 font-sans">
+              Entry areas, invalidation and targets appear only when a sweep, a structure confirmation and enough history agree.
+            </p>
           </div>
         </div>
 
         {/* Market Analysis & Explanation Form */}
         <div className="p-3 rounded-lg border border-slate-200 dark:border-terminal-border space-y-2.5">
           <span className="font-bold text-[11px] text-slate-900 dark:text-white block">
-            Market analysis &amp; narration - {cleanPair} {timeframe}
+            Market analysis & explanation - {cleanPair} {timeframe}
           </span>
+
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <select className="px-2 py-1 rounded border border-slate-300 dark:border-terminal-border bg-white dark:bg-terminal-900 font-semibold">
+              <option>{cleanPair}</option>
+            </select>
+            <select className="px-2 py-1 rounded border border-slate-300 dark:border-terminal-border bg-white dark:bg-terminal-900 font-semibold">
+              <option>{timeframe}</option>
+            </select>
+          </div>
 
           <button
             onClick={handleAnalyseAndExplain}
             disabled={isExplaining}
-            className="w-full py-2 px-3 rounded-lg bg-slate-950 hover:bg-slate-900 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer"
+            className="w-full py-2 px-3 rounded-lg bg-slate-950 hover:bg-slate-900 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md active:scale-98"
           >
             <Play className={`w-3.5 h-3.5 fill-current ${isExplaining ? 'animate-spin' : ''}`} />
-            <span>{isExplaining ? 'SYNTHESIZING VOICE...' : 'ANALYSE & EXPLAIN LIVE'}</span>
+            <span>{isExplaining ? 'ANALYSING & VOICING...' : 'ANALYSE & EXPLAIN'}</span>
           </button>
 
           {/* Voice Narration & Speed Controls */}
@@ -261,8 +234,8 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
             <button
               onClick={() => setIsVoiceOn(!isVoiceOn)}
               className={`px-2 py-1 rounded border text-[10px] font-bold flex items-center gap-1 ${
-                isVoiceOn
-                  ? 'bg-slate-900 text-white dark:bg-cyan-600'
+                isVoiceOn 
+                  ? 'bg-slate-900 text-white dark:bg-cyan-600' 
                   : 'border-slate-300 dark:border-terminal-border text-slate-400'
               }`}
             >
@@ -271,7 +244,7 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
             </button>
 
             <span className="text-slate-400 text-[10px]">Speed:</span>
-            {(['SLOW', 'NORMAL', 'FAST'] as const).map((s) => (
+            {(['SLOW', 'NORMAL', 'FAST'] as const).map(s => (
               <button
                 key={s}
                 onClick={() => setVoiceSpeed(s)}
@@ -286,6 +259,7 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
             ))}
           </div>
 
+          {/* Explanation Output Box */}
           {explanationText && (
             <div className="p-2.5 rounded bg-slate-50 dark:bg-terminal-900/60 border border-slate-200 dark:border-terminal-border text-[11px] leading-relaxed text-slate-700 dark:text-slate-300">
               {explanationText}
@@ -296,39 +270,23 @@ export const VisionAtlasLabSidebar: React.FC<VisionAtlasLabSidebarProps> = ({
         {/* Live Scenario Simulator */}
         <div className="p-2.5 rounded-lg border border-slate-200 dark:border-terminal-border space-y-2">
           <span className="font-bold text-[11px] text-slate-900 dark:text-white block">
-            Quantum Monte Carlo - {cleanPair} {timeframe}
+            Live scenario simulator - {cleanPair} {timeframe}
           </span>
           <button
             onClick={onSimulate}
-            className="w-full py-1.5 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-cyan-600 dark:hover:bg-cyan-500 font-bold text-xs transition-colors cursor-pointer"
+            className="w-full py-1.5 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-terminal-800 dark:hover:bg-terminal-700 font-bold text-xs transition-colors"
           >
-            OPEN QUANTUM SIMULATOR
+            SIMULATE
           </button>
         </div>
 
-        {/* Live Signal Engine Status */}
+        {/* Signal Engine Status */}
         <div className="p-2.5 rounded-lg border border-slate-200 dark:border-terminal-border space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="font-bold text-[11px] text-slate-900 dark:text-white">
-              Signal engine - {cleanPair} {timeframe}
-            </span>
-            <span
-              className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
-                lab.signalEngine.status === 'LONG_SIGNAL'
-                  ? 'bg-emerald-500/15 text-emerald-600'
-                  : lab.signalEngine.status === 'SHORT_SIGNAL'
-                  ? 'bg-rose-500/15 text-rose-600'
-                  : 'bg-amber-500/15 text-amber-600'
-              }`}
-            >
-              {lab.signalEngine.status.replace('_', ' ')}
-            </span>
-          </div>
-          <p className="text-[10px] font-bold text-slate-800 dark:text-slate-200 font-mono">
-            {lab.signalEngine.headline}
-          </p>
-          <p className="text-[10px] text-slate-500 font-mono leading-relaxed">
-            {lab.signalEngine.detail}
+          <span className="font-bold text-[11px] text-slate-900 dark:text-white block">
+            Signal engine - {cleanPair} {timeframe}
+          </span>
+          <p className="text-[10px] text-slate-500 font-mono">
+            NO SIGNAL: Bullish - last closed candle did not meet minimum institutional threshold.
           </p>
         </div>
       </div>

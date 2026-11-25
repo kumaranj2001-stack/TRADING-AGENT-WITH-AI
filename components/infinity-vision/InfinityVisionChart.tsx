@@ -35,7 +35,6 @@ import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstrai
 import { ensureDefaultChartPluginsRegistered } from '@/lib/chartjs/registerDefaultPlugins';
 import { chartPluginRegistry } from '@/lib/chartjs/ChartPluginRegistry';
 import {
-  TradePlanOverlayState,
   ChartUserDrawing,
   QriChartJsPluginData,
 } from '@/lib/chartjs/types';
@@ -67,7 +66,6 @@ export interface InfinityVisionChartProps {
   latencyMs?: number;
   isInterrupted?: boolean;
   indicatorSettings?: Record<string, boolean>;
-  tradePlanOverlay?: TradePlanOverlayState;
   onReconnect?: () => void;
   onSelectZone?: (zoneName: string) => void;
 }
@@ -89,7 +87,6 @@ export const InfinityVisionChart: React.FC<InfinityVisionChartProps> = ({
   latencyMs = 12,
   isInterrupted = false,
   indicatorSettings = {},
-  tradePlanOverlay,
   onReconnect,
 }) => {
   const isLight = theme === 'light';
@@ -327,7 +324,6 @@ export const InfinityVisionChart: React.FC<InfinityVisionChartProps> = ({
       },
       drawings: drawnElements,
       inProgressDrawing,
-      tradePlan: tradePlanOverlay,
     };
 
     (chart.options.plugins as any).qriContext = qriContext;
@@ -361,7 +357,6 @@ export const InfinityVisionChart: React.FC<InfinityVisionChartProps> = ({
     horizonCandles,
     drawnElements,
     inProgressDrawing,
-    tradePlanOverlay,
   ]);
 
   // Interactive Canvas Drawing Coordinate Conversion (Bound directly to Chart.js Scales)

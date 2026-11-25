@@ -118,24 +118,6 @@ export interface ChartIndicatorReadings {
   stochD?: number;
 }
 
-export interface ChartFundamentalReadings {
-  trailingPE?: number;
-  forwardPE?: number;
-  priceToBook?: number;
-  priceToSales?: number;
-  roe?: number;
-  roic?: number;
-  debtToEquity?: number;
-  revenueGrowthYoY?: number;
-  epsGrowthYoY?: number;
-  operatingMargin?: number;
-  grossMargin?: number;
-  netMargin?: number;
-  marketCap?: number;
-  tvRecommendAll?: number; // -1.0 to +1.0
-  sector?: string;
-}
-
 export interface ChartOHLCVBar {
   timestamp: number;
   time: string;
@@ -162,7 +144,6 @@ export interface ChartLiveContext {
   currency?: string;
   activeIndicators: string[];
   indicatorReadings: ChartIndicatorReadings;
-  fundamentalReadings?: ChartFundamentalReadings;
   recentCandles?: ChartOHLCVBar[];
   source: 'CHART_WIDGET_EVENT' | 'TRADINGVIEW_SCANNER' | 'YAHOO_FINANCE' | 'SYNTHETIC_FALLBACK';
   timestamp: number;

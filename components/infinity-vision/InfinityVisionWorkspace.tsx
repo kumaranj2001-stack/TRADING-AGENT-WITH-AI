@@ -18,15 +18,11 @@ import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstrai
 import { MarketSessionManager } from '@/lib/marketSessionManager';
 import { visionSystemLogger } from '@/lib/visionSystemLogger';
 import { VisionAtlasWebSocketClient } from '@/lib/visionAtlasWebSocket';
-import { ResearchReportSnapshot } from '@/lib/research/types';
-import { formatAssetPrice, liveChartTelemetryService } from '@/lib/research/LiveChartTelemetryService';
 
 export interface InfinityVisionWorkspaceProps {
   pair: CurrencyPair;
   timeframe: TimeFrame;
   candles?: Candle[];
-  sharedReport?: ResearchReportSnapshot | null;
-  onReportGenerated?: (report: ResearchReportSnapshot) => void;
   onSelectPair?: (p: CurrencyPair) => void;
   onSelectTimeframe?: (tf: TimeFrame) => void;
   onClose?: () => void;
@@ -46,8 +42,6 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
   pair: initialPair = 'XAU/USD',
   timeframe: initialTf = '15m',
   candles: initialCandles = [],
-  sharedReport,
-  onReportGenerated,
   onSelectPair,
   onSelectTimeframe,
   onClose,
@@ -97,14 +91,7 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
   const [isLiquidityOpen, setIsLiquidityOpen] = useState<boolean>(false);
   const [isIndicatorsOpen, setIsIndicatorsOpen] = useState<boolean>(false);
   const [activeRightSidebarMode, setActiveRightSidebarMode] = useState<'scenarios' | 'market_dna' | 'vision_atlas'>('scenarios');
-  const [horizonCandles, setHorizonCandles] = useState<number>(10);
-
-  // Unified AI Multi-Agent Research Engine State (100% synchronized with Chart.js Vision Atlas)
-  const [researchReport, setResearchReport] = useState<ResearchReportSnapshot | null>(sharedReport || null);
-  const [isRunningResearch, setIsRunningResearch] = useState<boolean>(false);
-  const [isSubScoresOpen, setIsSubScoresOpen] = useState<boolean>(false);
-  const [showPdfModal, setShowPdfModal] = useState<boolean>(false);
-  const [pdfHtml, setPdfHtml] = useState<string>('');
+  const [horizonCandles, setHorizonCandles] = useState<number>(5);
 
   // 🧭 Bi-directional Control Panel Indicator Overlays State
   const [indicatorSettings, setIndicatorSettings] = useState<Record<string, boolean>>({
@@ -223,101 +210,6 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
     LiveMarketFeedManager.startLiveFeed(selectedPair, selectedTf, 1000);
     setIsInterrupted(false);
   };
-
-  // Run Synchronized 5-Agent Research Engine Analysis for active Vision Atlas pair & timeframe
-  const runSynchronizedResearch = async (sym: string = selectedPair, tf: string = selectedTf) => {
-    setIsRunningResearch(true);
-    try {
-      const resolved = liveChartTelemetryService.resolveSymbol(sym);
-      const recent = (liveCandles || []).slice(-60);
-      const latestBar = recent[recent.length - 1];
-      const spot = livePrice || latestBar?.close || 100;
-      const prev = recent[0]?.open || spot;
-      const chartContext =
-        recent.length > 0
-          ? {
-              symbol: resolved.symbol,
-              tvSymbol: resolved.tvSymbol,
-              name: resolved.name,
-              timeframe: tf,
-              livePrice: spot,
-              open: latestBar?.open || spot,
-              high: Math.max(...recent.map((b) => b.high)),
-              low: Math.min(...recent.map((b) => b.low)),
-              close: spot,
-              prevClose: prev,
-              volume: latestBar?.volume || 100000,
-              changePercent: prev > 0 ? Number((((spot - prev) / prev) * 100).toFixed(2)) : 0,
-              currency: resolved.currency,
-              activeIndicators: ['EMA20', 'EMA50', 'RSI14', 'MACD', 'BB', 'ATR', 'VisionAtlas'],
-              indicatorReadings: {},
-              recentCandles: recent.map((c) => ({
-                timestamp: typeof c.timestamp === 'number' ? c.timestamp : new Date(c.time).getTime(),
-                time: typeof c.time === 'string' ? c.time : new Date(c.time * 1000).toISOString(),
-                open: c.open,
-                high: c.high,
-                low: c.low,
-                close: c.close,
-                volume: c.volume ?? 0,
-              })),
-              source: 'CHART_WIDGET_EVENT' as const,
-              timestamp: Date.now(),
-            }
-          : undefined;
-
-      const res = await fetch('/api/research/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbol: resolved.symbol,
-          timeframe: tf,
-          chartContext,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.report) {
-          setResearchReport(data.report);
-          onReportGenerated?.(data.report);
-        }
-      }
-    } catch (err) {
-      console.error('Vision Atlas Research sync failed:', err);
-    } finally {
-      setIsRunningResearch(false);
-    }
-  };
-
-  const handleOpenVisionPdf = async () => {
-    try {
-      const targetSym = liveChartTelemetryService.resolveSymbol(selectedPair).symbol;
-      const res = await fetch('/api/research/report-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbol: targetSym,
-          timeframe: selectedTf,
-          chartContext: researchReport?.brief?.chartContext,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPdfHtml(data.html);
-        setShowPdfModal(true);
-      }
-    } catch (err) {
-      console.error('Vision Atlas PDF generation failed:', err);
-    }
-  };
-
-  useEffect(() => {
-    const canonical = liveChartTelemetryService.resolveSymbol(selectedPair).symbol;
-    if (sharedReport && sharedReport.symbol === canonical && (!researchReport || sharedReport.timestamp >= researchReport.timestamp)) {
-      setResearchReport(sharedReport);
-      return;
-    }
-    runSynchronizedResearch(selectedPair, selectedTf);
-  }, [selectedPair, selectedTf, sharedReport]);
 
   // Derived price metrics & spreads calculated with exact decimal parity
   const isIndianIndex = selectedPair === 'NIFTY 50' || selectedPair === 'BANK NIFTY';
@@ -525,74 +417,6 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
         theme={theme}
       />
 
-      {/* 🤖 SYNCHRONIZED AI MULTI-AGENT RESEARCH ENGINE BAR (25 Sub-Scores & 6-Page PDF Inside Vision Atlas) */}
-      <div className="px-3 py-1.5 border-b border-slate-200 dark:border-terminal-border bg-white/80 dark:bg-terminal-900/90 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 font-bold border border-cyan-500/30">
-            AI RESEARCH SYNC: {researchReport ? `${researchReport.compositeScore}/100 • GRADE ${researchReport.grade}` : isRunningResearch ? 'COMPUTING...' : 'STANDBY'}
-          </span>
-          {researchReport && (
-            <>
-              <span className="text-slate-600 dark:text-slate-300">
-                Tech <strong>{researchReport.technical.totalScore}</strong> • Fund <strong>{researchReport.fundamental.totalScore}</strong> • Sent <strong>{researchReport.sentiment.totalScore}</strong> • Risk <strong>{researchReport.risk.totalScore}</strong> • Thesis <strong>{researchReport.thesis.totalScore}</strong>
-              </span>
-              <span className="hidden xl:inline text-emerald-600 dark:text-emerald-400">
-                | Entry {formatAssetPrice(researchReport.technical.tradePlan.entryZone.min, researchReport.assetClass, researchReport.symbol)} • SL {formatAssetPrice(researchReport.technical.tradePlan.stopLoss.price, researchReport.assetClass, researchReport.symbol)} • TP1 {formatAssetPrice(researchReport.technical.tradePlan.target1.price, researchReport.assetClass, researchReport.symbol)}
-              </span>
-            </>
-          )}
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => setIsSubScoresOpen((v) => !v)}
-            className="px-2.5 py-1 rounded border border-slate-300 dark:border-terminal-border hover:bg-slate-100 dark:hover:bg-terminal-800 text-[10px] font-bold cursor-pointer"
-          >
-            {isSubScoresOpen ? 'Hide 25 Sub-Scores' : '25 Sub-Scores & Thesis'}
-          </button>
-          <button
-            onClick={() => runSynchronizedResearch(selectedPair, selectedTf)}
-            disabled={isRunningResearch}
-            className="px-2.5 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[10px] font-bold disabled:opacity-50 cursor-pointer"
-          >
-            {isRunningResearch ? 'Running...' : 'Run AI Audit'}
-          </button>
-          <button
-            onClick={handleOpenVisionPdf}
-            className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold cursor-pointer"
-          >
-            6-Page PDF
-          </button>
-        </div>
-      </div>
-
-      {/* Expandable 25 Sub-Scores & Executive Thesis Panel inside Vision Atlas */}
-      {isSubScoresOpen && researchReport && (
-        <div className="p-3 border-b border-slate-200 dark:border-terminal-border bg-slate-50 dark:bg-terminal-950/95 space-y-2 text-[11px] font-mono">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <strong className="text-cyan-700 dark:text-cyan-300">
-              {researchReport.symbol} ({researchReport.assetClass}) Executive Thesis:
-            </strong>
-            <span className="text-slate-600 dark:text-slate-300">
-              {researchReport.gradeDescription}
-            </span>
-          </div>
-          <p className="text-slate-700 dark:text-slate-300 font-sans text-[11px] leading-snug">
-            {researchReport.thesis.executiveThesis}
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-5 gap-1.5 pt-1">
-            {researchReport.all25SubScores.map((sub, i) => (
-              <div key={i} className="px-2 py-1 rounded border border-slate-200 dark:border-terminal-border bg-white dark:bg-terminal-900 flex items-center justify-between text-[10px]">
-                <span className="truncate text-slate-600 dark:text-slate-300" title={`${sub.agent}: ${sub.label}`}>
-                  {sub.category}
-                </span>
-                <strong className="text-cyan-600 dark:text-cyan-400 shrink-0 ml-1">{sub.score}/20</strong>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* 🧭 MAIN BODY: Real-Time Streaming Chart + Fluid Dynamic Drawers */}
       <div className="flex-1 flex min-h-[500px] relative overflow-hidden">
         {/* Left Floating Quantum Vision Drawer */}
@@ -601,13 +425,7 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
           onClose={() => setIsQuantumVisionOpen(false)}
           horizonCandles={horizonCandles}
           onChangeHorizon={setHorizonCandles}
-          onViewChartMode={setChartType}
           theme={theme}
-          pair={selectedPair}
-          timeframe={selectedTf}
-          livePrice={livePrice}
-          candles={liveCandles}
-          researchReport={researchReport}
         />
 
         {/* Center Floating Liquidity Heatmap Window */}
@@ -617,9 +435,6 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
           pair={selectedPair}
           timeframe={selectedTf}
           theme={theme}
-          livePrice={livePrice}
-          candles={liveCandles}
-          researchReport={researchReport}
         />
 
         {/* 📈 Central High-Frequency Chart.js Streaming Container (Modular Vision Atlas Plugins) */}
@@ -640,20 +455,6 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
             latencyMs={liveLatencyMs}
             isInterrupted={isInterrupted}
             indicatorSettings={indicatorSettings}
-            tradePlanOverlay={
-              researchReport
-                ? {
-                    enabled: true,
-                    currency: researchReport.brief.pricing.currency,
-                    entryMin: researchReport.technical.tradePlan.entryZone.min,
-                    entryMax: researchReport.technical.tradePlan.entryZone.max,
-                    stopLoss: researchReport.technical.tradePlan.stopLoss.price,
-                    target1: researchReport.technical.tradePlan.target1.price,
-                    target2: researchReport.technical.tradePlan.target2.price,
-                    invalidationLevel: researchReport.thesis.invalidationTrigger.priceLevel,
-                  }
-                : undefined
-            }
             onReconnect={handleReconnect}
           />
         </div>
@@ -695,9 +496,6 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
               pair={selectedPair}
               timeframe={selectedTf}
               theme={theme}
-              livePrice={livePrice}
-              candles={liveCandles}
-              researchReport={researchReport}
               onTogglePatternOnChart={setShowPatternOnChart}
               onToggleChartMode={setChartType}
             />
@@ -708,50 +506,11 @@ export const InfinityVisionWorkspace: React.FC<InfinityVisionWorkspaceProps> = (
               pair={selectedPair}
               timeframe={selectedTf}
               theme={theme}
-              livePrice={livePrice}
-              candles={liveCandles}
-              researchReport={researchReport}
               onSimulate={() => setIsQuantumVisionOpen(true)}
             />
           )}
         </div>
       </div>
-
-      {/* Vision Atlas Integrated 6-Page PDF Report Preview Modal */}
-      {showPdfModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-terminal-900 border border-terminal-border rounded-xl max-w-4xl w-full h-[90vh] flex flex-col shadow-2xl">
-            <div className="p-3 border-b border-terminal-border flex items-center justify-between bg-terminal-950 text-white font-mono text-xs">
-              <span>Vision Atlas Synchronized 6-Page PDF Report // {selectedPair} ({selectedTf.toUpperCase()})</span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    const win = window.open('', '_blank');
-                    if (win) {
-                      win.document.write(pdfHtml);
-                      win.document.close();
-                      win.focus();
-                      setTimeout(() => win.print(), 400);
-                    }
-                  }}
-                  className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white font-bold cursor-pointer"
-                >
-                  Print / Save PDF
-                </button>
-                <button
-                  onClick={() => setShowPdfModal(false)}
-                  className="px-2 py-1 rounded bg-terminal-800 hover:bg-terminal-700 text-slate-300 cursor-pointer"
-                >
-                  ✕ Close
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-auto p-4 bg-white">
-              <iframe srcDoc={pdfHtml} title="Vision Atlas 6-Page Research PDF" className="w-full h-full border-none" />
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 📋 BOTTOM PANEL: Structure Timeline & Sessions & Vision Telemetry Logs */}
       <StructureTimelineBottom

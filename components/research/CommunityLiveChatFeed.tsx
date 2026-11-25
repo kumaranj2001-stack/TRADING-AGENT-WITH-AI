@@ -211,6 +211,18 @@ export const CommunityLiveChatFeed: React.FC<CommunityLiveChatFeedProps> = ({
           >
             {isStreamingActive ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
           </button>
+
+          {/* Trigger 5-Stage Sequential Discovery Pipeline */}
+          {onTriggerAnalysis && (
+            <button
+              onClick={() => onTriggerAnalysis(activeSymbol)}
+              disabled={isAnalyzing}
+              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-md disabled:opacity-50"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${isAnalyzing ? 'animate-spin' : ''}`} />
+              <span>{isAnalyzing ? 'ROUTING THROUGH 5 SUBAGENTS...' : 'SYNTHESIZE FROM CHAT'}</span>
+            </button>
+          )}
         </div>
       </div>
 

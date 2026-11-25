@@ -9,7 +9,6 @@
 
 import {
   AssetClass,
-  ChartFundamentalReadings,
   ChartIndicatorReadings,
   ChartLiveContext,
   ChartOHLCVBar,
@@ -473,7 +472,6 @@ export class LiveChartTelemetryService {
       currency: resolved.currency,
       activeIndicators,
       indicatorReadings,
-      fundamentalReadings: tvData?.fundamentals,
       recentCandles: candles.slice(-80),
       source: tvData ? 'TRADINGVIEW_SCANNER' : yfData.candles.length > 0 ? 'YAHOO_FINANCE' : 'SYNTHETIC_FALLBACK',
       timestamp: now,
@@ -496,7 +494,6 @@ export class LiveChartTelemetryService {
     volume?: number;
     changePercent?: number;
     indicators: ChartIndicatorReadings;
-    fundamentals?: ChartFundamentalReadings;
   } | null> {
     const endpoint = resolved.isIndian
       ? 'https://scanner.tradingview.com/india/scan'
@@ -533,20 +530,6 @@ export class LiveChartTelemetryService {
             `ATR${sfx}`,
             `Stoch.K${sfx}`,
             `Stoch.D${sfx}`,
-            'price_earnings_ttm',
-            'price_book_fq',
-            'price_sales_ratio',
-            'return_on_equity',
-            'return_on_invested_capital',
-            'debt_to_equity',
-            'total_revenue_yoy_growth_ttm',
-            'earnings_per_share_diluted_yoy_growth_ttm',
-            'operating_margin_ttm',
-            'gross_margin_ttm',
-            'net_margin_ttm',
-            'market_cap_basic',
-            'Recommend.All',
-            'sector',
           ],
         }),
         signal: controller.signal,
@@ -565,37 +548,6 @@ export class LiveChartTelemetryService {
       const macdSignal = typeof row[12] === 'number' ? row[12] : undefined;
       const bbUpper = typeof row[13] === 'number' ? row[13] : undefined;
       const bbLower = typeof row[14] === 'number' ? row[14] : undefined;
-      const num = (idx: number) =>
-        typeof row[idx] === 'number' && Number.isFinite(row[idx])
-          ? Number(row[idx].toFixed(2))
-          : undefined;
-      const pe = num(18);
-      const epsG = num(25);
-      const fundamentals: ChartFundamentalReadings = {
-        trailingPE: pe,
-        forwardPE:
-          pe !== undefined
-            ? Number(
-                (pe * (epsG !== undefined && epsG > 0 ? Math.max(0.68, 1 - Math.min(0.28, epsG / 200)) : 0.92)).toFixed(2)
-              )
-            : undefined,
-        priceToBook: num(19),
-        priceToSales: num(20),
-        roe: num(21),
-        roic: num(22),
-        debtToEquity: num(23),
-        revenueGrowthYoY: num(24),
-        epsGrowthYoY: epsG,
-        operatingMargin: num(26),
-        grossMargin: num(27),
-        netMargin: num(28),
-        marketCap: typeof row[29] === 'number' && Number.isFinite(row[29]) ? row[29] : undefined,
-        tvRecommendAll:
-          typeof row[30] === 'number' && Number.isFinite(row[30])
-            ? Number(row[30].toFixed(3))
-            : undefined,
-        sector: typeof row[31] === 'string' && row[31].trim() ? row[31].trim() : undefined,
-      };
 
       return {
         description: typeof row[0] === 'string' ? row[0] : undefined,
@@ -627,7 +579,6 @@ export class LiveChartTelemetryService {
           stochK: typeof row[16] === 'number' ? Number(row[16].toFixed(2)) : undefined,
           stochD: typeof row[17] === 'number' ? Number(row[17].toFixed(2)) : undefined,
         },
-        fundamentals,
       };
     };
 
