@@ -64,6 +64,8 @@ import { preExecutionVerificationEngine } from '@/lib/preExecutionVerificationEn
 import { tradingStore } from '@/lib/tradingStore';
 import { AutonomousEcosystemDashboard } from '@/components/AutonomousEcosystemDashboard';
 import { TradingResearchEngineDashboard } from '@/components/TradingResearchEngineDashboard';
+import { InstitutionalWorkspace } from '@/components/institutional/InstitutionalWorkspace';
+import type { InstitutionalSuiteSection } from '@/lib/institutional/types';
 
 const executionTelemetryEngine = ExecutionTelemetryEngine.getInstance();
 
@@ -1512,6 +1514,32 @@ export default function Home() {
             }}
             onBackToTerminal={() => setActiveTab('terminal')}
             theme={theme}
+          />
+        )}
+
+        {/* Tabs 16-24: Institutional Grade 50-Platform Expansion Suite (Strictly Additive) */}
+        {typeof activeTab === 'string' && activeTab.startsWith('institutional-') && (
+          <InstitutionalWorkspace
+            initialSection={((): InstitutionalSuiteSection => {
+              if (activeTab === 'institutional-microstructure') return 'microstructure';
+              if (activeTab === 'institutional-macro') return 'macro';
+              if (activeTab === 'institutional-pine-screener') return 'screener';
+              if (activeTab === 'institutional-options') return 'options';
+              if (activeTab === 'institutional-crypto') return 'crypto';
+              if (activeTab === 'institutional-alt-data') return 'alt-data';
+              if (activeTab === 'institutional-quant-bots') return 'quant';
+              if (activeTab === 'institutional-risk-audit') return 'risk';
+              return 'execution';
+            })()}
+            selectedPair={selectedPair}
+            timeframe={timeframe}
+            onSelectPair={handleSelectPair}
+            onSyncToDebate={(scenarioNote) => {
+              handleCustomDebatePrompt(scenarioNote);
+              setActiveTab('debate');
+              showNotification('INSTITUTIONAL CONFLUENCE INJECTED: Live institutional brief routed into 8-Agent Debate.');
+            }}
+            onBackToTerminal={() => setActiveTab('terminal')}
           />
         )}
       </main>

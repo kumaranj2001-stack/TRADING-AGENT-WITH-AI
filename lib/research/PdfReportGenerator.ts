@@ -734,6 +734,79 @@ export class PdfReportGenerator {
 </body>
 </html>`;
   }
+
+  /**
+   * Generates a client-ready Institutional Tear Sheet HTML combining macro fundamentals,
+   * GEX Zero-Gamma regime, execution slippage, alternative alpha, and cryptographic audit metrics
+   * without modifying the existing 6-page Research Engine PDF report template.
+   */
+  public static generateInstitutionalTearSheetHtml(params: {
+    symbol: string;
+    spotPrice: number;
+    compositeBias: string;
+    zeroGammaFlip: number;
+    slippageBps: number;
+    altAlphaScore: number;
+    darwinScore: number;
+    twrrPct: number;
+    auditHash: string;
+    bulletHighlights: string[];
+  }): string {
+    const dateStr = new Date().toISOString().split('T')[0];
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>QRI Institutional Tear Sheet - ${params.symbol}</title>
+  <style>
+    @page { size: A4; margin: 14mm; }
+    body { font-family: Inter, system-ui, sans-serif; color: #0f172a; margin: 0; padding: 24px; background: #fff; font-size: 12px; }
+    .hdr { border-bottom: 3px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+    .kpi { border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; background: #f8fafc; }
+    .kpi-lbl { font-size: 10px; text-transform: uppercase; color: #475569; font-weight: 700; }
+    .kpi-val { font-size: 16px; font-weight: 800; margin-top: 4px; color: #020617; }
+    .sec { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+    .sec-t { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #0369a1; font-weight: 800; margin-bottom: 8px; }
+    ul { margin: 0; padding-left: 18px; line-height: 1.7; }
+    .foot { margin-top: 20px; border-top: 1px solid #cbd5e1; padding-top: 10px; font-size: 10px; color: #64748b; display: flex; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <div class="hdr">
+    <div>
+      <div style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:#0284c7;">QRI TRADER // INSTITUTIONAL CLIENT TEAR SHEET</div>
+      <h1 style="margin:4px 0 0 0;font-size:22px;">${params.symbol} Quantitative Executive Tear Sheet</h1>
+    </div>
+    <div style="text-align:right;font-family:monospace;">
+      <div><strong>SPOT:</strong> ${params.spotPrice}</div>
+      <div><strong>BIAS:</strong> ${params.compositeBias}</div>
+      <div><strong>DATE:</strong> ${dateStr}</div>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="kpi"><div class="kpi-lbl">Verified TWRR</div><div class="kpi-val">+${params.twrrPct}%</div></div>
+    <div class="kpi"><div class="kpi-lbl">Zero Gamma Flip</div><div class="kpi-val">${params.zeroGammaFlip}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Alt-Data Alpha</div><div class="kpi-val">${params.altAlphaScore}/100</div></div>
+    <div class="kpi"><div class="kpi-lbl">L2 Modeled Slippage</div><div class="kpi-val">${params.slippageBps} bps</div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-t">Cross-Platform Institutional Confluence Signals</div>
+    <ul>
+      ${params.bulletHighlights.map((b) => `<li>${b}</li>`).join('')}
+    </ul>
+  </div>
+  <div class="sec">
+    <div class="sec-t">VaR Risk Normalization & Cryptographic Audit Chain</div>
+    <p>DARWIN-Normalised Strategy Score: <strong>${params.darwinScore}/100</strong> • SHA-256 Audit Ledger Head: <code>${params.auditHash}</code></p>
+  </div>
+  <div class="foot">
+    <span>MT5 & FIX 4.4 EXECUTION BRIDGE SYNCHRONIZED</span>
+    <span>AUDIT VERIFIED • QRI INSTITUTIONAL SUITE</span>
+  </div>
+</body>
+</html>`;
+  }
 }
 
 export const pdfReportGenerator = PdfReportGenerator;

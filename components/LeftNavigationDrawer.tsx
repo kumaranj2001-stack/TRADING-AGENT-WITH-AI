@@ -411,6 +411,159 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
         window.scrollTo({ top: 0, behavior: 'smooth' });
       },
     },
+    {
+      id: 'institutional-execution',
+      number: '16',
+      label: 'FIX Bridge & DOM',
+      description: 'L2 Slippage, DOM Ladder, MT5 GA & cTrader C# IDE',
+      icon: Layers,
+      color: 'text-emerald-400',
+      activeBg: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-semibold',
+      isActive: activeTab === 'institutional-execution' || activeTab === 'institutional-suite',
+      badge: 'FIX 4.4',
+      badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+      action: () => {
+        setActiveTab('institutional-execution');
+        onClose();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+    },
+    {
+      id: 'institutional-microstructure',
+      number: '17',
+      label: 'Microstructure & Bookmap',
+      description: 'TPO Profile, Footprint, Icebergs, C++ ACSIL & Liquidations',
+      icon: BarChart2,
+      color: 'text-orange-400',
+      activeBg: 'bg-orange-500/15 border-orange-500/40 text-orange-300 font-semibold',
+      isActive: activeTab === 'institutional-microstructure',
+      badge: 'TPO/L2',
+      badgeColor: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+      action: () => {
+        setActiveTab('institutional-microstructure');
+        onClose();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+    },
+    {
+      id: 'institutional-macro',
+      number: '18',
+      label: 'Macro & Bonds Desk',
+      description: 'OTC Bonds, Supply Chain, StarMine, CDS & Ratio Formula',
+      icon: Compass,
+      color: 'text-cyan-400',
+      activeBg: 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300 font-semibold',
+      isActive: activeTab === 'institutional-macro',
+      badge: 'BLOOMBERG',
+      badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+      action: () => {
+        setActiveTab('institutional-macro');
+        onClose();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+    },
+    {
+      id: 'institutional-pine-screener',
+      number: '19',
+      label: 'Pine v5 & Squawk Desk',
+      description: 'Pine v5 IDE, Bar Replay, Holly AI, RVOL & Audio Squawk',
+      icon: Radio,
+      color: 'text-rose-400',
+      activeBg: 'bg-rose-500/15 border-rose-500/40 text-rose-300 font-semibold',
+      isActive: activeTab === 'institutional-pine-screener',
+      badge: 'PINE V5',
+      badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+      action: () => {
+        setActiveTab('institutional-pine-screener');
+        onClose();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+    },
+    {
+      id: 'institutional-options',
+      number: '20',
+      label: 'Options & GEX Surface',
+      description: 'Vol Surface, Zero Gamma Flip, Dark Pool & thinkBack',
+      icon: TrendingUp,
+      color: 'text-indigo-400',
+      activeBg: 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300 font-semibold',
+      isActive: activeTab === 'institutional-options',
+      badge: 'GAMMA/IV',
+      badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+      action: () => {
+        setActiveTab('institutional-options');
+        onClose();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+    },
+    {
+      id: 'institutional-crypto',
+      number: '21',
+      label: 'Crypto On-Chain & SQL',
+      description: 'SOPR, Smart Money, Funding Arb, L3 Book & Dune SQL',
+      icon: Database,
+      color: 'text-amber-400',
+      activeBg: 'bg-amber-500/15 border-amber-500/40 text-amber-300 font-semibold',
+      isActive: activeTab === 'institutional-crypto',
+      badge: 'ON-CHAIN',
+      badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+      action: () => {
+        setActiveTab('institutional-crypto');
+        onClose();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+    },
+    {
+      id: 'institutional-alt-data',
+      number: '22',
+      label: 'Alt Data & RavenPack',
+      description: 'ESG/Geo NLP, Satellite Parking, Card Spend & Hiring',
+      icon: Radar,
+      color: 'text-teal-400',
+      activeBg: 'bg-teal-500/15 border-teal-500/40 text-teal-300 font-semibold',
+      isActive: activeTab === 'institutional-alt-data',
+      badge: 'ALT-ALPHA',
+      badgeColor: 'bg-teal-500/20 text-teal-300 border-teal-500/30',
+      action: () => {
+        setActiveTab('institutional-alt-data');
+        onClose();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+    },
+    {
+      id: 'institutional-quant-bots',
+      number: '23',
+      label: 'Quant Lab & Webhook Bots',
+      description: 'Tick Backtest, AFL, Symphonies, MT5 Webhooks & DCA/Grid',
+      icon: Cpu,
+      color: 'text-purple-400',
+      activeBg: 'bg-purple-500/15 border-purple-500/40 text-purple-300 font-semibold',
+      isActive: activeTab === 'institutional-quant-bots',
+      badge: 'ALGO LAB',
+      badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+      action: () => {
+        setActiveTab('institutional-quant-bots');
+        onClose();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+    },
+    {
+      id: 'institutional-risk-audit',
+      number: '24',
+      label: 'MAE/MFE, DARWIN & Audit',
+      description: 'Tilt Meter, Monte Carlo, SHA-256 Audit, VaR & ZuluGuard',
+      icon: Shield,
+      color: 'text-emerald-400',
+      activeBg: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-semibold',
+      isActive: activeTab === 'institutional-risk-audit',
+      badge: 'AUDIT',
+      badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+      action: () => {
+        setActiveTab('institutional-risk-audit');
+        onClose();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+    },
   ];
 
   return (

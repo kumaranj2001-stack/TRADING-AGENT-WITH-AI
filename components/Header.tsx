@@ -254,6 +254,28 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>AI Research</span>
               </button>
             )}
+
+            {/* Additive 50-Platform Institutional Suite Entry */}
+            {setActiveTab && (
+              <button
+                onClick={() =>
+                  setActiveTab(
+                    typeof activeTab === 'string' && activeTab.startsWith('institutional-')
+                      ? 'terminal'
+                      : 'institutional-suite'
+                  )
+                }
+                className={`px-2.5 sm:px-3 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm shrink-0 ${
+                  typeof activeTab === 'string' && activeTab.startsWith('institutional-')
+                    ? 'bg-gradient-to-r from-emerald-500 to-cyan-600 text-slate-950 border-transparent font-extrabold shadow-md'
+                    : 'bg-terminal-800 hover:bg-terminal-700 text-emerald-300 border-emerald-500/40 hover:text-white'
+                }`}
+                title="Open Institutional Execution, Options GEX, On-Chain SQL, Pine v5, Alt Data & Audit Suite"
+              >
+                <Cpu className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Institutional Suite</span>
+              </button>
+            )}
           </div>
 
           {/* Right: Swarm Synchronizer, Risk Settings, and Dark/Light Mode */}
@@ -400,6 +422,26 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Bot className="w-3.5 h-3.5 text-indigo-400" />
               <span>Research</span>
+            </button>
+          )}
+
+          {setActiveTab && (
+            <button
+              onClick={() =>
+                setActiveTab(
+                  typeof activeTab === 'string' && activeTab.startsWith('institutional-')
+                    ? 'terminal'
+                    : 'institutional-suite'
+                )
+              }
+              className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1 transition-all shadow-sm shrink-0 ${
+                typeof activeTab === 'string' && activeTab.startsWith('institutional-')
+                  ? 'bg-emerald-500 text-slate-950 border-transparent font-extrabold shadow-sm'
+                  : 'bg-terminal-800 hover:bg-terminal-700 text-emerald-300 border-emerald-500/40 hover:text-white'
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Suite</span>
             </button>
           )}
         </div>

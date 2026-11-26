@@ -57,7 +57,17 @@ export type NavigationTab =
   | 'scalping'             // 15. Scalping (Ultra-Low Latency Scalp Hunter & Precision Desk)
   | 'sequential-pipeline'  // 16. Seven-Stage Deterministic Sequential Pipeline
   | 'pipeline'            // 16. Pipeline alias
-  | 'ecosystem';           // 00. Five-Layer Autonomous AI Ecosystem & Directed State Graph
+  | 'ecosystem'           // 00. Five-Layer Autonomous AI Ecosystem & Directed State Graph
+  | 'institutional-suite' // 17. Institutional Suite Master Hub (50-Platform Upgrade)
+  | 'institutional-execution'      // 18. FIX 4.4 / MT5 DOM, SmartRouter & cTrader C# IDE
+  | 'institutional-microstructure' // 19. Bookmap Heatmap, TPO, Footprint, C++ & Tape
+  | 'institutional-macro'          // 20. OTC Bonds, Supply Chain, StarMine & Custom Ratios
+  | 'institutional-pine-screener'  // 21. Pine v5 Compiler, Bar Replay, Holly AI & Squawk
+  | 'institutional-options'        // 22. Options Surface, GEX Zero-Gamma, Dark Pool & flow
+  | 'institutional-crypto'         // 23. Crypto SOPR, Smart Money, Funding Arb & Dune SQL
+  | 'institutional-alt-data'       // 24. ESG/Geo NLP, Satellite Parking & RavenPack Taxonomy
+  | 'institutional-quant-bots'     // 25. Tick Backtest, AFL, Symphonies, Webhook & Grid Bots
+  | 'institutional-risk-audit';    // 26. MAE/MFE, Tilt Meter, DARWIN VaR & ZuluGuard
 
 export type TimeFrame = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
 
