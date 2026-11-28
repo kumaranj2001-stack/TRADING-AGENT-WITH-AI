@@ -43,16 +43,19 @@ export async function POST(req: NextRequest) {
         const sideChoice: 'BUY' | 'SELL' | 'HOLD' =
           rawOrderType === 'BUY_MARKET' ? 'BUY' : rawOrderType === 'SELL_MARKET' ? 'SELL' : 'HOLD';
 
+        riskManager.setConfig({
+          accountBalance: currentEquity,
+          currentDailyDrawdownPercent: currentDrawdownPct,
+        });
+
         const risk = riskManager.evaluateTrade(
-          sideChoice,
-          consensus.overallConfidence,
-          barClose,
-          consensus.agents.risk.parameters.stopLoss,
-          consensus.agents.risk.parameters.takeProfit1,
-          currentDrawdownPct,
           pair,
-          currentEquity,
-          spreadPips
+          barClose,
+          consensus.agents.technical,
+          consensus.agents.fundamental,
+          consensus.agents.forex,
+          consensus.agents.news,
+          sideChoice
         );
 
         return {

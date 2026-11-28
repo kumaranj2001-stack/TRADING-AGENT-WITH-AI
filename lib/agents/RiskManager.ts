@@ -520,3 +520,7 @@ export class RiskManagerAgent extends BaseAgent {
     };
   }
 }
+
+// Export RiskManager alias for backwards-compatibility across routes
+export const RiskManager = RiskManagerAgent;
+
