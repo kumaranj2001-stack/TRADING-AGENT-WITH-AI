@@ -18,6 +18,48 @@ export function seededUnit(seedKey: string): number {
   return Number.isFinite(normalized) ? normalized : 0.5;
 }
 
+export type InstitutionalAssetClass =
+  | 'METALS_COMMODITIES'
+  | 'FOREX'
+  | 'CRYPTO'
+  | 'INDIAN_EQUITY_INDEX'
+  | 'US_EQUITY';
+
+/**
+ * Classifies any symbol accurately so institutional modules never template Spot Gold or FX
+ * into corporate semiconductor equities or corporate unsecured debt.
+ */
+export function classifyInstitutionalAsset(rawSymbol: string): InstitutionalAssetClass {
+  const sym = (rawSymbol || 'XAU/USD').trim().toUpperCase();
+  if (
+    sym.includes('XAU') ||
+    sym.includes('XAG') ||
+    sym.includes('WTI') ||
+    sym.includes('BRENT') ||
+    sym.includes('OIL') ||
+    sym.includes('COPPER')
+  ) {
+    return 'METALS_COMMODITIES';
+  }
+  if (sym.includes('BTC') || sym.includes('ETH') || sym.includes('SOL') || sym.includes('XRP')) {
+    return 'CRYPTO';
+  }
+  if (
+    sym.includes('NIFTY') ||
+    sym.includes('SENSEX') ||
+    sym.includes('INR') ||
+    sym === 'RELIANCE' ||
+    sym === 'TCS' ||
+    sym === 'HDFCBANK'
+  ) {
+    return 'INDIAN_EQUITY_INDEX';
+  }
+  if (sym.includes('/')) {
+    return 'FOREX';
+  }
+  return 'US_EQUITY';
+}
+
 export function seededRange(seedKey: string, min: number, max: number): number {
   return min + seededUnit(seedKey) * (max - min);
 }

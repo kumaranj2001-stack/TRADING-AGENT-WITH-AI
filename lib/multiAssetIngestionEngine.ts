@@ -6,6 +6,7 @@ import {
 } from './types';
 import { BASE_PRICES, PIP_VALUES, FOREX_PAIRS, METALS_COMMODITIES, INDIAN_MARKET_ASSETS } from './marketData';
 import { MarketSessionManager } from './marketSessionManager';
+import { LiveMarketFeedManager } from './liveMarketFeed';
 
 export interface FIXMarketDataMessage {
   msgType: '35=W' | '35=X'; // MarketDataSnapshot / MarketDataIncrementalRefresh
@@ -249,15 +250,9 @@ export class MultiAssetIngestionEngine {
       const allSymbols = Array.from(this.latestNormalizedTicks.keys());
       for (const sym of allSymbols) {
         if (MarketSessionManager.isMarketFrozen(sym)) continue;
-        const current = this.latestNormalizedTicks.get(sym);
-        if (!current) continue;
-
-        // Minor stochastic tick jitter to simulate institutional liquidity flow
-        const pipMul = current.pipMultiplier;
-        const jitter = (Math.random() - 0.5) * 1.5 * pipMul;
-        const nextPrice = Number((current.midPrice + jitter).toFixed(current.decimals));
-        const protocol: 'FIX_5_0_SP2' | 'WSS_DIRECT' = Math.random() > 0.5 ? 'FIX_5_0_SP2' : 'WSS_DIRECT';
-        this.ingestTick(sym, nextPrice, protocol);
+        const authoritative = LiveMarketFeedManager.getCanonicalPrice(sym);
+        if (!authoritative || !Number.isFinite(authoritative) || authoritative <= 0) continue;
+        this.ingestTick(sym, authoritative, 'WSS_DIRECT');
       }
     }, intervalMs);
 

@@ -748,7 +748,7 @@ export const AgentSwarmPanel: React.FC<AgentSwarmPanelProps> = ({
                   risk.verdict === 'DYNAMIC_TIER_APPROVED' ? 'text-amber-400' : 'text-rose-400'
                 }`}>
                   <ShieldAlert className="w-4 h-4" />
-                  {risk.verdict === 'DYNAMIC_TIER_APPROVED' ? 'DYNAMIC SIZING OVERRIDE (ZERO-VETO ENFORCED):' : 'VETO ACTIVE:'}
+                  {risk.verdict === 'DYNAMIC_TIER_APPROVED' ? 'DYNAMIC RISK TIER ADJUSTMENT:' : 'HARD RISK VETO ACTIVE:'}
                 </span>
                 {risk.vetoReasons.map((v, i) => (
                   <p key={i} className="leading-relaxed">• {v}</p>
@@ -767,14 +767,19 @@ export const AgentSwarmPanel: React.FC<AgentSwarmPanelProps> = ({
           <div className="mt-3.5 pt-3 border-t border-terminal-border/40">
             <button
               onClick={onExecuteTrade}
+              disabled={risk.verdict === 'VETOED' || risk.action === 'NO_TRADE'}
               className={`w-full py-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 shadow-lg transition-all ${
-                risk.action === 'SELL'
+                risk.verdict === 'VETOED' || risk.action === 'NO_TRADE'
+                  ? 'bg-slate-800 text-slate-400 border border-rose-500/40 cursor-not-allowed'
+                  : risk.action === 'SELL'
                   ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30'
                   : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
               }`}
             >
               <span>
-                {risk.action === 'SELL'
+                {risk.verdict === 'VETOED' || risk.action === 'NO_TRADE'
+                  ? 'BLOCKED BY RISK VETO (0 LOTS)'
+                  : risk.action === 'SELL'
                   ? `EXECUTE SELL MARKET (${risk.parameters.positionSizeLots} LOTS)`
                   : `EXECUTE BUY MARKET (${risk.parameters.positionSizeLots} LOTS)`}
               </span>

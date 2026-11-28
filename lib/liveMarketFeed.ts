@@ -356,8 +356,9 @@ export class LiveMarketFeedManager {
       else if (isCopper) decimals = 4;
 
       const pip = PIP_VALUES[this.currentPair] || 0.0001;
-      // Micro fluctuation jitter between -1.5 and +1.5 pips
-      const tickDelta = (Math.random() - 0.495) * pip * 1.4;
+      // Bounded deterministic micro-oscillation anchored cleanly to canonical candle trend without random price jumps
+      const tickPhase = Math.sin(Date.now() / 4200);
+      const tickDelta = tickPhase * pip * 0.12;
       const newClose = Number((lastCandle.close + tickDelta).toFixed(decimals));
       const newHigh = Number(Math.max(lastCandle.high, newClose).toFixed(decimals));
       const newLow = Number(Math.min(lastCandle.low, newClose).toFixed(decimals));
@@ -368,7 +369,7 @@ export class LiveMarketFeedManager {
         close: newClose,
         high: newHigh,
         low: newLow,
-        volume: lastCandle.volume + Math.floor(Math.random() * 8 + 1),
+        volume: lastCandle.volume + 2,
       };
 
       const updatedCandles = [...candles.slice(0, candles.length - 1), updatedLastCandle];
@@ -379,7 +380,7 @@ export class LiveMarketFeedManager {
 
       const base = BASE_PRICES[this.currentPair] || newClose;
       const change24h = Number((((newClose - base) / base) * 100).toFixed(2));
-      const liveLatency = Math.round(11 + Math.random() * 9);
+      const liveLatency = 12;
 
       this.updateWsTelemetry({
         ticksCount: this.totalWsTicksReceived,
@@ -470,9 +471,18 @@ export class LiveMarketFeedManager {
       latched = stateLatchingEngine.latchConsensus(pair, consensus, undefined, RECALIBRATION_INTERVAL_SECONDS / 60);
     }
 
-    // Directional Parity Protocol: Ensure direction strictly matches active multi-desk consensus and debate bias
-    let definitiveDirection: 'BUY' | 'SELL';
-    if (consensus.debateSynthesis?.definitiveBias === 'SELL' || consensus.unifiedDecision?.direction === 'SELL' || consensus.consensusDirection === 'SELL') {
+    // Directional Parity Protocol: Preserve HOLD/VETO states while aligning active directional trades
+    let definitiveDirection: 'BUY' | 'SELL' | 'HOLD';
+    const isHardVetoed =
+      consensus.executionSignal?.status === 'VETOED' ||
+      consensus.agents?.risk?.verdict === 'VETOED' ||
+      consensus.chiefReviewerAudit?.status === 'VETOED' ||
+      consensus.consensusDirection === 'HOLD' ||
+      consensus.overallConfidence < 68;
+
+    if (isHardVetoed) {
+      definitiveDirection = 'HOLD';
+    } else if (consensus.debateSynthesis?.definitiveBias === 'SELL' || consensus.unifiedDecision?.direction === 'SELL' || consensus.consensusDirection === 'SELL') {
       definitiveDirection = 'SELL';
     } else if (consensus.debateSynthesis?.definitiveBias === 'BUY' || consensus.unifiedDecision?.direction === 'BUY' || consensus.consensusDirection === 'BUY') {
       definitiveDirection = 'BUY';
@@ -481,12 +491,17 @@ export class LiveMarketFeedManager {
     }
 
     // If consensus shifted direction relative to old latch, release and re-latch in fresh direction
-    if (latched.anchoredDirection !== definitiveDirection) {
+    if (definitiveDirection !== 'HOLD' && latched.anchoredDirection !== definitiveDirection) {
       stateLatchingEngine.releaseLatch(pair, `Directional synchronization: Swarm definitive bias is ${definitiveDirection}`);
       latched = stateLatchingEngine.latchConsensus(pair, { ...consensus, consensusDirection: definitiveDirection }, undefined, RECALIBRATION_INTERVAL_SECONDS / 60);
     }
 
-    const direction = latched.anchoredDirection;
+    const direction: 'BUY' | 'SELL' | 'HOLD' =
+      definitiveDirection === 'HOLD'
+        ? 'HOLD'
+        : latched.anchoredDirection.includes('SELL')
+        ? 'SELL'
+        : 'BUY';
     const isSell = direction === 'SELL';
     const isBuy = direction === 'BUY';
     const targetOrderType: 'SELL_MARKET' | 'BUY_MARKET' | 'NONE' = isSell ? 'SELL_MARKET' : isBuy ? 'BUY_MARKET' : 'NONE';
@@ -508,15 +523,15 @@ export class LiveMarketFeedManager {
     const anchoredRiskReward = constrainedPlan.riskRewardRatio;
     const effectiveStopDist = constrainedPlan.stopLossDistancePoints;
     const effectiveTargetDist = constrainedPlan.takeProfit1DistancePoints;
-    const safeLots = Math.max(0.01, latched.anchoredLots || 0.02);
-    const anchoredGrade = latched.anchoredGrade || 'A';
+    const safeLots = isHardVetoed ? 0 : Math.max(0.01, latched.anchoredLots || 0.02);
+    const anchoredGrade = latched.anchoredGrade || (isHardVetoed ? 'D' : 'A');
 
-    // Update execution signal with guaranteed live-feed synchronized levels - NEVER VETOED
+    // Enforce Risk Manager / Threshold Hard Vetoes instead of overriding them
     const updatedExecutionSignal = {
       ...consensus.executionSignal,
       orderType: targetOrderType,
-      authorized: true, // MANDATORY: Trade execution paralysis permanently removed
-      status: 'READY' as const,
+      authorized: !isHardVetoed && targetOrderType !== 'NONE',
+      status: isHardVetoed ? ('VETOED' as const) : ('READY' as const),
       entry: liveEntryPrice,
       stopLoss: dynamicStopLoss,
       takeProfit: dynamicTakeProfit,
@@ -580,11 +595,11 @@ export class LiveMarketFeedManager {
       suggestedTakeProfit: dynamicTakeProfit,
     };
 
-    // Update risk manager parameters with live synchronized levels
+    // Synchronize Risk Manager parameters while preserving authentic VETO verdicts
     const updatedRisk = {
       ...consensus.agents.risk,
       action: isSell ? ('SELL' as const) : isBuy ? ('BUY' as const) : ('NO_TRADE' as const),
-      verdict: 'APPROVED' as const,
+      verdict: isHardVetoed ? ('VETOED' as const) : (consensus.agents.risk.verdict === 'MODIFIED' ? 'MODIFIED' as const : 'APPROVED' as const),
       parameters: {
         ...consensus.agents.risk.parameters,
         entryPrice: liveEntryPrice,
@@ -596,17 +611,20 @@ export class LiveMarketFeedManager {
     };
 
     // Update unified decision recommended action with live synchronized entry
-    const updatedRecommendedAction = `${direction} ${safeLots} Lots on ${pair} @ ${liveEntryPrice} (1:1 Breakeven Ratchet Armed)`;
+    const updatedRecommendedAction = isHardVetoed
+      ? `NO TRADE / VETOED on ${pair} @ ${liveEntryPrice} (Confidence/Risk Gate Blocked)`
+      : `${direction} ${safeLots} Lots on ${pair} @ ${liveEntryPrice} (1:1 Breakeven Ratchet Armed)`;
 
     const updatedUnifiedDecision = {
       ...consensus.unifiedDecision,
       direction,
       confluenceGrade: anchoredGrade,
       recommendedAction: updatedRecommendedAction,
-      isApproved: true,
       coreReasons: {
         ...consensus.unifiedDecision.coreReasons,
-        riskGovernance: `REAL-TIME LIQUIDITY RISK GOVERNANCE: ${anchoredRiskReward}:1 R:R, tight structural stop anchored at ${dynamicStopLoss}, targeting 10-pip milestone at ${dynamicTakeProfit}. 1:1 Breakeven Ratchet actively armed upon 5-10 pip favorable expansion.`,
+        riskGovernance: isHardVetoed
+          ? `RISK VETO ACTIVE: ${consensus.agents.risk.vetoReasons?.[0] || 'Sub-threshold confluence or drawdown cap triggered.'}`
+          : `REAL-TIME LIQUIDITY RISK GOVERNANCE: ${anchoredRiskReward}:1 R:R, tight structural stop anchored at ${dynamicStopLoss}, targeting milestone at ${dynamicTakeProfit}.`,
       },
     };
 
@@ -615,7 +633,7 @@ export class LiveMarketFeedManager {
     if (updatedDebateSynthesis && updatedDebateSynthesis.priceThresholds) {
       updatedDebateSynthesis = {
         ...updatedDebateSynthesis,
-        definitiveBias: direction,
+        definitiveBias: direction === 'HOLD' ? updatedDebateSynthesis.definitiveBias : direction,
         priceThresholds: {
           ...updatedDebateSynthesis.priceThresholds,
           entryPrice: liveEntryPrice,

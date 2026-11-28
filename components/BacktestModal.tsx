@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
-import { History, Play, CheckCircle, XCircle, ShieldAlert, Award, ArrowUpRight, ArrowLeft } from 'lucide-react';
-import { CurrencyPair } from '@/lib/types';
+import React, { useState, useEffect } from 'react';
+import { History, Play, ArrowLeft, Layers } from 'lucide-react';
+import { CurrencyPair, TimeFrame } from '@/lib/types';
+import { BASE_PRICES } from '@/lib/marketData';
 
 interface BacktestSummary {
   totalScenarios: number;
@@ -14,6 +15,9 @@ interface BacktestSummary {
   totalPnlUsd: number;
   profitFactor: number;
   maxDrawdownPercent: number;
+  replaySource?: 'HISTORICAL_CANDLE_REPLAY';
+  timeframe?: TimeFrame;
+  candleCount?: number;
 }
 
 interface BacktestScenarioItem {
@@ -29,14 +33,32 @@ interface BacktestScenarioItem {
   rationale: string;
 }
 
+interface EquityCurvePoint {
+  step: number;
+  equity: number;
+  drawdownPct: number;
+  barTime: string;
+}
+
 export interface BacktestViewProps {
+  defaultPair?: CurrencyPair;
   onBackToTerminal?: () => void;
 }
 
-export const BacktestView: React.FC<BacktestViewProps> = ({ onBackToTerminal }) => {
+const BACKTEST_PAIRS = Object.keys(BASE_PRICES) as CurrencyPair[];
+const TIMEFRAMES: TimeFrame[] = ['15m', '1h', '4h', '1d'];
+
+export const BacktestView: React.FC<BacktestViewProps> = ({ defaultPair = 'EUR/USD', onBackToTerminal }) => {
+  const [selectedPair, setSelectedPair] = useState<CurrencyPair>(defaultPair);
+  const [selectedTf, setSelectedTf] = useState<TimeFrame>('1h');
   const [isRunning, setIsRunning] = useState(false);
   const [summary, setSummary] = useState<BacktestSummary | null>(null);
   const [scenarios, setScenarios] = useState<BacktestScenarioItem[]>([]);
+  const [equityCurve, setEquityCurve] = useState<EquityCurvePoint[]>([]);
+
+  useEffect(() => {
+    setSelectedPair(defaultPair);
+  }, [defaultPair]);
 
   const runBacktest = async () => {
     setIsRunning(true);
@@ -44,12 +66,13 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ onBackToTerminal }) 
       const res = await fetch('/api/backtest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pair: 'EUR/USD' }),
+        body: JSON.stringify({ pair: selectedPair, timeframe: selectedTf, count: 140 }),
       });
       const data = await res.json();
       if (data.success) {
         setSummary(data.data.summary);
         setScenarios(data.data.scenarios);
+        setEquityCurve(data.data.equityCurve || []);
       }
     } catch (e) {
       console.error(e);
@@ -64,21 +87,47 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ onBackToTerminal }) 
         <div>
           <h2 className="text-base font-bold text-white flex items-center gap-2">
             <History className="w-5 h-5 text-amber-400" />
-            <span>03 // MONTE CARLO WALK-FORWARD BACKTEST & STRESS SIMULATOR</span>
+            <span>03 // HISTORICAL OHLCV CANDLE REPLAY BACKTESTER</span>
           </h2>
           <p className="text-xs text-slate-400 font-mono mt-0.5">
-            Test the 5-agent swarm against historical volatility spikes, central bank surprise rate cuts, and NFP announcements.
+            Causal bar-by-bar OHLCV candle replay with spread deductions, intra-bar SL/TP execution, RiskManager vetoes & Unified Ledger sync.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={selectedPair}
+            onChange={(e) => setSelectedPair(e.target.value as CurrencyPair)}
+            className="bg-terminal-950 border border-terminal-border rounded-lg px-2.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
+            aria-label="Backtest Pair"
+          >
+            {BACKTEST_PAIRS.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={selectedTf}
+            onChange={(e) => setSelectedTf(e.target.value as TimeFrame)}
+            className="bg-terminal-950 border border-terminal-border rounded-lg px-2 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-500"
+            aria-label="Backtest Timeframe"
+          >
+            {TIMEFRAMES.map((tf) => (
+              <option key={tf} value={tf}>
+                {tf}
+              </option>
+            ))}
+          </select>
+
           <button
             onClick={runBacktest}
             disabled={isRunning}
             className="px-4 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-mono text-xs font-bold rounded-lg flex items-center gap-2 shadow-lg shadow-amber-600/20 disabled:opacity-50 transition-all active:scale-95"
           >
             <Play className={`w-4 h-4 ${isRunning ? 'animate-spin' : ''}`} />
-            <span>{isRunning ? 'SIMULATING SCENARIOS...' : 'EXECUTE FULL BACKTEST'}</span>
+            <span>{isRunning ? 'REPLAYING CANDLES...' : 'EXECUTE HISTORICAL REPLAY'}</span>
           </button>
 
           {onBackToTerminal && (
@@ -95,7 +144,7 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ onBackToTerminal }) 
       </div>
 
       {summary && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 font-mono text-xs">
           <div className="bg-terminal-950 p-3 rounded-lg border border-terminal-border">
             <span className="text-slate-400 block text-[10px] uppercase">Win Rate</span>
             <span className="text-emerald-400 font-bold text-lg">{summary.winRatePercent}%</span>
@@ -109,19 +158,54 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ onBackToTerminal }) 
             <span className={`font-bold text-lg ${summary.totalPnlUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
               {summary.totalPnlUsd >= 0 ? '+' : ''}${summary.totalPnlUsd.toFixed(2)}
             </span>
-            <span className="text-[10px] text-slate-400 block">Net Cumulative Equity</span>
+            <span className="text-[10px] text-slate-400 block">Spread-Adjusted Net Equity</span>
           </div>
 
           <div className="bg-terminal-950 p-3 rounded-lg border border-terminal-border">
             <span className="text-slate-400 block text-[10px] uppercase">Profit Factor</span>
             <span className="text-cyan-400 font-bold text-lg">{summary.profitFactor}</span>
-            <span className="text-[10px] text-slate-400 block">Gross Profit / Gross Loss</span>
+            <span className="text-[10px] text-slate-400 block">Realized Gross Win / Loss</span>
+          </div>
+
+          <div className="bg-terminal-950 p-3 rounded-lg border border-terminal-border">
+            <span className="text-slate-400 block text-[10px] uppercase">Max Drawdown</span>
+            <span className="text-rose-400 font-bold text-lg">{summary.maxDrawdownPercent}%</span>
+            <span className="text-[10px] text-slate-400 block">{summary.candleCount || 140} Historical Bars</span>
           </div>
 
           <div className="bg-terminal-950 p-3 rounded-lg border border-terminal-border">
             <span className="text-slate-400 block text-[10px] uppercase">Risk Manager Vetoes</span>
-            <span className="text-amber-400 font-bold text-lg">{summary.vetoedTrades} Trades</span>
-            <span className="text-[10px] text-slate-400 block">Dangerous setups filtered</span>
+            <span className="text-amber-400 font-bold text-lg">{summary.vetoedTrades} Blocked</span>
+            <span className="text-[10px] text-emerald-400 block flex items-center gap-1">
+              <Layers className="w-3 h-3" /> {summary.replaySource || 'HISTORICAL_CANDLE_REPLAY'}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {equityCurve.length > 1 && (
+        <div className="bg-terminal-950 border border-terminal-border rounded-lg p-3 font-mono text-xs">
+          <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
+            <span>CAUSAL REPLAY EQUITY CURVE ($25,000 START)</span>
+            <span className="text-cyan-300 font-bold">Final Equity: ${equityCurve[equityCurve.length - 1].equity.toLocaleString()}</span>
+          </div>
+          <div className="flex items-end gap-1.5 h-16">
+            {(() => {
+              const minEq = Math.min(...equityCurve.map((p) => p.equity));
+              const maxEq = Math.max(...equityCurve.map((p) => p.equity));
+              const span = Math.max(10, maxEq - minEq);
+              return equityCurve.map((pt) => {
+                const h = Math.max(15, Math.round(((pt.equity - minEq) / span) * 100));
+                return (
+                  <div
+                    key={pt.step}
+                    title={`Step ${pt.step} (${pt.barTime}): $${pt.equity} (DD: ${pt.drawdownPct}%)`}
+                    className={`flex-1 rounded-t transition-all ${pt.equity >= 25000 ? 'bg-emerald-500/70' : 'bg-rose-500/70'}`}
+                    style={{ height: `${h}%` }}
+                  />
+                );
+              });
+            })()}
           </div>
         </div>
       )}
@@ -131,14 +215,15 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ onBackToTerminal }) 
           <table className="w-full text-left font-mono text-xs">
             <thead className="bg-terminal-950 text-slate-400 border-b border-terminal-border text-[11px]">
               <tr>
-                <th className="p-3">Scenario / Macro Catalyst</th>
+                <th className="p-3">Historical Bar Window</th>
                 <th className="p-3">Pair</th>
                 <th className="p-3">Action</th>
                 <th className="p-3">Verdict</th>
+                <th className="p-3">Entry / Exit</th>
                 <th className="p-3">Lots</th>
                 <th className="p-3">Outcome</th>
                 <th className="p-3">P&L ($)</th>
-                <th className="p-3">Risk Manager Decision Reasoning</th>
+                <th className="p-3">Risk Manager Reasoning</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-terminal-border/60 bg-terminal-900/60">
@@ -168,6 +253,9 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ onBackToTerminal }) 
                       {sc.riskVerdict}
                     </span>
                   </td>
+                  <td className="p-3 text-slate-300">
+                    {sc.entryPrice} → {sc.exitPrice}
+                  </td>
                   <td className="p-3 text-slate-300">{sc.lots}</td>
                   <td className="p-3">
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -195,7 +283,7 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ onBackToTerminal }) 
         </div>
       ) : (
         <div className="p-8 text-center bg-terminal-950/60 border border-terminal-border rounded-xl text-slate-400 font-mono text-xs">
-          Click &quot;EXECUTE FULL BACKTEST&quot; to simulate how the Technical, Fundamental, Forex Analysts, and Risk Manager perform across historical high-volatility market events.
+          Select an instrument and timeframe, then click &quot;EXECUTE HISTORICAL REPLAY&quot; to run bar-by-bar OHLCV candle backtesting with authentic Risk Manager vetoes and ledger synchronization.
         </div>
       )}
     </div>

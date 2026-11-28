@@ -161,22 +161,58 @@ export class PreExecutionVerificationEngine {
       };
     }
 
-    // 6. Zero-Veto Decoupled Execution Guardrails:
-    // Enforce tight variance constraint: if signal price exceeds maxEntryVariancePips from live fill, clamp directly to liveFillPrice.
+    // Enforce Hard Risk, Threshold & Contradiction Vetoes (never force DISPATCH_ORDER when vetoed)
+    if (
+      signal.authorized === false ||
+      signal.status === 'VETOED' ||
+      signal.orderType === 'NONE' ||
+      !riskWorkflowVerified ||
+      !contradictionCheckPassed ||
+      !failureConstraintCheck.passed
+    ) {
+      return {
+        isVerified: false,
+        atomicTickId,
+        verificationTimestamp: now,
+        symbol: pair,
+        orderType,
+        signalPrice,
+        liveBid: bidAsk.bid,
+        liveAsk: bidAsk.ask,
+        liveFillPrice,
+        spreadPips: bidAsk.spreadPips,
+        priceDeviationPercent,
+        slippagePips,
+        riskWorkflowVerified,
+        proportionalLotSize: 0,
+        requiredMarginUsd: 0,
+        freeMarginUsd: freeMargin,
+        contradictionCheck: {
+          passed: contradictionCheckPassed,
+          newsSentimentInversionDetected: newsSentimentInversion,
+          macroTechnicalDivergenceDetected: macroTechDivergence,
+          structuralInvalidationBreached,
+          resolutionDirective: contradictionDirective,
+        },
+        failureConstraintCheck,
+        action: 'ABORT_AND_RECALIBRATE',
+        abortReason: !riskWorkflowVerified
+          ? `Minimum confidence (68%) or Risk Manager workflow veto triggered on ${pair}.`
+          : !contradictionCheckPassed
+          ? contradictionDirective
+          : `Hard risk / failure rule constraint blocked execution on ${pair}.`,
+      };
+    }
+
     const spec = liveMarketAnchorConstraintEngine.getTightVarianceSpec(pair);
     let effectiveSignalPrice = signalPrice;
     if (slippagePips > spec.maxEntryVariancePips) {
       effectiveSignalPrice = liveFillPrice;
     }
 
-    // Dynamic Micro-Lot Sizing:
-    // If free margin is limited or dialectical friction is elevated, scale down to 0.01 - 0.02 lots
     let validatedLots = proportionalLotSize;
     if (requiredMarginUsd > freeMargin && freeMargin > 0) {
-      validatedLots = 0.01;
-    }
-    if (!contradictionCheckPassed || !failureConstraintCheck.passed || !riskWorkflowVerified) {
-      validatedLots = Math.max(0.01, Math.min(0.02, validatedLots));
+      validatedLots = Math.max(0.01, Math.min(validatedLots, Number(((freeMargin * 0.8 * 30) / 100000).toFixed(2))));
     }
 
     const entryProximity = automatedSignalValidationModule.evaluateEntryProximityBand({
@@ -194,18 +230,13 @@ export class PreExecutionVerificationEngine {
       proposedStopLoss: signal.stopLoss || risk?.parameters?.stopLoss,
       currentPrice: liveFillPrice,
       direction: orderType,
-      maxDrawdownLimitPercent: 2.0,
-      minAllowedRiskReward: 1.0,
-      minAllowedWinProbability: 40,
+      maxDrawdownLimitPercent: 4.0,
+      minAllowedRiskReward: 1.5,
+      minAllowedWinProbability: 68,
     });
-
-    if (!riskGovernance.passed) {
-      validatedLots = Math.max(0.01, Math.min(0.02, validatedLots));
-    }
 
     const finalRequiredMargin = (validatedLots * 100000) / 30;
 
-    // All atomic pre-execution checks verified on identical tick: DISPATCH_ORDER guaranteed
     return {
       isVerified: true,
       atomicTickId,
@@ -217,25 +248,20 @@ export class PreExecutionVerificationEngine {
       liveAsk: bidAsk.ask,
       liveFillPrice,
       spreadPips: bidAsk.spreadPips,
-      priceDeviationPercent: slippagePips > 10.0 ? 0 : priceDeviationPercent,
-      slippagePips: Math.min(10.0, slippagePips),
-      riskWorkflowVerified: true,
+      priceDeviationPercent,
+      slippagePips,
+      riskWorkflowVerified,
       proportionalLotSize: validatedLots,
       requiredMarginUsd: finalRequiredMargin,
       freeMarginUsd: freeMargin,
       contradictionCheck: {
-        passed: true,
+        passed: contradictionCheckPassed,
         newsSentimentInversionDetected: newsSentimentInversion,
         macroTechnicalDivergenceDetected: macroTechDivergence,
         structuralInvalidationBreached,
-        resolutionDirective: contradictionCheckPassed
-          ? 'Atomic cross-desk confluence verified on identical tick.'
-          : 'Zero-Veto Override: Sized to micro-lots (0.01-0.02 lots) with 1:1 Breakeven Ratchet armed.',
+        resolutionDirective: 'Atomic cross-desk confluence verified on identical tick.',
       },
-      failureConstraintCheck: {
-        passed: true,
-        similarityScore: failurePreCheck.similarityScore,
-      },
+      failureConstraintCheck,
       entryProximityFilter: entryProximity,
       riskGovernanceValidation: riskGovernance,
       action: 'DISPATCH_ORDER',

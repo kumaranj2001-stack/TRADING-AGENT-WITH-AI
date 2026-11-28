@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Code2, Play, RotateCcw, Volume2, Radio, TrendingUp, Flame } from 'lucide-react';
 import type { TechnicalScreenerSnapshot } from '@/lib/institutional/types';
 
@@ -20,6 +20,13 @@ export const TechnicalScreenerDesk: React.FC<Props> = ({
   const [headlineInput, setHeadlineInput] = useState<string>('');
   const [scoredHeadline, setScoredHeadline] = useState(screener.unstructuredNewsSentiment[0]);
   const [voiceActive, setVoiceActive] = useState<boolean>(false);
+
+  useEffect(() => {
+    setPineCode(screener.pineCompiler.sourceCode);
+    setReplayIdx(screener.barReplay.currentBarIndex);
+    setHeadlineInput('');
+    setScoredHeadline(screener.unstructuredNewsSentiment[0]);
+  }, [symbol, screener]);
 
   const handleSpeakSquawk = (voiceScript: string) => {
     setVoiceActive(true);

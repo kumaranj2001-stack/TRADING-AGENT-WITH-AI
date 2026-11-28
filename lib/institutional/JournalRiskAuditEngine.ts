@@ -1,6 +1,7 @@
 import type { TimeFrame } from '../types';
 import type { JournalRiskAuditSnapshot } from './types';
 import { computeAuditDigest, resolveInstitutionalAssetContext, seededRange } from './helpers';
+import { unifiedLedgerService } from '../ledger/UnifiedLedgerService';
 
 export class JournalRiskAuditEngine {
   private static instance: JournalRiskAuditEngine;
@@ -62,16 +63,30 @@ export class JournalRiskAuditEngine {
     targetVaRPct?: number;
   }): JournalRiskAuditSnapshot {
     const ctx = resolveInstitutionalAssetContext(params?.symbol || 'XAU/USD', params?.timeframe || '1h');
-    const drawdownHardLimitPct = params?.drawdownHardLimitPct ?? 6.0;
+    const ledger = unifiedLedgerService.getSnapshot();
+    const drawdownHardLimitPct = params?.drawdownHardLimitPct ?? ledger.maxAllowedDrawdownPercent ?? 6.0;
     const targetAnnualizedVaRPct = params?.targetVaRPct ?? 10.0;
 
-    const trades = [
-      { id: 'TR_904', symbol: ctx.symbol, side: 'LONG' as const, maeR: -0.24, mfeR: 2.85, realizedR: 2.40, mistakeTag: 'PLAN_ADHERENCE' },
-      { id: 'TR_903', symbol: 'EUR/USD', side: 'SHORT' as const, maeR: -0.41, mfeR: 2.10, realizedR: 1.35, mistakeTag: 'EARLY_EXIT' },
-      { id: 'TR_902', symbol: 'NVDA', side: 'LONG' as const, maeR: -0.95, mfeR: 0.48, realizedR: -1.00, mistakeTag: 'FOMO_ENTRY' },
-      { id: 'TR_901', symbol: 'XAU/USD', side: 'LONG' as const, maeR: -0.18, mfeR: 3.40, realizedR: 2.90, mistakeTag: 'PLAN_ADHERENCE' },
-      { id: 'TR_900', symbol: 'GBP/USD', side: 'SHORT' as const, maeR: -1.12, mfeR: 0.22, realizedR: -1.15, mistakeTag: 'MOVED_STOP_LOSS' },
-    ];
+    const liveClosedTrades = (ledger.closedTrades || []).slice(0, 6).map((t) => ({
+      id: t.id,
+      symbol: t.symbol,
+      side: (t.type === 'BUY' ? 'LONG' : 'SHORT') as 'LONG' | 'SHORT',
+      maeR: Number((t.pnl >= 0 ? -0.25 : -1.0).toFixed(2)),
+      mfeR: Number((t.pnl >= 0 ? 2.15 : 0.35).toFixed(2)),
+      realizedR: Number((t.pnl >= 0 ? Math.max(0.4, Math.min(3.5, t.pnl / 200)) : -1.0).toFixed(2)),
+      mistakeTag: (t.pnl >= 0 ? 'PLAN_ADHERENCE' : 'STOP_LOSS_HIT') as any,
+    }));
+
+    const trades =
+      liveClosedTrades.length > 0
+        ? liveClosedTrades
+        : [
+            { id: 'TR_904', symbol: ctx.symbol, side: 'LONG' as const, maeR: -0.24, mfeR: 2.85, realizedR: 2.40, mistakeTag: 'PLAN_ADHERENCE' },
+            { id: 'TR_903', symbol: 'EUR/USD', side: 'SHORT' as const, maeR: -0.41, mfeR: 2.10, realizedR: 1.35, mistakeTag: 'EARLY_EXIT' },
+            { id: 'TR_902', symbol: 'NVDA', side: 'LONG' as const, maeR: -0.95, mfeR: 0.48, realizedR: -1.00, mistakeTag: 'FOMO_ENTRY' },
+            { id: 'TR_901', symbol: 'XAU/USD', side: 'LONG' as const, maeR: -0.18, mfeR: 3.40, realizedR: 2.90, mistakeTag: 'PLAN_ADHERENCE' },
+            { id: 'TR_900', symbol: 'GBP/USD', side: 'SHORT' as const, maeR: -1.12, mfeR: 0.22, realizedR: -1.15, mistakeTag: 'MOVED_STOP_LOSS' },
+          ];
 
     const avgMaeR = Number((trades.reduce((a, t) => a + Math.abs(t.maeR), 0) / trades.length).toFixed(2));
     const avgMfeR = Number((trades.reduce((a, t) => a + t.mfeR, 0) / trades.length).toFixed(2));
@@ -98,9 +113,11 @@ export class JournalRiskAuditEngine {
 
     const rawStrategyVaRPct = Number(seededRange(`${ctx.symbol}:rawvar`, 6.8, 14.2).toFixed(2));
     const normalizationMultiplier = Number((targetAnnualizedVaRPct / rawStrategyVaRPct).toFixed(2));
-    const currentDdPct = Number(seededRange(`${ctx.symbol}:zulu_dd`, 1.4, 3.8).toFixed(2));
-    const hwm = 119840;
-    const currentEq = Math.round(hwm * (1 - currentDdPct / 100));
+    const currentDdPct = ledger.closedTrades.length > 0 || ledger.enforcementEvents.length > 0
+      ? ledger.currentDrawdownPercent
+      : Number(seededRange(`${ctx.symbol}:zulu_dd`, 1.4, 3.8).toFixed(2));
+    const hwm = Math.max(ledger.dailyStartingBalance || 25000, ledger.equity || 25000);
+    const currentEq = ledger.equity > 0 ? Math.round(ledger.equity) : Math.round(hwm * (1 - currentDdPct / 100));
 
     return {
       symbol: ctx.symbol,

@@ -173,20 +173,26 @@ export class CandlestickPatternAnalystAgent extends BaseAgent {
       confidenceScore = 87;
       location = 'CHOCH_REVERSAL';
     }
-    // Fallback: Default to verified high-probability market structure pattern based on current trend
+    // Fallback: Anchor strictly to observed latest candle geometry (never hardcode bearish bias by pair)
     else {
-      if (pair === 'XAU/USD' || c1.close < c2.close) {
-        detectedPattern = 'BEARISH_ENGULFING';
-        patternCategory = 'REVERSAL';
+      if (c1.close < c1.open && c1.close < c2.close) {
+        detectedPattern = 'BEARISH_CONTINUATION_BAR';
+        patternCategory = 'CONTINUATION';
         bias = 'SELL';
-        confidenceScore = 84.4;
+        confidenceScore = 72;
+        location = 'ORDER_BLOCK';
+      } else if (c1.close > c1.open && c1.close > c2.close) {
+        detectedPattern = 'BULLISH_CONTINUATION_BAR';
+        patternCategory = 'CONTINUATION';
+        bias = 'BUY';
+        confidenceScore = 72;
         location = 'ORDER_BLOCK';
       } else {
-        detectedPattern = 'BULLISH_ENGULFING';
-        patternCategory = 'REVERSAL';
-        bias = 'BUY';
-        confidenceScore = 84.4;
-        location = 'ORDER_BLOCK';
+        detectedPattern = 'CONSOLIDATION_DOJI';
+        patternCategory = 'INDECISION_FILTER';
+        bias = 'NEUTRAL';
+        confidenceScore = 54;
+        location = 'KEY_S_R_LEVEL';
       }
     }
 

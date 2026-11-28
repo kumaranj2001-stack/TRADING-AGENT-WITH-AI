@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Database, Wallet, Cpu, Layers } from 'lucide-react';
 import type { CryptoOnChainSnapshot } from '@/lib/institutional/types';
 
@@ -13,6 +13,11 @@ interface Props {
 export const CryptoOnChainDesk: React.FC<Props> = ({ symbol, crypto }) => {
   const [sqlInput, setSqlInput] = useState<string>(crypto.sqlQueryResult.query);
   const [sqlResult, setSqlResult] = useState(crypto.sqlQueryResult);
+
+  useEffect(() => {
+    setSqlInput(crypto.sqlQueryResult.query);
+    setSqlResult(crypto.sqlQueryResult);
+  }, [symbol, crypto]);
 
   const runSql = async () => {
     const res = await fetch('/api/institutional/crypto-onchain', {

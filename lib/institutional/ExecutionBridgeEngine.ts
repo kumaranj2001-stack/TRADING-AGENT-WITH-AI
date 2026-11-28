@@ -98,9 +98,17 @@ export class ExecutionBridgeEngine {
     side: 'BUY' | 'SELL',
     orderUnits: number,
     spotPrice: number,
-    decimals: number
+    decimals: number,
+    symbol: string = 'XAU/USD'
   ): SlippageEstimate {
-    let remaining = Math.max(1, orderUnits);
+    // Normalize displayed institutional depth quantities across asset conventions (lots vs notional FX units)
+    const isFxUnits = symbol.includes('/') && orderUnits >= 1000;
+    const normalizedLots = isFxUnits ? orderUnits / 100000 : Math.max(0.01, orderUnits / 100);
+    const totalBookDepth = Math.max(1, book.reduce((s, l) => s + (side === 'BUY' ? l.askSize : l.bidSize), 0));
+    // Scale displayed depth units proportionally to standard contract depth
+    const bookWalkUnits = isFxUnits ? Math.min(totalBookDepth * 1.25, normalizedLots * 160) : Math.max(1, orderUnits);
+
+    let remaining = bookWalkUnits;
     let weightedCost = 0;
     let filled = 0;
 
@@ -116,24 +124,25 @@ export class ExecutionBridgeEngine {
 
     if (remaining > 0 && book.length > 0) {
       const tail = book[book.length - 1];
-      const worstPx = side === 'BUY' ? tail.askPrice * 1.0008 : tail.bidPrice * 0.9992;
+      const worstPx = side === 'BUY' ? tail.askPrice * 1.0004 : tail.bidPrice * 0.9996;
       weightedCost += remaining * worstPx;
       filled += remaining;
     }
 
     const avgBookPx = filled > 0 ? weightedCost / filled : spotPrice;
-    const spreadWalkBps = Math.abs((avgBookPx - spotPrice) / Math.max(1e-8, spotPrice)) * 10000;
-    const marketImpactBps = 0.35 * Math.sqrt(Math.max(1, orderUnits) / 100);
+    const spreadWalkBps = Math.min(18, Math.abs((avgBookPx - spotPrice) / Math.max(1e-8, spotPrice)) * 10000);
+    const marketImpactBps = Number((0.28 * Math.sqrt(Math.max(0.05, normalizedLots))).toFixed(2));
     const latencySlippageBps = 0.18;
     const avgImbalance =
       book.slice(0, 3).reduce((acc, l) => acc + Math.abs(l.imbalanceRatio), 0) / Math.max(1, Math.min(3, book.length));
-    const adverseSelectionBps = avgImbalance * 0.65;
+    const adverseSelectionBps = avgImbalance * 0.45;
     const totalSlippageBps = spreadWalkBps + marketImpactBps + latencySlippageBps + adverseSelectionBps;
     const directionSign = side === 'BUY' ? 1 : -1;
     const expectedFillPrice = Number(
       (spotPrice * (1 + directionSign * (totalSlippageBps / 10000))).toFixed(decimals)
     );
-    const estimatedCostUsd = Number(((orderUnits * Math.abs(expectedFillPrice - spotPrice))).toFixed(2));
+    const notionalUsd = symbol.includes('/') ? normalizedLots * 100000 : orderUnits * spotPrice;
+    const estimatedCostUsd = Number(((notionalUsd * totalSlippageBps) / 10000).toFixed(2));
 
     return {
       orderUnits,
@@ -141,7 +150,7 @@ export class ExecutionBridgeEngine {
       midPrice: spotPrice,
       expectedFillPrice,
       spreadWalkBps: Number(spreadWalkBps.toFixed(2)),
-      marketImpactBps: Number(marketImpactBps.toFixed(2)),
+      marketImpactBps,
       latencySlippageBps,
       adverseSelectionBps: Number(adverseSelectionBps.toFixed(2)),
       totalSlippageBps: Number(totalSlippageBps.toFixed(2)),
@@ -391,7 +400,8 @@ export class ExecutionBridgeEngine {
       params?.side || 'BUY',
       params?.orderUnits || 120,
       ctx.spotPrice,
-      ctx.decimals
+      ctx.decimals,
+      ctx.symbol
     );
     const cBotSource = params?.cBotCode?.trim() ? params.cBotCode : DEFAULT_CBOT_CODE;
 

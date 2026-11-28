@@ -331,13 +331,17 @@ export class RealMarketDataService {
 
     for (let i = 0; i < count; i++) {
       const timeMs = startTime + i * stepMs;
-      const timeStr = new Date(timeMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const wave = Math.sin(i / 6) * volatility * 0.5;
-      const step = (Math.random() - 0.49) * volatility * 1.2;
+      const d = new Date(timeMs);
+      const timeStr = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
+      const wave = Math.sin(i / 6) * volatility * 0.48 + Math.cos(i / 3.2) * volatility * 0.24;
       const open = currentClose;
-      const close = Number((open + wave + step).toFixed(decimals));
-      const high = Number((Math.max(open, close) + Math.random() * volatility * 0.5).toFixed(decimals));
-      const low = Number((Math.min(open, close) - Math.random() * volatility * 0.5).toFixed(decimals));
+      const isFinalBar = i === count - 1;
+      const close = isFinalBar
+        ? Number(basePrice.toFixed(decimals))
+        : Number((open + wave).toFixed(decimals));
+      const wickFactor = Math.abs(Math.cos(i * 0.71)) * volatility * 0.42;
+      const high = Number((Math.max(open, close) + wickFactor).toFixed(decimals));
+      const low = Number((Math.min(open, close) - wickFactor).toFixed(decimals));
 
       candles.push({
         time: timeStr,
@@ -346,7 +350,7 @@ export class RealMarketDataService {
         high,
         low,
         close,
-        volume: Math.floor(15000 + Math.random() * 45000),
+        volume: Math.floor(18000 + Math.abs(Math.sin(i * 0.43)) * 28000),
       });
 
       currentClose = close;

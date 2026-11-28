@@ -405,18 +405,40 @@ export class ChiefReviewerAgent extends BaseAgent {
       `7. 1:1 BREAKEVEN RATCHET: Move stop loss to breakeven after 5 to 10 pips of favorable price expansion.`
     ];
 
-    // ===============================================================
-    // 6. FINAL GATEKEEPER STATUS DETERMINATION
-    // Trade execution paralysis is permanently eradicated. Entries are mandatory.
-    // ===============================================================
+    // Enforce Hard Vetoes & Directional Contradiction Integrity
     let status: ChiefReviewerAuditResult['status'] = 'APPROVED';
     const institutionalGrading = exhaustiveCorpus?.institutionalGrading;
+    const severeCrossDeskConflict =
+      (proposedDirection === 'BUY' && !techBiasMatches && !candleVote.includes('AGREE')) ||
+      (proposedDirection === 'SELL' && !techBiasMatches && !candleVote.includes('AGREE'));
 
-    if (capitalPreservationGate && !capitalPreservationGate.passed) {
+    if (
+      proposedDirection === 'HOLD' ||
+      risk.verdict === 'VETOED' ||
+      confidenceScore < 68 ||
+      agreeCount < 4 ||
+      severeCrossDeskConflict
+    ) {
+      status = 'VETOED';
+      consensusDirective = 'AVOID_TRADE';
+      hasContradiction = true;
+      resolutionAction = 'FORCE_VETO';
+      contradictionExplanation = `HARD GATEKEEPER VETO ENFORCED: ${
+        risk.verdict === 'VETOED'
+          ? risk.vetoReasons?.[0] || 'Risk Manager hard veto active.'
+          : proposedDirection === 'HOLD'
+          ? 'Swarm direction is NEUTRAL/HOLD.'
+          : confidenceScore < 68
+          ? `Confidence (${confidenceScore}%) below mandatory 68% threshold.`
+          : severeCrossDeskConflict
+          ? `Directional contradiction: Technical/Candlestick price action opposes ${proposedDirection}.`
+          : `Insufficient desk agreement (${agreeCount}/7 < 4/7 minimum).`
+      }`;
+    } else if (capitalPreservationGate && !capitalPreservationGate.passed) {
       status = 'MODIFIED';
       consensusDirective = 'MODIFY_PARAMETERS';
       resolutionAction = 'REDUCE_SIZE_50_PERCENT';
-      contradictionExplanation = `CAPITAL PRESERVATION DYNAMIC SCALING: Lot size scaled down to 0.01-0.02 to eliminate downside exposure. Hard veto removed.`;
+      contradictionExplanation = `CAPITAL PRESERVATION DYNAMIC SCALING: Lot size scaled down defensively.`;
     } else if (hasContradiction || resolutionAction === 'REDUCE_SIZE_50_PERCENT' || risk.verdict === 'MODIFIED') {
       status = 'MODIFIED';
       consensusDirective = 'MODIFY_PARAMETERS';

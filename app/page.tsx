@@ -18,6 +18,7 @@ import {
 } from '@/lib/types';
 import { ArrowLeft, Bot, RefreshCw, Layers } from 'lucide-react';
 import { INITIAL_PORTFOLIO, PortfolioState } from '@/lib/store';
+import { unifiedLedgerService } from '@/lib/ledger/UnifiedLedgerService';
 import { DEFAULT_RISK_CONFIG, RiskManagerConfig } from '@/lib/agents/RiskManager';
 import { BrowserStorageManager } from '@/lib/browserStorage';
 import { Header } from '@/components/Header';
@@ -106,6 +107,9 @@ export default function Home() {
   const [riskConfig, setRiskConfig] = useState<RiskManagerConfig>(DEFAULT_RISK_CONFIG);
   const riskConfigRef = useRef(riskConfig);
   riskConfigRef.current = riskConfig;
+  const closingIdsRef = useRef<Set<string>>(new Set());
+  const lastRiskSyncRef = useRef<number>(0);
+  const handleClosePositionRef = useRef<((posId: string, exitReason?: string, invalidationTriggers?: string[], overrideExitPrice?: number) => void) | null>(null);
 
   const executionModeRef = useRef(executionMode);
   executionModeRef.current = executionMode;
@@ -184,11 +188,13 @@ export default function Home() {
       if (dropCheck.isDropped && (executionModeRef.current === 'FULL_AUTOPILOT' || executionModeRef.current === 'SEMI_AUTONOMOUS')) {
         setPortfolio(currentPortfolio => {
           if (currentPortfolio.positions.length > 0) {
-            currentPortfolio.positions.forEach(pos => {
-              handleClosePosition(pos.id, 'WS_DISCONNECT_AUTO_SEVER', [
-                `WebSocket heartbeat dropped for ${(dropCheck.dropDurationMs / 1000).toFixed(1)}s (exceeded 5,000ms threshold)`,
-                'Automated fail-safe severed position to eliminate unmonitored risk during connection loss'
-              ]);
+            currentPortfolio.positions.forEach((pos, idx) => {
+              setTimeout(() => {
+                handleClosePositionRef.current?.(pos.id, 'WS_DISCONNECT_AUTO_SEVER', [
+                  `WebSocket heartbeat dropped for ${(dropCheck.dropDurationMs / 1000).toFixed(1)}s (exceeded 5,000ms threshold)`,
+                  'Automated fail-safe severed position to eliminate unmonitored risk during connection loss'
+                ]);
+              }, idx * 10);
             });
           }
           return currentPortfolio;
@@ -492,13 +498,13 @@ export default function Home() {
 
         // ⚡ Autonomous Emergency / Small-Profit Exit on Invalidation (FULL_AUTOPILOT & SEMI_AUTONOMOUS)
         if (executionModeRef.current === 'FULL_AUTOPILOT' || executionModeRef.current === 'SEMI_AUTONOMOUS') {
-          for (const pos of reevaluated) {
+          reevaluated.forEach((pos, idx) => {
             if (pos.invalidation?.isInvalidated && (pos.invalidation.urgency === 'HIGH' || pos.invalidation.urgency === 'CRITICAL')) {
               setTimeout(() => {
-                handleClosePosition(pos.id, 'INVALIDATION_AUTO_CLOSE', pos.invalidation?.allReasons);
-              }, 0);
+                handleClosePositionRef.current?.(pos.id, 'INVALIDATION_AUTO_CLOSE', pos.invalidation?.allReasons);
+              }, idx * 15);
             }
-          }
+          });
         }
 
         return { ...prev, positions: reevaluated };
@@ -609,9 +615,49 @@ export default function Home() {
           };
         });
 
+        // 🛡️ Hard Automated Stop-Loss, Take-Profit & Account Max Daily Drawdown Flattening (ALL Execution Modes)
+        const enforcement = unifiedLedgerService.evaluateAndEnforcePositions({
+          positions: updatedPositions,
+          balance: prev.balance,
+          dailyStartingBalance: prev.dailyStartingBalance || prev.balance,
+          maxDailyDrawdownPercent: riskConfigRef.current.maxDailyDrawdownPercent || 4.0,
+          resolvePrice: (sym) => sym === selectedPair ? event.livePrice : LiveMarketFeedManager.getCanonicalPrice(sym),
+        });
+
+        if (enforcement.closedEvents.length > 0) {
+          enforcement.closedEvents.forEach((ev, idx) => {
+            setTimeout(() => {
+              handleClosePositionRef.current?.(
+                ev.positionId,
+                ev.reason,
+                [
+                  ev.reason === 'MAX_DRAWDOWN_FLATTEN'
+                    ? `Account Drawdown ${enforcement.drawdownPercent}% breached hard cap ${riskConfigRef.current.maxDailyDrawdownPercent}%`
+                    : `${ev.reason} triggered automatically at ${ev.exitPrice}`,
+                ],
+                ev.exitPrice
+              );
+            }, idx * 15);
+          });
+
+          if (Date.now() - lastRiskSyncRef.current > 2000) {
+            lastRiskSyncRef.current = Date.now();
+            fetch('/api/execution/enforce-risk', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                positions: updatedPositions,
+                balance: prev.balance,
+                dailyStartingBalance: prev.dailyStartingBalance || prev.balance,
+                maxDailyDrawdownPercent: riskConfigRef.current.maxDailyDrawdownPercent || 4.0,
+              }),
+            }).catch(() => {});
+          }
+        }
+
         // ⚡ Paramount Structural Override & Invalidation Exit (FULL_AUTOPILOT & SEMI_AUTONOMOUS)
         if (executionModeRef.current === 'FULL_AUTOPILOT' || executionModeRef.current === 'SEMI_AUTONOMOUS') {
-          for (const pos of updatedPositions) {
+          updatedPositions.forEach((pos, idx) => {
             const symPrice = pos.symbol === selectedPair ? event.livePrice : LiveMarketFeedManager.getCanonicalPrice(pos.symbol);
             const isInvalidationPriceBreached = pos.invalidationPriceLevel && (
               (pos.type === 'BUY' && symPrice <= pos.invalidationPriceLevel) ||
@@ -624,21 +670,23 @@ export default function Home() {
                 isInvalidationPriceBreached ? `Explicit Invalidation Level Breached: Price ${symPrice} breached ${pos.invalidationPriceLevel}` : ''
               ].filter(Boolean);
               setTimeout(() => {
-                handleClosePosition(pos.id, 'PARAMOUNT_STRUCTURAL_OVERRIDE', reasons);
-              }, 0);
+                handleClosePositionRef.current?.(pos.id, 'PARAMOUNT_STRUCTURAL_OVERRIDE', reasons);
+              }, (enforcement.closedEvents.length + idx) * 15);
             } else if (pos.invalidation?.isInvalidated && (pos.invalidation.urgency === 'HIGH' || pos.invalidation.urgency === 'CRITICAL')) {
               setTimeout(() => {
-                handleClosePosition(pos.id, 'INVALIDATION_AUTO_CLOSE', pos.invalidation?.allReasons);
-              }, 0);
+                handleClosePositionRef.current?.(pos.id, 'INVALIDATION_AUTO_CLOSE', pos.invalidation?.allReasons);
+              }, (enforcement.closedEvents.length + idx) * 15);
             }
-          }
+          });
         }
 
         const updated = {
           ...prev,
+          equity: enforcement.updatedEquity,
           positions: updatedPositions,
           freeMargin: Math.max(0, prev.balance - prev.marginUsed + totalOpenPnl),
         };
+        unifiedLedgerService.syncPortfolioState(updated, riskConfigRef.current.maxDailyDrawdownPercent || 4.0);
         BrowserStorageManager.savePortfolio(updated);
         return updated;
       });
@@ -1030,65 +1078,101 @@ export default function Home() {
     showNotification(`ORDER EXECUTED: ${newPosition.type} ${executionLots} Lots on ${signal.symbol} @ ${liveFillPrice} (${tradeType === 'BUY' ? 'Ask' : 'Bid'} Fill)`);
   };
 
-  // Close Position & Save to Local Browser Storage (calibrated against live chart feed)
-  const handleClosePosition = (posId: string, exitReason?: string, invalidationTriggers?: string[]) => {
-    const pos = portfolio.positions.find(p => p.id === posId);
-    if (!pos) return;
+  // Close Position & Save to Local Browser Storage (calibrated against live chart feed & atomic against double-close)
+  const handleClosePosition = (
+    posId: string,
+    exitReason?: string,
+    invalidationTriggers?: string[],
+    overrideExitPrice?: number
+  ) => {
+    if (closingIdsRef.current.has(posId)) return;
+    closingIdsRef.current.add(posId);
 
-    const liveExitPrice = LiveMarketFeedManager.getCanonicalPrice(pos.symbol);
-    const isJpy = pos.symbol.includes('JPY');
-    const isGold = pos.symbol === 'XAU/USD';
-    const pipVal = PIP_VALUES[pos.symbol] || (isGold ? 0.10 : isJpy ? 0.01 : 0.0001);
-    const pipDollar = 10;
-    const pipDiff = pos.type === 'BUY'
-      ? (liveExitPrice - pos.entryPrice) / pipVal
-      : (pos.entryPrice - liveExitPrice) / pipVal;
+    let closedPos: Position | null = null;
+    let liveExitPrice = 0;
+    let finalPnl = 0;
 
-    const finalPnl = Number((pipDiff * pipDollar * pos.lots).toFixed(2));
-    const updatedPositions = portfolio.positions.filter(p => p.id !== posId);
-    const newBalance = Number((portfolio.balance + finalPnl).toFixed(2));
-    const marginFreed = (pos.lots * 100000) / 30;
-    const newMarginUsed = Math.max(0, portfolio.marginUsed - marginFreed);
+    setPortfolio(prev => {
+      const pos = prev.positions.find(p => p.id === posId);
+      if (!pos) {
+        closingIdsRef.current.delete(posId);
+        return prev;
+      }
 
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      closedPos = pos;
+      liveExitPrice = typeof overrideExitPrice === 'number' && overrideExitPrice > 0
+        ? overrideExitPrice
+        : LiveMarketFeedManager.getCanonicalPrice(pos.symbol);
 
+      finalPnl = unifiedLedgerService.computePositionPnlUsd(
+        pos.symbol,
+        pos.type,
+        pos.lots,
+        pos.entryPrice,
+        liveExitPrice
+      );
+
+      const updatedPositions = prev.positions.filter(p => p.id !== posId);
+      const newBalance = Number((prev.balance + finalPnl).toFixed(2));
+      const marginFreed = (pos.lots * 100000) / 30;
+      const newMarginUsed = Math.max(0, prev.marginUsed - marginFreed);
+      const remainingOpenPnl = updatedPositions.reduce((s, p) => s + (p.pnl || 0), 0);
+      const newEquity = Number((newBalance + remainingOpenPnl).toFixed(2));
+
+      const now = new Date();
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const isAutoInvalidation = exitReason === 'INVALIDATION_AUTO_CLOSE';
+      const notes = isAutoInvalidation
+        ? `⚡ Autonomous Exit on Invalidation: Closed at ${liveExitPrice}. ${finalPnl >= 0 ? `Small profit of +$${finalPnl.toFixed(2)} locked` : `Capital preserved (Loss: -$${Math.abs(finalPnl).toFixed(2)})`}. Reasons: ${invalidationTriggers?.join(' | ') || 'Technical/Fundamental Invalidation'}`
+        : `Position closed (${exitReason || 'MANUAL_CLOSE'}) at ${liveExitPrice}. Realized P&L: $${finalPnl.toFixed(2)}.`;
+
+      const historyItem: TradeHistoryItem = {
+        id: `th-${Date.now()}-${posId.slice(-4)}`,
+        symbol: pos.symbol,
+        type: pos.type,
+        lots: pos.lots,
+        entryPrice: pos.entryPrice,
+        exitPrice: liveExitPrice,
+        stopLoss: pos.stopLoss,
+        takeProfit: pos.takeProfit,
+        openTime: pos.openTime,
+        closeTime: timeStr,
+        pnl: finalPnl,
+        outcome: (finalPnl > 0 ? 'WIN' : finalPnl < 0 ? 'LOSS' : 'SCRATCH') as 'WIN' | 'LOSS' | 'SCRATCH',
+        riskManagerVerdict: 'APPROVED' as const,
+        strategyNotes: notes,
+        exitReason: exitReason || 'MANUAL_CLOSE',
+        invalidationTriggers: invalidationTriggers || [],
+      };
+
+      const updatedPortfolio: PortfolioState = {
+        ...prev,
+        balance: newBalance,
+        equity: newEquity,
+        positions: updatedPositions,
+        marginUsed: newMarginUsed,
+        freeMargin: Math.max(0, newEquity - newMarginUsed),
+        tradeHistory: [historyItem, ...prev.tradeHistory],
+      };
+
+      unifiedLedgerService.syncPortfolioState(updatedPortfolio, riskConfigRef.current.maxDailyDrawdownPercent || 4.0);
+      BrowserStorageManager.savePortfolio(updatedPortfolio);
+      fetch('/api/ledger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          portfolio: updatedPortfolio,
+          maxDailyDrawdownPercent: riskConfigRef.current.maxDailyDrawdownPercent || 4.0,
+        }),
+      }).catch(() => {});
+
+      return updatedPortfolio;
+    });
+
+    setTimeout(() => closingIdsRef.current.delete(posId), 300);
+    if (!closedPos) return;
+    const pos: Position = closedPos;
     const isAutoInvalidation = exitReason === 'INVALIDATION_AUTO_CLOSE';
-    const notes = isAutoInvalidation
-      ? `⚡ Autonomous Exit on Invalidation: Closed at ${liveExitPrice}. ${finalPnl >= 0 ? `Small profit of +$${finalPnl.toFixed(2)} locked` : `Capital preserved (Loss: -$${Math.abs(finalPnl).toFixed(2)})`}. Reasons: ${invalidationTriggers?.join(' | ') || 'Technical/Fundamental Invalidation'}`
-      : `Position closed at ${liveExitPrice}. Realized P&L: $${finalPnl.toFixed(2)}.`;
-
-    const historyItem: TradeHistoryItem = {
-      id: `th-${Date.now()}`,
-      symbol: pos.symbol,
-      type: pos.type,
-      lots: pos.lots,
-      entryPrice: pos.entryPrice,
-      exitPrice: liveExitPrice,
-      stopLoss: pos.stopLoss,
-      takeProfit: pos.takeProfit,
-      openTime: pos.openTime,
-      closeTime: timeStr,
-      pnl: finalPnl,
-      outcome: (finalPnl > 0 ? 'WIN' : finalPnl < 0 ? 'LOSS' : 'SCRATCH') as 'WIN' | 'LOSS' | 'SCRATCH',
-      riskManagerVerdict: 'APPROVED' as const,
-      strategyNotes: notes,
-      exitReason: exitReason || 'MANUAL_CLOSE',
-      invalidationTriggers: invalidationTriggers || [],
-    };
-
-    const updatedPortfolio = {
-      ...portfolio,
-      balance: newBalance,
-      equity: newBalance,
-      positions: updatedPositions,
-      marginUsed: newMarginUsed,
-      freeMargin: Math.max(0, newBalance - newMarginUsed),
-      tradeHistory: [historyItem, ...portfolio.tradeHistory],
-    };
-
-    setPortfolio(updatedPortfolio);
-    BrowserStorageManager.savePortfolio(updatedPortfolio);
 
     // 📓 Immutable Event-Driven Data Bus: Transmit complete execution payload directly to journal
     const closeResult = JournalStorageManager.recordTradeClose(
@@ -1114,7 +1198,7 @@ export default function Home() {
     const pnlPrefix = finalPnl >= 0 ? '+' : '';
     const alertMsg = isAutoInvalidation
       ? `⚡ AUTONOMOUS EXIT ON INVALIDATION: Closed ${pos.symbol} @ ${liveExitPrice} | P&L: ${pnlPrefix}$${finalPnl.toFixed(2)} (${finalPnl >= 0 ? 'Small profit secured' : 'Capital preserved'})`
-      : `CLOSED POSITION: ${pos.symbol} @ ${liveExitPrice} | Realized P&L: ${pnlPrefix}$${finalPnl.toFixed(2)}`;
+      : `CLOSED POSITION (${exitReason || 'MANUAL'}): ${pos.symbol} @ ${liveExitPrice} | Realized P&L: ${pnlPrefix}$${finalPnl.toFixed(2)}`;
 
     showNotification(alertMsg);
 
@@ -1124,6 +1208,7 @@ export default function Home() {
       triggerSwarm(selectedPair, timeframe, candles);
     }
   };
+  handleClosePositionRef.current = handleClosePosition;
 
   const handleForceRecalibrate = useCallback(() => {
     stateLatchingEngine.forceRecalibrate(selectedPair);
@@ -1283,6 +1368,7 @@ export default function Home() {
               takeProfit={consensus?.pair === selectedPair ? consensus.agents.risk.parameters.takeProfit1 : undefined}
               entryPrice={consensus?.pair === selectedPair ? consensus.agents.risk.parameters.entryPrice : undefined}
               signalBias={consensus?.pair === selectedPair ? consensus.agents.technical.bias : undefined}
+              indicators={consensus?.pair === selectedPair ? consensus.agents.technical.indicators : undefined}
               theme={theme}
             />
 
@@ -1359,7 +1445,7 @@ export default function Home() {
 
         {/* Tab 3: Historical Backtest */}
         {activeTab === 'backtest' && (
-          <BacktestView onBackToTerminal={() => setActiveTab('terminal')} />
+          <BacktestView defaultPair={selectedPair} onBackToTerminal={() => setActiveTab('terminal')} />
         )}
 
         {/* Tab 4: Persistent Trade Journals & Loss Attribution */}

@@ -101,8 +101,8 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="border-b border-terminal-border bg-terminal-900/95 backdrop-blur-md sticky top-0 z-40 w-full transition-colors duration-200">
       <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2 sm:py-2.5 space-y-2">
-        {/* Row 1: Brand & Nav Controls (Responsive Split across Mobile & Desktop) */}
-        <div className="flex items-center justify-between gap-2.5 sm:gap-3 w-full min-w-0">
+        {/* Row 1: Brand & Nav Controls (Responsive Flex-Wrap prevents medium/tablet collisions) */}
+        <div className="flex flex-wrap xl:flex-nowrap items-center justify-between gap-2 sm:gap-3 w-full min-w-0">
           {/* Left: Attached completely to the left - Responsive Hamburger Drawer Trigger + Brand */}
           <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
             {/* Modern Responsive Hamburger Menu Trigger with Smooth Proximity Hover Pullout */}
@@ -175,7 +175,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Desktop Middle: Market Scope Selector & Technical Analysis */}
-          <div className="hidden md:flex items-center gap-2">
+          <div className="hidden md:flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
             <div className="flex items-center bg-terminal-950 p-1 rounded-lg border border-terminal-border text-xs sm:text-sm shrink-0">
               <button
                 onClick={() => {
@@ -349,7 +349,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Mobile Sub-Row: Market Scope Selector & Technical Analysis (Visible on <md screens) */}
-        <div className="flex md:hidden items-center justify-between gap-2 w-full pt-1 border-t border-terminal-border/40">
+        <div className="flex md:hidden flex-wrap items-center justify-between gap-2 w-full pt-1 border-t border-terminal-border/40">
           <div className="flex items-center bg-terminal-950 p-1 rounded-lg border border-terminal-border text-xs flex-1 justify-around">
             <button
               onClick={() => {

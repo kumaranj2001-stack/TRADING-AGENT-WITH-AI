@@ -190,8 +190,12 @@ export const RiskRatioControllerModal: React.FC<RiskRatioControllerModalProps> =
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-bold text-white text-base sm:text-lg">Risk Ratio Controller</h3>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold">
-                  ZERO-VETO ACTIVE
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold border ${
+                  config.zeroVetoEnforced
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                }`}>
+                  {config.zeroVetoEnforced ? 'SCOUT OVERRIDE ACTIVE' : 'HARD-VETO GOVERNANCE ACTIVE'}
                 </span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
                   7-TIER DYNAMIC SIZING
@@ -215,7 +219,7 @@ export const RiskRatioControllerModal: React.FC<RiskRatioControllerModalProps> =
           <div className="flex items-center gap-2 text-slate-300">
             <Zap className="w-4 h-4 text-amber-400 shrink-0" />
             <span>
-              <strong className="text-amber-300">Zero-Veto Decoupling Active:</strong> Low-confidence setups (Grade F / E) automatically execute with conservative scout volume (0.01 - 0.08 lots) rather than halting or vetoing execution.
+              <strong className="text-emerald-300">Hard Risk Veto Governance Enforced:</strong> Trade execution strictly honors minimum confidence floors (&ge;68%), R:R thresholds, and max daily drawdown limits before clearing lots.
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-1.5 shrink-0">

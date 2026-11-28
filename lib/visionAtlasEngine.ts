@@ -1118,32 +1118,39 @@ export class VisionAtlasLabEngine {
    * Helper to generate baseline candles if input candles is empty
    */
   private generateBaselineCandles(symbol: CurrencyPair, basePrice: number, count: number = 60): Candle[] {
+    const canonical = LiveMarketFeedManager.getCanonicalCandles(symbol, '1h');
+    if (canonical && canonical.length >= 10) {
+      return canonical.slice(-count);
+    }
+
     const candles: Candle[] = [];
     const intervalMs = 60 * 60 * 1000;
     const now = Date.now();
-    let current = basePrice;
-    const volatility = basePrice * 0.003;
-    const decimals = symbol.includes('JPY') ? 3 : 5;
+    const volatility = basePrice * 0.0022;
+    const decimals = symbol.includes('JPY') || symbol.includes('INR') ? 3 : symbol.includes('XAU') || symbol.includes('XAG') ? 2 : 5;
 
+    let prevClose = Number((basePrice - volatility * 0.4).toFixed(decimals));
     for (let i = count - 1; i >= 0; i--) {
+      const idx = count - 1 - i;
       const timeMs = now - i * intervalMs;
-      const open = current;
-      const change = (Math.random() - 0.49) * volatility;
-      const close = Number((open + change).toFixed(decimals));
-      const high = Number((Math.max(open, close) + Math.random() * (volatility * 0.5)).toFixed(decimals));
-      const low = Number((Math.min(open, close) - Math.random() * (volatility * 0.5)).toFixed(decimals));
-      const volume = Math.floor(Math.random() * 3000) + 1000;
+      const open = prevClose;
+      const deterministicDelta = Math.sin(idx * 0.37) * volatility * 0.45 + Math.cos(idx * 0.19) * volatility * 0.2;
+      const close = i === 0 ? Number(basePrice.toFixed(decimals)) : Number((open + deterministicDelta).toFixed(decimals));
+      const wickSpan = Math.abs(Math.sin(idx * 0.63)) * (volatility * 0.35);
+      const high = Number((Math.max(open, close) + wickSpan).toFixed(decimals));
+      const low = Number((Math.min(open, close) - wickSpan).toFixed(decimals));
+      const volume = Math.floor(1400 + Math.abs(Math.sin(idx * 0.5)) * 2200);
 
-      candles.push({ 
-        time: new Date(timeMs).toISOString(), 
+      candles.push({
+        time: new Date(timeMs).toISOString(),
         timestamp: timeMs,
-        open, 
-        high, 
-        low, 
-        close, 
-        volume 
+        open,
+        high,
+        low,
+        close,
+        volume,
       });
-      current = close;
+      prevClose = close;
     }
     return candles;
   }

@@ -1,4 +1,5 @@
-import { generateCandles, getMarketSegmentForSymbol } from '../marketData';
+import { getMarketSegmentForSymbol } from '../marketData';
+import { unifiedMarketAuthority } from '../unifiedMarketAuthority';
 import type { Candle, CurrencyPair, TimeFrame } from '../types';
 import type { TechnicalScreenerSnapshot } from './types';
 import { resolveInstitutionalAssetContext, seededRange } from './helpers';
@@ -207,7 +208,7 @@ export class TechnicalScreenerEngine {
     customHeadline?: string;
   }): TechnicalScreenerSnapshot {
     const ctx = resolveInstitutionalAssetContext(params?.symbol || 'XAU/USD', params?.timeframe || '1h');
-    const candles = generateCandles(ctx.symbol as CurrencyPair, ctx.timeframe, 60);
+    const candles = unifiedMarketAuthority.getAuthoritativeCandles(ctx.symbol as CurrencyPair, ctx.timeframe).slice(-60);
     const totalBars = candles.length;
     const idx = Math.max(15, Math.min(totalBars, params?.replayBarIndex ?? 45));
     const replayVisible = candles.slice(0, idx);

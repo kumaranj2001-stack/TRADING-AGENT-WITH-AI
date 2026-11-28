@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Activity,
   Cpu,
@@ -39,6 +39,15 @@ export const ExecutionMicrostructureDesk: React.FC<Props> = ({
   const [cppCode, setCppCode] = useState<string>(microstructure.cppAcsilStudy.sourceCode);
   const [smartTapeMin, setSmartTapeMin] = useState<number>(microstructure.smartTapeMinFilter);
   const [busyMsg, setBusyMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAlgoType(execution.vwapExecution.algorithm);
+    setCBotCode(execution.cBotIde.defaultCode);
+    setCBotCompile(execution.cBotIde.compileResult);
+    setCppCode(microstructure.cppAcsilStudy.sourceCode);
+    setSmartTapeMin(microstructure.smartTapeMinFilter);
+    setBusyMsg(null);
+  }, [symbol, execution, microstructure]);
 
   const handleDomOrder = async (side: 'BUY' | 'SELL', price: number, orderType: 'LIMIT' | 'MARKET' = 'LIMIT') => {
     setBusyMsg(`Routing ${side} ${orderType} @ ${price} via FIX 4.4 / MT5 Bridge...`);

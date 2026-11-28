@@ -5,6 +5,7 @@
  */
 
 import { CurrencyPair } from '../types';
+import { LiveMarketFeedManager } from '../liveMarketFeed';
 
 export type BrokerProtocolType = 'FIX_4_4' | 'REST_V20' | 'WEBSOCKET_STREAM' | 'IBKR_CLIENT_PORTAL';
 
@@ -102,19 +103,21 @@ export class InstitutionalBrokerBridge {
     const fixTagOrdType = order.orderType === 'MARKET' ? '1' : '2';
     const rawFIX = `8=FIX.4.4|9=142|35=D|49=${this.senderCompId}|56=${this.targetCompId}|34=${this.msgSeqNum}|52=${new Date().toISOString()}|11=${order.clOrdId}|55=${order.symbol}|54=${fixTagSide}|38=${order.quantityUnits}|40=${fixTagOrdType}|59=3|10=188|`;
 
-    // Simulate microsecond latency and broker matching
-    const basePrice = order.price || 1.0850;
-    // Calculate realistic micro-slippage (e.g. 0.0 to 0.3 pips)
-    const slippagePips = (Math.random() * 0.3) * (order.side === 'BUY' ? 1 : -1);
-    const pipScale = order.symbol.includes('JPY') ? 0.01 : order.symbol.includes('XAU') ? 0.1 : 0.0001;
-    const fillPrice = basePrice + slippagePips * pipScale;
+    // Anchor to canonical spot feed whenever order price omitted
+    const basePrice = order.price || LiveMarketFeedManager.getCanonicalPrice(order.symbol);
+    // Deterministic depth-impact slippage model scaled cleanly by order notional units (max 0.35 pips)
+    const sizeLots = Math.max(0.01, order.quantityUnits / 100000);
+    const deterministicImpact = Math.min(0.35, Number((0.04 + sizeLots * 0.03).toFixed(3)));
+    const slippagePips = deterministicImpact * (order.side === 'BUY' ? 1 : -1);
+    const pipScale = order.symbol.includes('JPY') || order.symbol.includes('INR') ? 0.01 : order.symbol.includes('XAU') ? 0.1 : 0.0001;
+    const fillPrice = Number((basePrice + slippagePips * pipScale).toFixed(order.symbol.includes('JPY') ? 3 : order.symbol.includes('XAU') ? 2 : 5));
     
-    const latencyMs = Math.round(performance.now() - startTime + 8 + Math.random() * 10);
+    const latencyMs = Math.max(4, Math.round(performance.now() - startTime + 9));
 
     const report: ExecutionReport = {
       clOrdId: order.clOrdId,
       orderId: `ord_${Date.now()}_${this.msgSeqNum}`,
-      execId: `exec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      execId: `exec_${Date.now()}_${this.msgSeqNum}`,
       execType: 'FILL',
       ordStatus: 'FILLED',
       symbol: order.symbol,

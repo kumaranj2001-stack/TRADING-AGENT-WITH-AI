@@ -63,6 +63,24 @@ async function main() {
   assert(!badRatio.valid, 'Division by zero caught safely');
   console.log(`✅ Pillar 3 (Macro/Fundamental): Custom Ratio valid (${macro.customRatioEvaluation.results[0].symbol}=${macro.customRatioEvaluation.results[0].value}), Scatter R²=${macro.economicScatterPlot.rSquared}`);
 
+  // 4b. Asset-Class Taxonomy Guard on XAU/USD (Must NOT leak semiconductor/equity debt templates)
+  const goldMacro = fundamentalMacroEngine.getSnapshot({ symbol: 'XAU/USD' });
+  const goldMacroJson = JSON.stringify(goldMacro);
+  assert(!goldMacroJson.includes('XAU Senior Unsecured'), 'XAU/USD must never template corporate XAU Senior Unsecured CDS');
+  assert(!goldMacroJson.includes('Vanguard Group (13F)'), 'XAU/USD must never show equity 13F Vanguard shareholdings');
+  assert(!goldMacroJson.includes('ASML Holding'), 'XAU/USD supply chain must model mines/refineries/vaults, not EUV lithography');
+  assert(goldMacro.supplyChainGraph.some((n) => n.entity.includes('LBMA')), 'XAU/USD supply chain models LBMA/COMEX physical vaults');
+  const fxSlip = executionBridgeEngine.calculateSlippage(
+    executionBridgeEngine.buildLevel2Book('EUR/USD', 1.0968, 0.0001, 5),
+    'BUY',
+    100000,
+    1.0968,
+    5,
+    'EUR/USD'
+  );
+  assert(fxSlip.totalSlippageBps > 0 && fxSlip.totalSlippageBps < 20, `1.0 lot EUR/USD slippage realistic (<20 bps), got ${fxSlip.totalSlippageBps}`);
+  console.log('✅ Pillar 3b (Asset-Class Taxonomy & FX Lot Slippage): Verified zero equity contamination on XAU/USD.');
+
   // 5. Charting, Screener & News API: Pine v5 Compiler, Bar Replay, Holly AI, RVOL, Squawk
   const scr = technicalScreenerEngine.getSnapshot({ symbol: 'NVDA', replayBarIndex: 35 });
   assert(scr.pineCompiler.compiledOk && scr.pineCompiler.plots.length === 3, 'Pine v5 indicator compiled & plotted 3 series');

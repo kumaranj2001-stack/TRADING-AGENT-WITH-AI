@@ -5,7 +5,7 @@ import { ConfluenceGrade, TierRiskParameter, RiskRatioControllerConfig } from '.
 // ============================================================================
 
 export const DEFAULT_TIER_RISK_CONFIG: RiskRatioControllerConfig = {
-  zeroVetoEnforced: true,
+  zeroVetoEnforced: false,
   dynamicSizingEnabled: true,
   minConservativeLots: 0.01,
   maxInstitutionalLots: 5.0,

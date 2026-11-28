@@ -22,6 +22,12 @@ export const MacroFundamentalDesk: React.FC<Props> = ({
   const [isAnimatingCurve, setIsAnimatingCurve] = useState<boolean>(false);
 
   useEffect(() => {
+    setFormulaInput(macro.customRatioEvaluation.formula);
+    setRatioResult(macro.customRatioEvaluation);
+    setCurveIdx(0);
+  }, [symbol, macro]);
+
+  useEffect(() => {
     if (!isAnimatingCurve) return;
     const id = setInterval(() => {
       setCurveIdx((prev) => (prev + 1) % macro.yieldCurveHistory.length);

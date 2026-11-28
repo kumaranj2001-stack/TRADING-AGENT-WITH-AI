@@ -434,31 +434,37 @@ export class SwarmCoordinator {
     const riskBiasVal = risk.action === 'BUY' ? 1.0 : risk.action === 'SELL' ? -1.0 : 0;
     const totalBiasConviction = techBiasVal + fundBiasVal + newsBiasVal + fxBiasVal + ofBiasVal + candleBiasVal + riskBiasVal;
 
-    let activeDirection: 'BUY' | 'SELL';
-    if (consensusDirection === 'HOLD') {
-      if (sellScore > buyScore || totalBiasConviction < 0) {
-        activeDirection = 'SELL';
-      } else if (buyScore > sellScore || totalBiasConviction > 0) {
-        activeDirection = 'BUY';
+    let activeDirection: 'BUY' | 'SELL' | 'HOLD' = consensusDirection;
+    if (consensusDirection !== 'HOLD') {
+      // Enforce strict directional consistency: never allow overwhelming cross-desk sell to emit BUY or vice-versa
+      const strongBearishPatternVsBuy =
+        consensusDirection === 'BUY' &&
+        !candlestick.rejectionStatus.isRejectedNoise &&
+        candlestick.bias.includes('SELL') &&
+        technical.bias.includes('SELL');
+      const strongBullishPatternVsSell =
+        consensusDirection === 'SELL' &&
+        !candlestick.rejectionStatus.isRejectedNoise &&
+        candlestick.bias.includes('BUY') &&
+        technical.bias.includes('BUY');
+
+      if (strongBearishPatternVsBuy || strongBullishPatternVsSell) {
+        activeDirection = 'HOLD';
+        overallConfidence = Math.min(overallConfidence, 52);
       } else {
-        activeDirection = technical.bias.includes('SELL') ? 'SELL' : 'BUY';
+        const isOverwhelminglySell =
+          (fundamental.bias.includes('SELL') && (news.bias.includes('SELL') || technical.bias.includes('SELL') || orderFlow.bias.includes('SELL'))) ||
+          (technical.bias === 'STRONG_SELL' && candlestick.bias.includes('SELL'));
+        const isOverwhelminglyBuy =
+          (fundamental.bias.includes('BUY') && (news.bias.includes('BUY') || technical.bias.includes('BUY') || orderFlow.bias.includes('BUY'))) ||
+          (technical.bias === 'STRONG_BUY' && candlestick.bias.includes('BUY'));
+
+        if (activeDirection === 'BUY' && isOverwhelminglySell && !isOverwhelminglyBuy) {
+          activeDirection = 'HOLD';
+        } else if (activeDirection === 'SELL' && isOverwhelminglyBuy && !isOverwhelminglySell) {
+          activeDirection = 'HOLD';
+        }
       }
-    } else {
-      activeDirection = consensusDirection;
-    }
-
-    // Absolute Logical Consistency Invariant:
-    // If Fundamental and News desks or Technical desk maintain a strong sell posture,
-    // the setup can NEVER be labeled Long (BUY)!
-    const isOverwhelminglySell = (fundamental.bias.includes('SELL') && (news.bias.includes('SELL') || technical.bias.includes('SELL') || orderFlow.bias.includes('SELL'))) ||
-                                 technical.bias === 'STRONG_SELL' || fundamental.bias === 'STRONG_SELL' || orderFlow.bias === 'STRONG_SELL';
-    const isOverwhelminglyBuy = (fundamental.bias.includes('BUY') && (news.bias.includes('BUY') || technical.bias.includes('BUY') || orderFlow.bias.includes('BUY'))) ||
-                                technical.bias === 'STRONG_BUY' || fundamental.bias === 'STRONG_BUY' || orderFlow.bias === 'STRONG_BUY';
-
-    if (isOverwhelminglySell && !isOverwhelminglyBuy) {
-      activeDirection = 'SELL';
-    } else if (isOverwhelminglyBuy && !isOverwhelminglySell) {
-      activeDirection = 'BUY';
     }
 
     // ===============================================================
@@ -642,13 +648,15 @@ export class SwarmCoordinator {
       calculatedEntry = currentPrice;
     }
 
+    const calcDirection: 'BUY' | 'SELL' = activeDirection === 'SELL' ? 'SELL' : 'BUY';
+
     // 🛡️ Absolute Capital Preservation Gating & Order Book Liquidity Wall Anchoring
     // Mathematically calculates dynamic Stop Loss and Take Profit anchored strictly behind
     // order book liquidity walls using real-time volatility metrics to eliminate unhedged exposure.
     const capitalPreservationGate = knowledgeEngine.evaluateCapitalPreservationGate({
       symbol: pair,
       currentPrice,
-      direction: activeDirection,
+      direction: calcDirection,
       metaConsensusScore: exhaustiveCorpus.metaConsensusScore,
       debateFrictionIndex: exhaustiveCorpus.debateFrictionIndex,
       technical,
@@ -670,7 +678,7 @@ export class SwarmCoordinator {
     // 🌊 Enforce Strict Tight Variance on final execution parameters against authoritative spot price
     const tightExecutionPlan = liveMarketAnchorConstraintEngine.enforceTightVarianceConstraint({
       symbol: pair,
-      direction: activeDirection,
+      direction: calcDirection,
       proposedEntry: calculatedEntry,
       proposedStopLoss: finalStopLoss,
       proposedTakeProfit1: finalTakeProfit,
@@ -683,13 +691,12 @@ export class SwarmCoordinator {
 
     // 🔬 Strict Automated Signal Validation Module Reconciliation:
     // Reconciles live multi-asset stream against technical/fundamental engines,
-    // verifies unlimited profit potential with positive expectancy (R:R >= 2.0:1),
-    // and executes autonomous risk governance gatekeeper.
+    // verifies positive expectancy (R:R >= 2.0:1), and executes risk governance gatekeeper.
     const entryProximityFilter = automatedSignalValidationModule.evaluateEntryProximityBand({
       symbol: pair,
       proposedEntry: calculatedEntry,
       livePrice: currentPrice,
-      direction: activeDirection,
+      direction: calcDirection,
       minBandPips: 10,
     });
 
@@ -700,24 +707,16 @@ export class SwarmCoordinator {
       monteCarloWinProbability: overallConfidence,
       proposedStopLoss: finalStopLoss,
       currentPrice,
-      direction: activeDirection,
+      direction: calcDirection,
       maxDrawdownLimitPercent: 2.0,
       minAllowedRiskReward: 2.0,
       minAllowedWinProbability: 68,
     });
 
-    // Decouple trade entry from rigid swarm vetoes: continuous execution active 24/7
-    const orderType = activeDirection === 'SELL' ? 'SELL_MARKET' : 'BUY_MARKET';
-
-    let executionAuthorized = true;
-    let executionStatus: 'READY' | 'EXECUTED' | 'VETOED' = 'READY';
-
     // 🌐 Real-Time Telemetry Bridge & Strict Trend Gate Verification:
-    // Resolves signal lag during market reversals:
-    // Automatically downgrades or flips static "Definitive Buy" signals when price breaches support or diverges from macro sentiment.
     const trendGate = macroTelemetryBridge.evaluateTrendGate({
       symbol: pair,
-      macroSignal: activeDirection,
+      macroSignal: calcDirection,
       macroSentimentScore: news?.sentimentScore ? news.sentimentScore / 100 : 0,
       currentPrice,
       supportLevel: technical.keySupport,
@@ -725,13 +724,11 @@ export class SwarmCoordinator {
       candles: marketCandles,
     });
 
-    if (trendGate.downgradeOrFlipAction === 'FLIP_BIAS') {
+    if (activeDirection !== 'HOLD' && trendGate.downgradeOrFlipAction === 'FLIP_BIAS') {
       activeDirection = trendGate.effectiveSignal === 'SELL' ? 'SELL' : 'BUY';
       unifiedDecision.direction = activeDirection;
       unifiedDecision.summary = `Trend Gate Flip: ${activeDirection} reversal triggered via real-time telemetry bridge (${trendGate.rationale})`;
     } else if (trendGate.downgradeOrFlipAction === 'DOWNGRADE_CONVICTION') {
-      executionAuthorized = true;
-      executionStatus = 'READY';
       finalLots = Math.max(0.01, Math.min(0.02, finalLots));
     }
 
@@ -758,35 +755,46 @@ export class SwarmCoordinator {
     // 🛡️ Pre-Execution Active Failure Filter (Cross-referencing 1051st+ Operative Rules)
     const preExecutionFilter = diagnosticReasoningEngine.crossReferenceSetup({
       symbol: pair,
-      direction: activeDirection,
+      direction: calcDirection,
       lots: finalLots,
       indicators: technical.indicators,
       smcStructure: technical.smartMoneyConcepts?.structure,
       centralBankBias: fundamental.baseCurrencyOutlook?.centralBankStance,
     });
 
-    // 🛡️ Strict Risk Management Workflow Priority & Absolute Capital Preservation Verification
-    // Sizing is never speculative but strictly proportional to validated risk parameters.
     const riskWorkflowCompleted = !!(
       risk &&
       risk.parameters &&
       risk.parameters.positionSizeLots > 0 &&
       risk.parameters.stopLoss > 0 &&
-      risk.parameters.takeProfit1 > 0
+      risk.parameters.takeProfit1 > 0 &&
+      risk.verdict !== 'VETOED'
     );
 
-    // 🛡️ Zero-Veto Dynamic Position Sizing Architecture:
-    // Hard vetoes permanently eliminated: trades are never aborted due to friction, R:R, or gatekeeper warnings.
-    // Instead, position size dynamically scales down to micro-lots (0.01 - 0.02 lots),
-    // and entries remain mandatory with 1:1 Breakeven Ratchet armed.
-    executionAuthorized = !failSafePauseActive;
-    executionStatus = failSafePauseActive ? 'VETOED' : 'READY';
+    const hardGateBlocked =
+      failSafePauseActive ||
+      activeDirection === 'HOLD' ||
+      overallConfidence < 68 ||
+      risk.verdict === 'VETOED' ||
+      !riskWorkflowCompleted ||
+      chiefReviewerAudit.status === 'VETOED' ||
+      !preExecutionFilter.allowed;
 
-    if (!riskWorkflowCompleted || overallConfidence < 68 || !capitalPreservationGate.passed || chiefReviewerAudit.status === 'VETOED' || !preExecutionFilter.allowed || !entryProximityFilter.passed || !riskGovernanceGatekeeper.passed) {
+    const orderType: 'BUY_MARKET' | 'SELL_MARKET' | 'NONE' = hardGateBlocked
+      ? 'NONE'
+      : activeDirection === 'SELL'
+      ? 'SELL_MARKET'
+      : 'BUY_MARKET';
+
+    const executionAuthorized = !hardGateBlocked;
+    const executionStatus: 'READY' | 'EXECUTED' | 'VETOED' = hardGateBlocked ? 'VETOED' : 'READY';
+
+    if (hardGateBlocked) {
+      finalLots = 0;
+      unifiedDecision.direction = 'HOLD';
+      unifiedDecision.recommendedAction = `VETOED / NO TRADE on ${pair} @ ${currentPrice} (Risk/Confidence Gate Enforced)`;
+    } else if (!capitalPreservationGate.passed || !entryProximityFilter.passed || !riskGovernanceGatekeeper.passed) {
       finalLots = Math.max(0.01, Math.min(0.02, finalLots));
-      if (!unifiedDecision.summary.includes('Micro-Lot Scaled')) {
-        unifiedDecision.summary = `Dynamic Micro-Lot Sizing: Sized to ${finalLots} lots with 1:1 Breakeven Ratchet armed. ${unifiedDecision.summary}`;
-      }
     } else if (chiefReviewerAudit.contradictionResolution.resolutionAction === 'REDUCE_SIZE_50_PERCENT') {
       finalLots = Math.max(0.01, Number((finalLots * 0.50).toFixed(2)));
     } else if (preExecutionFilter.action === 'ADJUST_SIZING') {
@@ -807,6 +815,8 @@ export class SwarmCoordinator {
       directiveTitle: debateOutcome.synthesis.terminalNode?.directiveTitle || 'MAINTAIN POSITION DIRECTIVE: CONFLUENCE RESILIENT ACROSS 8 SPECIALIST AGENTS',
       actionableSummary: debateOutcome.synthesis.terminalNode?.actionableSummary || 'Consensus verified across 8 autonomous agents',
       institutionalClearanceStatus: failSafePauseActive
+        ? ('FAIL_SAFE_PAUSED' as const)
+        : !executionAuthorized
         ? ('FAIL_SAFE_PAUSED' as const)
         : (finalLots <= 0.02 ? ('DYNAMIC_TIER_APPROVED' as const) : ('CLEARED_FOR_EXECUTION' as const)),
       zeroVetoAllocationLots: finalLots,
@@ -876,7 +886,7 @@ export class SwarmCoordinator {
         chiefRiskManagerUnifiedDirective,
       },
       executionSignal: {
-        authorized: !failSafePauseActive,
+        authorized: executionAuthorized,
         orderType,
         symbol: pair,
         lots: finalLots,
@@ -885,12 +895,12 @@ export class SwarmCoordinator {
         takeProfit: finalTakeProfit,
         riskReward: existingLatched?.anchoredRiskReward || finalRiskReward,
         riskAmountUsd: finalMaxRisk,
-        status: failSafePauseActive ? 'VETOED' : 'READY',
+        status: executionStatus,
         gradingTier: confluenceGrade,
         tierDescription: failSafePauseActive
-          ? `FAIL-SAFE PAUSE ACTIVE: WebSocket/SSE stream latency (${streamLatencyMs}ms) exceeded 1500ms safety threshold. Execution paused against stale data.`
-          : (finalLots <= 0.02 && overallConfidence < 68)
-          ? `DYNAMIC MICRO-LOT ALLOCATION (${finalLots} Lots): Hard veto decoupled. 1:1 Breakeven Ratchet armed for zero-loss exposure.`
+          ? `FAIL-SAFE PAUSE ACTIVE: WebSocket/SSE stream latency (${streamLatencyMs}ms) exceeded 1500ms safety threshold.`
+          : !executionAuthorized
+          ? `TRADE VETOED: Hard risk governance or 68% minimum confidence threshold not satisfied.`
           : tierParams.executionPolicy,
       },
       autonomousLoopTelemetry: {
@@ -1485,7 +1495,7 @@ export class SwarmCoordinator {
       agentName: risk.agentName,
       avatarColor: 'text-emerald-400 bg-emerald-950/60 border-emerald-800',
       content: directive === 'STRATEGIC_EXIT'
-        ? `CHIEF RISK OFFICER BINDING VERDICT: ZERO-VETO DYNAMIC SCALE-DOWN: Injected scenario "${scenarioContext?.prompt || 'Stress Event'}" prompts defensive risk arbitration. Dialectical pressure comparison: Buy Channel ${buySideChannelWeight}% vs Sell Channel ${sellSideChannelWeight}%. Opposing arguments (${techOpposeRule.id} WR: ${techOpposeRule.expectedWinRate}%) active. Enforcing Grade E/F conservative micro-lot sizing (${debatedPositionSize} lots).`
+        ? `CHIEF RISK OFFICER BINDING VERDICT: HARD RISK VETO ENFORCED (NO_TRADE): Injected scenario "${scenarioContext?.prompt || 'Stress Event'}" breaches risk governance or confidence floor (<68%). Dialectical pressure comparison: Buy Channel ${buySideChannelWeight}% vs Sell Channel ${sellSideChannelWeight}%. Opposing arguments (${techOpposeRule.id} WR: ${techOpposeRule.expectedWinRate}%) block entry at 0 lots.`
         : directive === 'MODIFY_POSITION'
         ? `CHIEF RISK OFFICER BINDING VERDICT: Scenario cross-examination concluded. Dialectical channel weights: Buy-Side ${buySideChannelWeight}% vs Sell-Side ${sellSideChannelWeight}%. Opposing risk ${techOpposeRule.id} arbitrated with dynamic risk mitigation. SETUP APPROVED WITH RISK-ADJUSTED PARAMETERS:
 • Definitive Bias: ${dominantSide} (${confluenceGrade} Grade, ${debatedConfidence}% Confidence)
@@ -1597,7 +1607,7 @@ export class SwarmCoordinator {
         orderFlowAnalyst: swarmSignOff.orderFlowAnalyst,
         candlestickPatternAnalyst: swarmSignOff.candlestickPatternAnalyst,
         chiefRiskOfficer: swarmSignOff.chiefRiskOfficer,
-        chiefReviewer: `Dr. Marcus Sterling (Chief Reviewer): Institutional Gatekeeper Audit cleared across Eight-Agent Consensus Chamber. Strategy corpus synchronously verified with zero heuristic pruning. Zero-veto parameterization authorized.`,
+        chiefReviewer: `Dr. Marcus Sterling (Chief Reviewer): Institutional Gatekeeper Audit completed across Eight-Agent Consensus Chamber. Hard risk vetoes, minimum 68% confidence threshold, and directional consistency enforced (${directive}).`,
       },
     };
 
@@ -1636,8 +1646,8 @@ export class SwarmCoordinator {
       content: `[MANDATORY CHIEF REVIEWER FINAL GATEKEEPER AUDIT & EXECUTION CLEARANCE]
 • Institutional Execution Clearance: Audited all 8 specialized agents (Technical, Fundamental, News Wire, Forex Intermarket, Order Flow, Candlestick Pattern, Risk Governance, and Chief Reviewer) following dialectical deliberation comparing Buy-Side (${buySideChannelWeight}%) vs Sell-Side (${sellSideChannelWeight}%) channel pressure.
 • Candlestick Price-Action Gatekeeper Clearance: Verified ${candlestick.detectedPattern.replace(/_/g, ' ')} against Knowledge Base pattern repository with ${candlestick.wickToBodyRatio}:1 wick ratio, ${candlestick.volumeConfirmation.volumeMultiplier}x volume confirmation, and defining candle stop-loss boundary anchored at ${candlestick.definingCandleBoundary.suggestedStopLoss}.
-• Zero-Veto Dynamic Allocation Mandate: Hard vetoes permanently decommissioned in favor of dynamic risk-curtailed lot sizing (${debatedPositionSize} lots) and 1:1 Breakeven Ratchet protection.
-• Setup Status: ${failSafePauseActive ? 'FAIL-SAFE PAUSED (Stream latency > 1500ms)' : 'APPROVED FOR MANDATORY LIVE DISPATCH at exact real-time bid/ask tick with maximum 10-pip entry proximity tolerance'}.
+• Risk & Confidence Governance Mandate: Hard risk vetoes enforced below 68% confidence, on insufficient R:R, or on daily drawdown breach (${risk.verdict === 'VETOED' ? 'VETOED • 0.00 lots' : `${debatedPositionSize} lots • 1:1 Breakeven Ratchet armed`}).
+• Setup Status: ${failSafePauseActive ? 'FAIL-SAFE PAUSED (Stream latency > 1500ms)' : risk.verdict === 'VETOED' || directive === 'STRATEGIC_EXIT' ? 'BLOCKED BY HARD RISK VETO (0 LOTS DISPATCHED)' : 'APPROVED FOR LIVE DISPATCH within real-time bid/ask tolerance'}.
 • Order Flow Integration: Audited CVD absorption, 3:1 footprint imbalances, and resting order book liquidity walls with zero unhedged exposure.
 • Invalidation Mandate: Active entry locked with explicit structural invalidation boundary (anchored strictly to defining candle extreme wick at ${candlestick.definingCandleBoundary.extremeWickPrice}).`,
       sentiment: dominantSide === 'BUY' ? 'BULLISH' : 'BEARISH',

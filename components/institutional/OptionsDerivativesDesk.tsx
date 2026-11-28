@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShieldAlert, Layers, Flame } from 'lucide-react';
 import type { OptionsDerivativesSnapshot } from '@/lib/institutional/types';
 
@@ -18,6 +18,12 @@ export const OptionsDerivativesDesk: React.FC<Props> = ({
   const [ivShift, setIvShift] = useState<number>(options.pnlHeatmap.ivShiftPct);
   const [potTarget, setPotTarget] = useState<string>(String(options.probabilityOfTouch.targetPrice));
   const [potDte, setPotDte] = useState<number>(options.probabilityOfTouch.dte);
+
+  useEffect(() => {
+    setIvShift(options.pnlHeatmap.ivShiftPct);
+    setPotTarget(String(options.probabilityOfTouch.targetPrice));
+    setPotDte(options.probabilityOfTouch.dte);
+  }, [symbol, options]);
 
   return (
     <div className="space-y-4">

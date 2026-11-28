@@ -24,9 +24,8 @@ export type TickListener = (packet: OrderFlowTickPacket) => void;
 export type StatusListener = (status: OrderFlowConnectionStatus, latencyMs: number) => void;
 
 /**
- * Isolated, Low-Latency WebSocket Feed Client for Real-Time Price Action & Order Flow.
- * Completely decoupled from terminal chart feeds to maintain strict state isolation.
- * Includes automatic exponential-backoff reconnection and strict data validation.
+ * Order Flow WebSocket Feed Client synchronized to the Canonical Unified Market Feed.
+ * Includes automatic exponential-backoff reconnection and strict packet validation.
  */
 export class IsolatedOrderFlowWebSocketClient {
   private symbol: CurrencyPair;
@@ -116,10 +115,9 @@ export class IsolatedOrderFlowWebSocketClient {
 
   private startHeartbeat() {
     this.stopHeartbeat();
-    // Jitter latency periodically to reflect realistic network telemetry
     this.pingInterval = setInterval(() => {
       if (this.status === 'LIVE') {
-        this.latencyMs = Math.floor(12 + Math.random() * 15);
+        this.latencyMs = LiveMarketFeedManager.getWebSocketTelemetry().latencyMs || 12;
         this.statusListeners.forEach(l => l('LIVE', this.latencyMs));
       }
     }, 4000);
@@ -134,13 +132,13 @@ export class IsolatedOrderFlowWebSocketClient {
 
   private startStreaming() {
     this.stopStreaming();
-    // High-frequency tick generator (100ms - 250ms per order flow print)
-    const tickFrequencyMs = 180;
+    // Synchronized high-frequency order flow publisher anchored strictly to LiveMarketFeedManager SSOT
+    const tickFrequencyMs = 450;
 
     this.streamInterval = setInterval(() => {
       if (this.status !== 'LIVE') return;
-      const rawPacket = this.generateIsolatedTick();
-      
+      const rawPacket = this.generateUnifiedTick();
+
       // Strict data validation gate: Verify packet schema integrity
       if (this.validatePacket(rawPacket)) {
         this.tickListeners.forEach(listener => listener(rawPacket));
@@ -169,38 +167,30 @@ export class IsolatedOrderFlowWebSocketClient {
   }
 
   /**
-   * Generates realistic price micro-structure for order flow analysis
+   * Derives synchronized Order Flow tick from the canonical chart price & candle momentum (Zero random-walk divergence).
    */
-  private generateIsolatedTick(): OrderFlowTickPacket {
+  public generateUnifiedTick(): OrderFlowTickPacket {
+    const bidAsk = LiveMarketFeedManager.getCanonicalBidAsk(this.symbol);
+    const candles = LiveMarketFeedManager.getCanonicalCandles(this.symbol, '1h');
+    const lastCandle = candles[candles.length - 1];
+    this.currentPrice = bidAsk.mid;
+
+    const side: 'BUY' | 'SELL' = lastCandle && lastCandle.close < lastCandle.open ? 'SELL' : 'BUY';
+    const recentVol = lastCandle?.volume || 1500;
     const isGold = this.symbol.includes('XAU');
     const isCrude = this.symbol.includes('WTI') || this.symbol.includes('BRENT');
-    const isNifty = this.symbol.includes('NIFTY');
-    const isForex = !isGold && !isCrude && !isNifty;
-
-    const tickUnit = isForex ? 0.0001 : isGold ? 0.20 : isCrude ? 0.05 : 1.0;
-    const spread = isForex ? 0.00015 : isGold ? 0.30 : 0.04;
-
-    // Small random micro-tick walk
-    const direction = Math.random() > 0.48 ? 1 : -1;
-    const step = (Math.random() > 0.7 ? 2 : 1) * tickUnit * direction;
-    this.currentPrice = Number((this.currentPrice + step).toFixed(isForex ? 5 : 2));
-
-    const bid = Number((this.currentPrice - spread / 2).toFixed(isForex ? 5 : 2));
-    const ask = Number((this.currentPrice + spread / 2).toFixed(isForex ? 5 : 2));
-
-    // Determine aggressive buyer vs aggressive seller
-    const side: 'BUY' | 'SELL' = Math.random() > 0.46 ? 'BUY' : 'SELL';
-    const isBlock = Math.random() > 0.88; // 12% probability of institutional block
-    const baseSize = isGold ? 2.5 : isCrude ? 5.0 : 15.0;
-    const size = Number((isBlock ? baseSize * (2 + Math.random() * 5) : baseSize * (0.2 + Math.random() * 1.5)).toFixed(2));
+    const baseSize = isGold ? 3.5 : isCrude ? 6.0 : 12.0;
+    const volRatio = Math.min(3.5, Math.max(0.5, recentVol / 25000));
+    const isBlock = volRatio >= 2.2;
+    const size = Number((baseSize * volRatio).toFixed(2));
     const delta = side === 'BUY' ? size : -size;
 
     return {
       symbol: this.symbol,
-      price: side === 'BUY' ? ask : bid,
+      price: side === 'BUY' ? bidAsk.ask : bidAsk.bid,
       size,
-      bid,
-      ask,
+      bid: bidAsk.bid,
+      ask: bidAsk.ask,
       side,
       delta,
       timestamp: Date.now(),

@@ -18,6 +18,24 @@ import {
   Compass
 } from 'lucide-react';
 import { CurrencyPair } from '@/lib/types';
+import { timezoneDstEngine } from '@/lib/timezoneDstEngine';
+
+/**
+ * Checks whether Sydney is currently in AEDT (UTC+11: first Sun Oct -> first Sun Apr) vs AEST (UTC+10).
+ */
+function isSydneyAedt(date: Date): boolean {
+  const year = date.getUTCFullYear();
+  const oct1 = new Date(Date.UTC(year, 9, 1));
+  const firstSunOct = 1 + ((7 - oct1.getUTCDay()) % 7);
+  const aedtStart = Date.UTC(year, 9, firstSunOct - 1, 16, 0, 0); // 02:00 AEST = 16:00 UTC prev day
+
+  const apr1 = new Date(Date.UTC(year, 3, 1));
+  const firstSunApr = 1 + ((7 - apr1.getUTCDay()) % 7);
+  const aedtEnd = Date.UTC(year, 3, firstSunApr - 1, 16, 0, 0);
+
+  const ts = date.getTime();
+  return ts >= aedtStart || ts < aedtEnd;
+}
 
 interface DynamicTradingSessionTimelineProps {
   currentPair?: CurrencyPair;
@@ -219,9 +237,65 @@ export const DynamicTradingSessionTimeline: React.FC<DynamicTradingSessionTimeli
     (utcDay === 6) || 
     (utcDay === 0 && currentUtcMinutes < 21 * 60);
 
-  // Evaluate each market session status
+  // Compute DST-adjusted global session windows dynamically from timezoneDstEngine
+  const { activeSessionsConfig, activeOverlapsConfig } = useMemo(() => {
+    const isUsDst = timezoneDstEngine.isUsDst(now);
+    const isEuDst = timezoneDstEngine.isEuDst(now);
+    const isSydDst = isSydneyAedt(now);
+
+    const sydOpenHour = isSydDst ? 20 : 21;
+    const sydCloseHour = isSydDst ? 5 : 6;
+    const ldnOpenHour = isEuDst ? 7 : 8;
+    const ldnCloseHour = isEuDst ? 15 : 16;
+    const nyOpenHour = isUsDst ? 12 : 13;
+    const nyCloseHour = isUsDst ? 20 : 21;
+
+    const dynSessions: MarketSessionConfig[] = SESSIONS.map((s) => {
+      if (s.id === 'sydney') return { ...s, utcOpenHour: sydOpenHour, utcCloseHour: sydCloseHour };
+      if (s.id === 'london') return { ...s, utcOpenHour: ldnOpenHour, utcCloseHour: ldnCloseHour };
+      if (s.id === 'newyork') return { ...s, utcOpenHour: nyOpenHour, utcCloseHour: nyCloseHour };
+      return s;
+    });
+
+    const dynOverlaps: OverlapConfig[] = OVERLAPS.map((ov) => {
+      if (ov.id === 'london-ny') {
+        const startMin = Math.max(ldnOpenHour * 60, nyOpenHour * 60);
+        const endMin = Math.min(ldnCloseHour * 60 + 30, nyCloseHour * 60);
+        return {
+          ...ov,
+          utcStartHour: Math.floor(startMin / 60),
+          utcStartMinute: startMin % 60,
+          utcEndHour: Math.floor(endMin / 60),
+          utcEndMinute: endMin % 60,
+        };
+      }
+      if (ov.id === 'sydney-tokyo') {
+        return {
+          ...ov,
+          utcStartHour: 0,
+          utcStartMinute: 0,
+          utcEndHour: sydCloseHour,
+          utcEndMinute: 0,
+        };
+      }
+      if (ov.id === 'tokyo-london') {
+        return {
+          ...ov,
+          utcStartHour: ldnOpenHour,
+          utcStartMinute: 0,
+          utcEndHour: 9,
+          utcEndMinute: 0,
+        };
+      }
+      return ov;
+    });
+
+    return { activeSessionsConfig: dynSessions, activeOverlapsConfig: dynOverlaps };
+  }, [now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours()]);
+
+  // Evaluate each market session status using DST-calibrated windows
   const sessionStatuses = useMemo(() => {
-    return SESSIONS.map((sess) => {
+    return activeSessionsConfig.map((sess) => {
       const openMinutes = sess.utcOpenHour * 60 + sess.utcOpenMinute;
       const closeMinutes = sess.utcCloseHour * 60 + sess.utcCloseMinute;
       const wrapsMidnight = closeMinutes <= openMinutes; // e.g. Sydney 21:00 to 06:00
@@ -310,11 +384,11 @@ export const DynamicTradingSessionTimeline: React.FC<DynamicTradingSessionTimeli
         localCityTime,
       };
     });
-  }, [currentUtcMinutes, utcSeconds, utcDay, isWeekend, now]);
+  }, [activeSessionsConfig, currentUtcMinutes, utcSeconds, utcDay, isWeekend, now]);
 
   // Evaluate overlapping sessions
   const overlapStatuses = useMemo(() => {
-    return OVERLAPS.map((overlap) => {
+    return activeOverlapsConfig.map((overlap) => {
       const startMin = overlap.utcStartHour * 60 + overlap.utcStartMinute;
       const endMin = overlap.utcEndHour * 60 + overlap.utcEndMinute;
 
@@ -344,7 +418,7 @@ export const DynamicTradingSessionTimeline: React.FC<DynamicTradingSessionTimeli
         secondsUntilStart,
       };
     });
-  }, [currentUtcMinutes, utcSeconds, isWeekend]);
+  }, [activeOverlapsConfig, currentUtcMinutes, utcSeconds, utcDay, isWeekend]);
 
   // Find currently active overlap
   const activeOverlap = overlapStatuses.find((o) => o.isActive);

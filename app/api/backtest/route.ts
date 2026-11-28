@@ -1,22 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { CurrencyPair, RiskVerdict } from '@/lib/types';
+import { CurrencyPair, TimeFrame } from '@/lib/types';
 import { SwarmCoordinator } from '@/lib/agents/SwarmCoordinator';
+import { RiskManager, DEFAULT_RISK_CONFIG } from '@/lib/agents/RiskManager';
 import { BASE_PRICES } from '@/lib/marketData';
+import { RealMarketDataService } from '@/lib/realMarketDataService';
+import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { unifiedLedgerService } from '@/lib/ledger/UnifiedLedgerService';
+import { runHistoricalCandleReplay } from '@/lib/backtest/historicalReplayEngine';
 
 export const runtime = 'nodejs';
 
-interface ScenarioResult {
-  scenarioName: string;
-  pair: CurrencyPair;
-  action: 'BUY' | 'SELL' | 'NO_TRADE';
-  riskVerdict: RiskVerdict;
-  lots: number;
-  entryPrice: number;
-  exitPrice: number;
-  pnlUsd: number;
-  outcome: 'WIN' | 'LOSS' | 'SCRATCH';
-  rationale: string;
-}
+const VALID_TIMEFRAMES: TimeFrame[] = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,123 +18,87 @@ export async function POST(req: NextRequest) {
     try {
       body = await req.json();
     } catch {
-      // Body is optional for backtesting
+      // Optional body defaults to EUR/USD 1h historical replay
     }
 
     const rawPair = typeof body?.pair === 'string' ? body.pair : 'EUR/USD';
-    const pair: CurrencyPair = (rawPair in BASE_PRICES) ? (rawPair as CurrencyPair) : 'EUR/USD';
+    const pair: CurrencyPair = rawPair in BASE_PRICES ? (rawPair as CurrencyPair) : 'EUR/USD';
+    const rawTf = typeof body?.timeframe === 'string' ? body.timeframe : '1h';
+    const timeframe: TimeFrame = VALID_TIMEFRAMES.includes(rawTf as TimeFrame) ? (rawTf as TimeFrame) : '1h';
+    const count = Math.min(240, Math.max(80, Number(body?.count) || 140));
 
-    const scenarios = [
-      {
-        name: 'US NFP Jobs Beat (+240k vs 165k exp)',
-        pair: 'EUR/USD' as CurrencyPair,
-        techBias: 'DOWNTREND',
-        expectedMovePips: -65,
-      },
-      {
-        name: 'ECB Dovish Rate Cut (-25 bps)',
-        pair: 'EUR/USD' as CurrencyPair,
-        techBias: 'DOWNTREND',
-        expectedMovePips: -45,
-      },
-      {
-        name: 'BOJ Rate Hike & Carry Trade Liquidation',
-        pair: 'USD/JPY' as CurrencyPair,
-        techBias: 'STRONG_DOWNTREND',
-        expectedMovePips: -140,
-      },
-      {
-        name: 'UK Sticky Services Inflation (BoE Pause)',
-        pair: 'GBP/USD' as CurrencyPair,
-        techBias: 'UPTREND',
-        expectedMovePips: 55,
-      },
-      {
-        name: 'Commodity Rally (WTI Crude +4.5%)',
-        pair: 'USD/CAD' as CurrencyPair,
-        techBias: 'DOWNTREND',
-        expectedMovePips: -50,
-      },
-      {
-        name: 'Asian Session Thin Liquidity Drift',
-        pair: 'AUD/USD' as CurrencyPair,
-        techBias: 'SIDEWAYS',
-        expectedMovePips: 8,
-      },
-    ];
-
+    const { candles } = await RealMarketDataService.fetchRealLiveCandles(pair, timeframe, count);
     const coordinator = new SwarmCoordinator();
-    const results: ScenarioResult[] = [];
-    let totalPnl = 0;
-    let winCount = 0;
-    let lossCount = 0;
-    let vetoedCount = 0;
+    const riskManager = new RiskManager(DEFAULT_RISK_CONFIG);
 
-    for (const sc of scenarios) {
-      const consensus = coordinator.runConsensus(sc.pair, '1h');
-      const risk = consensus.agents.risk;
+    const replay = runHistoricalCandleReplay(
+      pair,
+      timeframe,
+      candles,
+      25000,
+      ({ historySlice, currentEquity, currentDrawdownPct, spreadPips }) => {
+        const consensus = coordinator.runConsensus(pair, timeframe, historySlice);
+        const barClose = historySlice[historySlice.length - 1].close;
+        const rawOrderType = consensus.executionSignal.orderType;
+        const sideChoice: 'BUY' | 'SELL' | 'HOLD' =
+          rawOrderType === 'BUY_MARKET' ? 'BUY' : rawOrderType === 'SELL_MARKET' ? 'SELL' : 'HOLD';
 
-      let pnl = 0;
-      let outcome: ScenarioResult['outcome'] = 'SCRATCH';
+        const risk = riskManager.evaluateTrade(
+          sideChoice,
+          consensus.overallConfidence,
+          barClose,
+          consensus.agents.risk.parameters.stopLoss,
+          consensus.agents.risk.parameters.takeProfit1,
+          currentDrawdownPct,
+          pair,
+          currentEquity,
+          spreadPips
+        );
 
-      if (risk.verdict === 'VETOED') {
-        vetoedCount++;
-        outcome = 'SCRATCH';
-        pnl = 0;
-      } else {
-        const isWin = (risk.action === 'BUY' && sc.expectedMovePips > 0) ||
-                      (risk.action === 'SELL' && sc.expectedMovePips < 0);
-        
-        if (isWin) {
-          outcome = 'WIN';
-          winCount++;
-          pnl = risk.parameters.projectedGainUsd;
-        } else {
-          outcome = 'LOSS';
-          lossCount++;
-          pnl = -risk.parameters.maxLossUsd;
-        }
+        return {
+          side: risk.action === 'BUY' ? 'BUY' : risk.action === 'SELL' ? 'SELL' : 'HOLD',
+          confidence: consensus.overallConfidence,
+          riskVerdict: risk.verdict,
+          authorized: consensus.executionSignal.authorized && risk.verdict !== 'VETOED' && sideChoice !== 'HOLD',
+          lots: risk.parameters.positionSizeLots,
+          stopLoss: risk.parameters.stopLoss,
+          takeProfit: risk.parameters.takeProfit1,
+          rationale: risk.reasoning,
+        };
       }
+    );
 
-      totalPnl += pnl;
+    unifiedLedgerService.recordBacktestRun({
+      pair,
+      timeframe,
+      executedTrades: replay.summary.executedTrades,
+      vetoedTrades: replay.summary.vetoedTrades,
+      winCount: replay.summary.winCount,
+      lossCount: replay.summary.lossCount,
+      winRatePercent: replay.summary.winRatePercent,
+      totalPnlUsd: replay.summary.totalPnlUsd,
+      profitFactor: replay.summary.profitFactor,
+      maxDrawdownPercent: replay.summary.maxDrawdownPercent,
+      replaySource: 'HISTORICAL_CANDLE_REPLAY',
+      timestamp: Date.now(),
+    });
 
-      results.push({
-        scenarioName: sc.name,
-        pair: sc.pair,
-        action: risk.action,
-        riskVerdict: risk.verdict,
-        lots: risk.parameters.positionSizeLots,
-        entryPrice: risk.parameters.entryPrice,
-        exitPrice: risk.action === 'BUY' ? risk.parameters.takeProfit1 : risk.parameters.stopLoss,
-        pnlUsd: pnl,
-        outcome,
-        rationale: risk.reasoning,
-      });
-    }
-
-    const executedCount = winCount + lossCount;
-    const winRate = executedCount > 0 ? Number(((winCount / executedCount) * 100).toFixed(1)) : 0;
-    const profitFactor = lossCount > 0 ? Number((Math.max(1, winCount * 2.2) / lossCount).toFixed(2)) : 3.5;
+    // Restore full candle array in canonical cache after historical replay
+    LiveMarketFeedManager.setCanonicalFeed(pair, timeframe, candles);
 
     return NextResponse.json({
       success: true,
       data: {
         targetPair: pair,
-        summary: {
-          totalScenarios: scenarios.length,
-          executedTrades: executedCount,
-          vetoedTrades: vetoedCount,
-          winCount,
-          lossCount,
-          winRatePercent: winRate,
-          totalPnlUsd: Number(totalPnl.toFixed(2)),
-          profitFactor,
-          maxDrawdownPercent: 2.4,
-        },
-        scenarios: results,
+        timeframe,
+        summary: replay.summary,
+        scenarios: replay.scenarios,
+        equityCurve: replay.equityCurve,
+        ledger: unifiedLedgerService.getSnapshot(),
       },
     });
   } catch (error: any) {
+    console.error('[API /backtest POST] error:', error);
     return NextResponse.json(
       { success: false, error: 'Backtest execution failed' },
       { status: 500 }

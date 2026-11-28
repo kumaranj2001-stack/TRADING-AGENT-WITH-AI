@@ -55,11 +55,15 @@ function OandaTradingViewChartComponent({
       if (!isMounted || !containerRef.current) return;
       try {
         if (typeof (window as any).TradingView !== 'undefined') {
+          const detectedTimezone =
+            typeof Intl !== 'undefined'
+              ? Intl.DateTimeFormat().resolvedOptions().timeZone || 'Etc/UTC'
+              : 'Etc/UTC';
           new (window as any).TradingView.widget({
             autosize: true,
             symbol: tvSymbol,
             interval: interval,
-            timezone: 'Asia/Kolkata',
+            timezone: detectedTimezone,
             theme: theme === 'light' ? 'light' : 'dark',
             style: '1',
             locale: 'en',

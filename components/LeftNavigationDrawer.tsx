@@ -736,7 +736,7 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
             </button>
           )}
 
-          {/* Dedicated Risk Ratio Controller (Dynamic Tier Sizing & Zero-Veto Decoupling) */}
+          {/* Dedicated Risk Ratio Controller (Dynamic Tier Sizing & Hard Risk Veto Gate) */}
           {onOpenRiskRatioController && (
             <button
               onClick={() => {
@@ -744,14 +744,14 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
                 onOpenRiskRatioController();
               }}
               className="w-full py-2 px-3 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:text-amber-200 flex items-center justify-between text-xs font-semibold transition-all shadow-sm group"
-              title="Configure Dynamic Lot Sizing & Risk Parameters per Grading Tier (Zero-Veto Active)"
+              title="Configure Dynamic Lot Sizing & Hard Drawdown/Confidence Risk Gate"
             >
               <div className="flex items-center gap-2">
                 <ShieldAlert className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
                 <span>Risk Ratio Controller</span>
               </div>
               <span className="font-mono text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/50 text-amber-300">
-                ZERO-VETO
+                HARD-VETO
               </span>
             </button>
           )}

@@ -48,10 +48,9 @@ export class MacroTelemetryBridge {
   ): MultiTimeframeMomentumVector {
     const livePrice = candles.length > 0 ? candles[candles.length - 1].close : (BASE_PRICES[symbol] || 1.0850);
     
-    // Simulate/derive MTF alignment from available candle structure
-    let rsi14 = 52.4;
-    let emaTrend: MultiTimeframeMomentumVector['emaTrend'] = 'STRONG_UPTREND';
-    let smcStructure: MultiTimeframeMomentumVector['smcStructure'] = 'BOS_EXPANSION';
+    let rsi14 = 50.0;
+    let emaTrend: MultiTimeframeMomentumVector['emaTrend'] = 'CONSOLIDATION';
+    let smcStructure: MultiTimeframeMomentumVector['smcStructure'] = 'RANGE_BOUND';
 
     if (candles.length >= 14) {
       const recent = candles.slice(-14);

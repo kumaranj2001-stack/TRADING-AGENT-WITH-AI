@@ -83,8 +83,8 @@ export class OrderFlowEngine {
       const seed = Math.sin(price * 1000 + (this.tickCounter[symbol] || 0));
       const skew = seed * 0.4; // Buying bias or selling bias
       
-      const askVolume = Math.max(8, Math.round(baseVolFactor * (1 + skew) * (1.2 + Math.random() * 0.3)));
-      const bidVolume = Math.max(8, Math.round(baseVolFactor * (1 - skew) * (1.1 + Math.random() * 0.3)));
+      const askVolume = Math.max(8, Math.round(baseVolFactor * (1 + skew) * (1.15 + Math.abs(seed) * 0.25)));
+      const bidVolume = Math.max(8, Math.round(baseVolFactor * (1 - skew) * (1.1 + Math.abs(seed) * 0.22)));
       const delta = askVolume - bidVolume;
       const totalVolume = askVolume + bidVolume;
 
@@ -209,14 +209,14 @@ export class OrderFlowEngine {
     let emaRibbonAlignment: TechnicalMomentumMetrics['emaRibbonAlignment'] = 'STRONG_BULLISH';
 
     if (volumeProfile.buyingPressurePercent > 55) {
-      rsi = Number((55 + (volumeProfile.buyingPressurePercent - 50) * 1.2).toFixed(1));
+      rsi = Number(Math.min(82, 55 + (volumeProfile.buyingPressurePercent - 50) * 1.1).toFixed(1));
       rsiSlope = 'RISING';
-      vwapDistancePercent = Number((+0.15 + Math.random() * 0.25).toFixed(2));
+      vwapDistancePercent = Number(((volumeProfile.buyingPressurePercent - 50) * 0.015).toFixed(2));
       emaRibbonAlignment = volumeProfile.buyingPressurePercent > 62 ? 'STRONG_BULLISH' : 'BULLISH';
     } else if (volumeProfile.buyingPressurePercent < 45) {
-      rsi = Number((45 - (50 - volumeProfile.buyingPressurePercent) * 1.2).toFixed(1));
+      rsi = Number(Math.max(18, 45 - (50 - volumeProfile.buyingPressurePercent) * 1.1).toFixed(1));
       rsiSlope = 'FALLING';
-      vwapDistancePercent = Number((-0.15 - Math.random() * 0.25).toFixed(2));
+      vwapDistancePercent = Number((-(50 - volumeProfile.buyingPressurePercent) * 0.015).toFixed(2));
       emaRibbonAlignment = volumeProfile.buyingPressurePercent < 38 ? 'STRONG_BEARISH' : 'BEARISH';
     } else {
       rsi = 50.2;
@@ -510,7 +510,7 @@ export class OrderFlowEngine {
       bid: report.liveWebSocketTelemetry.bidPrice,
       ask: report.liveWebSocketTelemetry.askPrice,
       spread: report.liveWebSocketTelemetry.spread,
-      deltaChange: Math.round((Math.random() - 0.48) * 15),
+      deltaChange: Math.round((report.volumeProfile.buyingPressurePercent - 50) * 0.8),
       cumulativeVolumeDelta: report.volumeProfile.cumulativeVolumeDelta,
       buyingPressurePercent: report.volumeProfile.buyingPressurePercent,
       tickVelocity: 14.2,
@@ -571,7 +571,8 @@ export class OrderFlowEngine {
       let candleSell = 0;
 
       for (let p = cLow; p <= cHigh + 0.00001; p = Number((p + tickStep).toFixed(decimals))) {
-        const baseVol = 30 + Math.floor(Math.random() * 80);
+        const distFromMid = Math.abs(p - (cHigh + cLow) / 2) / Math.max(tickStep, cHigh - cLow);
+        const baseVol = Math.round(45 + 65 * Math.exp(-2.2 * distFromMid * distFromMid));
         let askVol = Math.floor(baseVol * (isBull ? 0.62 : 0.38));
         let bidVol = Math.floor(baseVol * (isBull ? 0.38 : 0.62));
 

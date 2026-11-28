@@ -4,6 +4,7 @@ import { macroCalendarIngestionEngine } from '@/lib/macroCalendarIngestionEngine
 import { CurrencyPair, TimeFrame } from '@/lib/types';
 import { RealMarketDataService } from '@/lib/realMarketDataService';
 import { MarketSessionManager } from '@/lib/marketSessionManager';
+import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
 
 export const runtime = 'nodejs';
 
@@ -30,6 +31,7 @@ export async function GET(req: NextRequest) {
 
     // 4. Ingest real-time live OHLCV bar data from Unified SSOT Market Stream
     const { candles, livePrice, ssotVerified } = await RealMarketDataService.fetchRealLiveCandles(pair, timeframe, count);
+    LiveMarketFeedManager.setCanonicalFeed(pair, timeframe, candles);
     const session = getActiveTradingSession();
     const sessionInfo = MarketSessionManager.getMarketSessionInfo(pair);
 

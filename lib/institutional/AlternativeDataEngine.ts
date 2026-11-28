@@ -1,6 +1,6 @@
 import type { TimeFrame } from '../types';
 import type { AlternativeDataSnapshot } from './types';
-import { resolveInstitutionalAssetContext, seededRange } from './helpers';
+import { classifyInstitutionalAsset, resolveInstitutionalAssetContext, seededRange } from './helpers';
 
 export class AlternativeDataEngine {
   private static instance: AlternativeDataEngine;
@@ -16,18 +16,28 @@ export class AlternativeDataEngine {
 
   public getSnapshot(params?: { symbol?: string; timeframe?: TimeFrame }): AlternativeDataSnapshot {
     const ctx = resolveInstitutionalAssetContext(params?.symbol || 'XAU/USD', params?.timeframe || '1h');
+    const assetClass = classifyInstitutionalAsset(ctx.symbol);
 
     const esgGeopoliticalNlp: AlternativeDataSnapshot['esgGeopoliticalNlp'] = [
-      { pillar: 'ENVIRONMENTAL', score: 78, controversyVelocity: -4.2, keyDriver: 'Grid decarbonization PPA & renewable procurement contracts' },
-      { pillar: 'SOCIAL', score: 71, controversyVelocity: 1.8, keyDriver: 'Technical talent retention & STEM workforce expansion' },
-      { pillar: 'GOVERNANCE', score: 84, controversyVelocity: -1.1, keyDriver: 'Independent audit committee & capital return discipline' },
+      { pillar: 'ENVIRONMENTAL', score: 78, controversyVelocity: -4.2, keyDriver: assetClass === 'METALS_COMMODITIES' ? 'LBMA responsible sourcing & low-carbon bullion refining' : 'Grid decarbonization PPA & renewable procurement contracts' },
+      { pillar: 'SOCIAL', score: 71, controversyVelocity: 1.8, keyDriver: assetClass === 'FOREX' ? 'Real wage growth & labor participation trends' : 'Technical talent retention & STEM workforce expansion' },
+      { pillar: 'GOVERNANCE', score: 84, controversyVelocity: -1.1, keyDriver: assetClass === 'METALS_COMMODITIES' || assetClass === 'FOREX' ? 'Central bank policy credibility & reserve audit transparency' : 'Independent audit committee & capital return discipline' },
       { pillar: 'GEOPOLITICAL', score: Math.round(seededRange(`${ctx.symbol}:geo`, 42, 74)), controversyVelocity: 12.4, keyDriver: 'Export-control tariff risk, maritime shipping diversion & central bank reserve shifts' },
     ];
 
     const newsNoveltyScores = [
       { timestamp: '06:51 UTC', headline: `Fresh sovereign reserve diversification accelerates physical demand near ${ctx.spotPrice}`, ensNoveltyScore: 94, essSentimentScore: 0.72, taxonomyCode: 'MACRO > CENTRAL_BANK > RESERVES' },
       { timestamp: '06:34 UTC', headline: 'Wire echo: Quarterly PMI manufacturing sub-index repeat syndication across 14 outlets', ensNoveltyScore: 22, essSentimentScore: -0.18, taxonomyCode: 'MACRO > ECONOMIC_RELEASE > PMI' },
-      { timestamp: '06:12 UTC', headline: `Primary supply chain capex revision alters forward margin outlook for ${ctx.symbol}`, ensNoveltyScore: 88, essSentimentScore: 0.64, taxonomyCode: 'CORP > GUIDANCE > CAPEX' },
+      {
+        timestamp: '06:12 UTC',
+        headline:
+          assetClass === 'METALS_COMMODITIES' || assetClass === 'FOREX'
+            ? `Real-yield & central-bank liquidity revision shifts forward macro positioning on ${ctx.symbol}`
+            : `Primary supply chain capex revision alters forward margin outlook for ${ctx.symbol}`,
+        ensNoveltyScore: 88,
+        essSentimentScore: 0.64,
+        taxonomyCode: assetClass === 'METALS_COMMODITIES' || assetClass === 'FOREX' ? 'MACRO > RATES > LIQUIDITY' : 'CORP > GUIDANCE > CAPEX',
+      },
     ];
 
     const macroImpactTaxonomy = [
@@ -49,8 +59,15 @@ export class AlternativeDataEngine {
       { merchantCategory: 'Travel, Airlines & Hospitality', spendYoYPct: 9.7, avgTicketChangePct: 3.4, cardPanelUsersMillions: 14.2 },
     ];
 
+    const primaryDeskLabel =
+      assetClass === 'METALS_COMMODITIES'
+        ? `LBMA / COMEX Bullion Institutional Desk Peers (${ctx.symbol})`
+        : assetClass === 'FOREX'
+        ? `G10 Macro Quant & E-FX Bank Peers (${ctx.symbol})`
+        : ctx.symbol;
+
     const corporateJobVelocity: AlternativeDataSnapshot['corporateJobVelocity'] = [
-      { company: ctx.symbol, openRoles: 2480, aiEngineeringDelta30dPct: 14.6, salesHiringDelta30dPct: 6.2, signal: 'EXPANSIONARY' },
+      { company: primaryDeskLabel, openRoles: 2480, aiEngineeringDelta30dPct: 14.6, salesHiringDelta30dPct: 6.2, signal: 'EXPANSIONARY' },
       { company: 'MSFT / Azure', openRoles: 6120, aiEngineeringDelta30dPct: 11.4, salesHiringDelta30dPct: 3.8, signal: 'EXPANSIONARY' },
       { company: 'Legacy Retail Peer', openRoles: 840, aiEngineeringDelta30dPct: -3.2, salesHiringDelta30dPct: -6.8, signal: 'HIRING_FREEZE' },
     ];

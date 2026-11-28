@@ -294,7 +294,14 @@ export const ChartView: React.FC<ChartViewProps> = ({
           {showRsi && (
             <div className="bg-terminal-950/70 border border-terminal-border/40 rounded-lg p-2">
               <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 mb-1">
-                <span className="text-purple-400 font-bold">RSI (14): {indicators?.rsi ? indicators.rsi.toFixed(1) : '52.4'}</span>
+                <span className="text-purple-400 font-bold">
+                  RSI (14):{' '}
+                  {Number.isFinite(indicators?.rsi)
+                    ? indicators!.rsi.toFixed(1)
+                    : rsi.length > 0
+                    ? rsi[rsi.length - 1].toFixed(1)
+                    : '50.0'}
+                </span>
                 <span className="text-slate-400">70 (Overbought) / 30 (Oversold)</span>
               </div>
               <svg viewBox={`0 0 ${chartWidth} ${rsiHeight}`} className="w-full h-14 sm:h-16 select-none" preserveAspectRatio="none">

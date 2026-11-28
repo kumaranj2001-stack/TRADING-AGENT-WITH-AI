@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Bot, Satellite, Activity, Lock } from 'lucide-react';
 import type {
   AlternativeDataSnapshot,
@@ -30,6 +30,13 @@ export const AltDataQuantRiskDesk: React.FC<Props> = ({
   const [webhookStatus, setWebhookStatus] = useState<string>(quant.cloudWebhookScanner.lastMt5BridgeStatus);
   const [webhookCount, setWebhookCount] = useState<number>(quant.cloudWebhookScanner.dispatchedCount);
   const [mcResult, setMcResult] = useState(riskAudit.monteCarloEquity);
+
+  useEffect(() => {
+    setFormulaScript(quant.formulaBacktester.script);
+    setWebhookStatus(quant.cloudWebhookScanner.lastMt5BridgeStatus);
+    setWebhookCount(quant.cloudWebhookScanner.dispatchedCount);
+    setMcResult(riskAudit.monteCarloEquity);
+  }, [symbol, quant, riskAudit]);
 
   const handleTriggerWebhook = async () => {
     const res = await fetch('/api/institutional/quant-backtest', {

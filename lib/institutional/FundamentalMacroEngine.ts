@@ -1,6 +1,6 @@
 import type { TimeFrame } from '../types';
 import type { MacroFundamentalSnapshot } from './types';
-import { evaluateSafeFormula, resolveInstitutionalAssetContext, seededRange } from './helpers';
+import { classifyInstitutionalAsset, evaluateSafeFormula, resolveInstitutionalAssetContext, seededRange } from './helpers';
 
 const RATIO_UNIVERSE: Array<{ symbol: string; variables: Record<string, number> }> = [
   { symbol: 'NVDA', variables: { MarketCap: 3480, FCF: 64.2, ROIC: 68.5, EBITDA: 81.4, EV: 3455, Debt: 9.8, Revenue: 130.5, EPS: 2.94 } },
@@ -90,6 +90,7 @@ export class FundamentalMacroEngine {
     customFormula?: string;
   }): MacroFundamentalSnapshot {
     const ctx = resolveInstitutionalAssetContext(params?.symbol || 'XAU/USD', params?.timeframe || '1h');
+    const assetClass = classifyInstitutionalAsset(ctx.symbol);
     const cleanSym = ctx.symbol.replace('/USD', '');
 
     const otcBonds = [
@@ -101,12 +102,34 @@ export class FundamentalMacroEngine {
       { ticker: 'IGB 10Y', issuer: 'Government of India (RBI)', tenor: '10Y', yieldPct: 6.78, cleanPrice: 101.18, oasBps: 240, dv01PerMillion: 682, dailyChangeBps: -2.4 },
     ];
 
-    const supplyChainGraph: MacroFundamentalSnapshot['supplyChainGraph'] = [
-      { tier: 'UPSTREAM_SUPPLIER', entity: 'ASML Holding / Tokyo Electron', country: 'NLD/JPN', revenueDependencyPct: 84, fragilityScore: 78, chokepointRisk: 'EUV Lithography Export Control' },
-      { tier: 'UPSTREAM_SUPPLIER', entity: 'SK Hynix (HBM3E Memory)', country: 'KOR', revenueDependencyPct: 62, fragilityScore: 69, chokepointRisk: 'CoWoS Packaging Allocation' },
-      { tier: 'MIDSTREAM_FOUNDRY', entity: 'TSMC N3/N4P Fab Clusters', country: 'TWN', revenueDependencyPct: 91, fragilityScore: 86, chokepointRisk: 'Taiwan Strait Maritime Chokepoint' },
-      { tier: 'DOWNSTREAM_CUSTOMER', entity: 'Microsoft / Meta / Alphabet Hyperscalers', country: 'USA', revenueDependencyPct: 47, fragilityScore: 32, chokepointRisk: 'Capex Digestion Cycle' },
-    ];
+    const supplyChainGraph: MacroFundamentalSnapshot['supplyChainGraph'] =
+      assetClass === 'METALS_COMMODITIES'
+        ? [
+            { tier: 'UPSTREAM_SUPPLIER', entity: 'Primary Mines (Newmont / Barrick / AngloGold)', country: 'AUS/CAN/ZAF', revenueDependencyPct: 76, fragilityScore: 61, chokepointRisk: 'AISC Energy Cost & Ore Grade Depletion' },
+            { tier: 'UPSTREAM_SUPPLIER', entity: 'Swiss Good-Delivery Refineries (PAMP / Valcambi)', country: 'CHE', revenueDependencyPct: 68, fragilityScore: 44, chokepointRisk: 'Doré Assay Throughput & Customs Quota' },
+            { tier: 'MIDSTREAM_FOUNDRY', entity: 'LBMA London Vaults & COMEX Clearing Warehouses', country: 'GBR/USA', revenueDependencyPct: 89, fragilityScore: 52, chokepointRisk: 'EFP Basis Spread & Registered Vault Drawdown' },
+            { tier: 'DOWNSTREAM_CUSTOMER', entity: 'Sovereign Central Banks, GLD/IAU ETFs & Asian Bullion Hubs', country: 'CHN/IND/POL', revenueDependencyPct: 82, fragilityScore: 39, chokepointRisk: 'US Real Yield (10Y TIPS) & DXY Regime' },
+          ]
+        : assetClass === 'FOREX'
+        ? [
+            { tier: 'UPSTREAM_SUPPLIER', entity: 'Central Bank Policy Liquidity (Fed / ECB / BoJ / BoE)', country: 'G10', revenueDependencyPct: 92, fragilityScore: 64, chokepointRisk: 'Terminal Rate Spread Divergence' },
+            { tier: 'UPSTREAM_SUPPLIER', entity: 'CLS / Tier-1 Prime FX Settlement Clearing Banks', country: 'USA/GBR', revenueDependencyPct: 86, fragilityScore: 38, chokepointRisk: 'Quarter-End Cross-Currency Basis Turn' },
+            { tier: 'MIDSTREAM_FOUNDRY', entity: 'Institutional ECN Venues (EBS Direct / LMAX / Currenex)', country: 'LD4/NY4', revenueDependencyPct: 79, fragilityScore: 41, chokepointRisk: 'Macro Print Liquidity Gap' },
+            { tier: 'DOWNSTREAM_CUSTOMER', entity: 'Sovereign Reserve Managers, CTAs & Multinational Hedgers', country: 'GLOBAL', revenueDependencyPct: 71, fragilityScore: 47, chokepointRisk: 'Risk-Off USD Funding Squeeze' },
+          ]
+        : assetClass === 'CRYPTO'
+        ? [
+            { tier: 'UPSTREAM_SUPPLIER', entity: 'Layer-1 Validators & Listed Bitcoin Miners (MARA / RIOT)', country: 'USA/CAN', revenueDependencyPct: 74, fragilityScore: 68, chokepointRisk: 'Hashprice Compression & Power Curtailment' },
+            { tier: 'UPSTREAM_SUPPLIER', entity: 'Institutional Qualified Custodians (Coinbase Prime / BitGo)', country: 'USA', revenueDependencyPct: 81, fragilityScore: 54, chokepointRisk: 'Cold Storage Key & Regulatory Compliance' },
+            { tier: 'MIDSTREAM_FOUNDRY', entity: 'Spot ETF Authorized Participants & CME Futures Desk', country: 'USA', revenueDependencyPct: 88, fragilityScore: 46, chokepointRisk: 'CME Basis Carry Unwind' },
+            { tier: 'DOWNSTREAM_CUSTOMER', entity: 'BlackRock IBIT / Fidelity FBTC ETF & Corporate Treasuries', country: 'GLOBAL', revenueDependencyPct: 67, fragilityScore: 52, chokepointRisk: 'Net Daily ETF Outflow Streak' },
+          ]
+        : [
+            { tier: 'UPSTREAM_SUPPLIER', entity: 'ASML Holding / Tokyo Electron', country: 'NLD/JPN', revenueDependencyPct: 84, fragilityScore: 78, chokepointRisk: 'EUV Lithography Export Control' },
+            { tier: 'UPSTREAM_SUPPLIER', entity: 'SK Hynix (HBM3E Memory)', country: 'KOR', revenueDependencyPct: 62, fragilityScore: 69, chokepointRisk: 'CoWoS Packaging Allocation' },
+            { tier: 'MIDSTREAM_FOUNDRY', entity: 'TSMC N3/N4P Fab Clusters', country: 'TWN', revenueDependencyPct: 91, fragilityScore: 86, chokepointRisk: 'Taiwan Strait Maritime Chokepoint' },
+            { tier: 'DOWNSTREAM_CUSTOMER', entity: 'Microsoft / Meta / Alphabet Hyperscalers', country: 'USA', revenueDependencyPct: 47, fragilityScore: 32, chokepointRisk: 'Capex Digestion Cycle' },
+          ];
 
     const assets = ['XAU/USD', 'EUR/USD', 'NVDA', 'US10Y', 'BTC/USD', 'NIFTY50'];
     const values = [
@@ -118,12 +141,20 @@ export class FundamentalMacroEngine {
       [0.19, 0.28, 0.49, -0.33, 0.36, 1.0],
     ];
 
-    const starMineAnalystScores = [
-      { firm: 'Goldman Sachs', analyst: 'T. Hari', accuracyPercentile: 96, smartEstimate: 0.94, consensusEstimate: 0.85, predictedSurprisePct: 10.6, rating: 'CONVICTION_BUY' },
-      { firm: 'Morgan Stanley', analyst: 'J. Moore', accuracyPercentile: 92, smartEstimate: 0.91, consensusEstimate: 0.85, predictedSurprisePct: 7.1, rating: 'OVERWEIGHT' },
-      { firm: 'Bernstein Research', analyst: 'S. Rasgon', accuracyPercentile: 95, smartEstimate: 0.93, consensusEstimate: 0.85, predictedSurprisePct: 9.4, rating: 'OUTPERFORM' },
-      { firm: 'J.P. Morgan', analyst: 'H. Sur', accuracyPercentile: 89, smartEstimate: 0.88, consensusEstimate: 0.85, predictedSurprisePct: 3.5, rating: 'OVERWEIGHT' },
-    ];
+    const starMineAnalystScores =
+      assetClass === 'METALS_COMMODITIES' || assetClass === 'FOREX' || assetClass === 'CRYPTO'
+        ? [
+            { firm: 'Goldman Sachs Commodities/FX', analyst: 'D. Struyven', accuracyPercentile: 95, smartEstimate: Number((ctx.spotPrice * 1.032).toFixed(ctx.decimals)), consensusEstimate: Number((ctx.spotPrice * 1.015).toFixed(ctx.decimals)), predictedSurprisePct: 1.7, rating: 'CONVICTION_BUY' as const },
+            { firm: 'J.P. Morgan Global Research', analyst: 'N. Kaneva', accuracyPercentile: 91, smartEstimate: Number((ctx.spotPrice * 1.024).toFixed(ctx.decimals)), consensusEstimate: Number((ctx.spotPrice * 1.012).toFixed(ctx.decimals)), predictedSurprisePct: 1.2, rating: 'OVERWEIGHT' as const },
+            { firm: 'UBS Chief Investment Office', analyst: 'G. Staunovo', accuracyPercentile: 90, smartEstimate: Number((ctx.spotPrice * 1.019).toFixed(ctx.decimals)), consensusEstimate: Number((ctx.spotPrice * 1.009).toFixed(ctx.decimals)), predictedSurprisePct: 1.0, rating: 'OUTPERFORM' as const },
+            { firm: 'Morgan Stanley Macro', analyst: 'A. Sheets', accuracyPercentile: 87, smartEstimate: Number((ctx.spotPrice * 1.008).toFixed(ctx.decimals)), consensusEstimate: Number((ctx.spotPrice * 1.002).toFixed(ctx.decimals)), predictedSurprisePct: 0.6, rating: 'OVERWEIGHT' as const },
+          ]
+        : [
+            { firm: 'Goldman Sachs', analyst: 'T. Hari', accuracyPercentile: 96, smartEstimate: 0.94, consensusEstimate: 0.85, predictedSurprisePct: 10.6, rating: 'CONVICTION_BUY' },
+            { firm: 'Morgan Stanley', analyst: 'J. Moore', accuracyPercentile: 92, smartEstimate: 0.91, consensusEstimate: 0.85, predictedSurprisePct: 7.1, rating: 'OVERWEIGHT' },
+            { firm: 'Bernstein Research', analyst: 'S. Rasgon', accuracyPercentile: 95, smartEstimate: 0.93, consensusEstimate: 0.85, predictedSurprisePct: 9.4, rating: 'OUTPERFORM' },
+            { firm: 'J.P. Morgan', analyst: 'H. Sur', accuracyPercentile: 89, smartEstimate: 0.88, consensusEstimate: 0.85, predictedSurprisePct: 3.5, rating: 'OVERWEIGHT' },
+          ];
 
     const shippingTracker: MacroFundamentalSnapshot['shippingTracker'] = {
       balticDryIndex: 1842,
@@ -138,31 +169,81 @@ export class FundamentalMacroEngine {
       ],
     };
 
-    const pitFundamentalRevisions = [
-      { period: 'FY24 Q2', metric: 'Non-GAAP EPS ($)', asReportedValue: 0.68, restatedValue: 0.68, revisionDeltaPct: 0.0, filingDate: '2024-08-28' },
-      { period: 'FY24 Q3', metric: 'Gross Margin (%)', asReportedValue: 74.6, restatedValue: 73.9, revisionDeltaPct: -0.94, filingDate: '2024-11-20' },
-      { period: 'FY24 Q4', metric: 'Free Cash Flow ($B)', asReportedValue: 15.5, restatedValue: 15.82, revisionDeltaPct: 2.06, filingDate: '2025-02-26' },
-    ];
+    const pitFundamentalRevisions =
+      assetClass === 'METALS_COMMODITIES'
+        ? [
+            { period: '2025 Q4', metric: 'Global Central Bank Net Purchases (Tonnes)', asReportedValue: 286, restatedValue: 312, revisionDeltaPct: 9.09, filingDate: '2026-01-30' },
+            { period: '2026 Q1', metric: 'Industry Average AISC ($/oz)', asReportedValue: 1385, restatedValue: 1428, revisionDeltaPct: 3.1, filingDate: '2026-04-28' },
+            { period: '2026 Q2', metric: 'COMEX Registered Vault Coverage (%)', asReportedValue: 34.2, restatedValue: 31.8, revisionDeltaPct: -7.02, filingDate: '2026-07-15' },
+          ]
+        : assetClass === 'FOREX'
+        ? [
+            { period: '2026 Q1', metric: 'G10 Sovereign Reserve Allocation (%)', asReportedValue: 58.2, restatedValue: 57.6, revisionDeltaPct: -1.03, filingDate: '2026-03-31' },
+            { period: '2026 Q2', metric: 'US-Euro 2Y Yield Spread (bps)', asReportedValue: 190, restatedValue: 184, revisionDeltaPct: -3.16, filingDate: '2026-06-20' },
+            { period: '2026 Q3', metric: 'CFTC Leveraged Net Positioning (K Contracts)', asReportedValue: 42.5, restatedValue: 49.1, revisionDeltaPct: 15.53, filingDate: '2026-09-18' },
+          ]
+        : [
+            { period: 'FY24 Q2', metric: 'Non-GAAP EPS ($)', asReportedValue: 0.68, restatedValue: 0.68, revisionDeltaPct: 0.0, filingDate: '2024-08-28' },
+            { period: 'FY24 Q3', metric: 'Gross Margin (%)', asReportedValue: 74.6, restatedValue: 73.9, revisionDeltaPct: -0.94, filingDate: '2024-11-20' },
+            { period: 'FY24 Q4', metric: 'Free Cash Flow ($B)', asReportedValue: 15.5, restatedValue: 15.82, revisionDeltaPct: 2.06, filingDate: '2025-02-26' },
+          ];
 
-    const institutionalOwnership = [
-      { institution: 'Vanguard Group (13F)', ownershipPct: 8.74, sharesMillions: 2140.5, qoqChangePct: 1.4, filingQuarter: 'Q4-13F' },
-      { institution: 'BlackRock Institutional Trust', ownershipPct: 7.42, sharesMillions: 1817.2, qoqChangePct: 2.1, filingQuarter: 'Q4-13F' },
-      { institution: 'FMR / Fidelity Management', ownershipPct: 4.18, sharesMillions: 1024.0, qoqChangePct: 3.8, filingQuarter: 'Q4-13F' },
-      { institution: 'Citadel Advisors (Multi-Strat)', ownershipPct: 0.96, sharesMillions: 235.1, qoqChangePct: 14.2, filingQuarter: 'Q4-13F' },
-    ];
+    const institutionalOwnership =
+      assetClass === 'METALS_COMMODITIES'
+        ? [
+            { institution: 'Sovereign Central Banks (IMF COFER / WGC)', ownershipPct: 18.4, sharesMillions: 36700, qoqChangePct: 2.9, filingQuarter: 'Q2-WGC' },
+            { institution: 'SPDR Gold Shares Physical Trust (GLD)', ownershipPct: 4.35, sharesMillions: 874.2, qoqChangePct: 3.4, filingQuarter: 'DAILY-LBMA' },
+            { institution: 'iShares Gold Trust Physical (IAU)', ownershipPct: 2.18, sharesMillions: 438.6, qoqChangePct: 1.9, filingQuarter: 'DAILY-LBMA' },
+            { institution: 'COMEX Managed Money Net Long', ownershipPct: 1.42, sharesMillions: 218.5, qoqChangePct: 11.4, filingQuarter: 'CFTC-COT' },
+          ]
+        : assetClass === 'FOREX'
+        ? [
+            { institution: 'IMF Sovereign FX Reserves (Allocated)', ownershipPct: 20.1, sharesMillions: 2450, qoqChangePct: 0.8, filingQuarter: 'Q2-COFER' },
+            { institution: 'CFTC Institutional Asset Managers', ownershipPct: 11.4, sharesMillions: 412, qoqChangePct: 4.6, filingQuarter: 'CFTC-COT' },
+            { institution: 'CLS Real-Money Pension Hedgers', ownershipPct: 6.9, sharesMillions: 318, qoqChangePct: 1.7, filingQuarter: 'BIS-FLOW' },
+            { institution: 'Macro Systematic CTA Leveraged Funds', ownershipPct: 3.4, sharesMillions: 144, qoqChangePct: 9.2, filingQuarter: 'CFTC-COT' },
+          ]
+        : [
+            { institution: 'Vanguard Group (13F)', ownershipPct: 8.74, sharesMillions: 2140.5, qoqChangePct: 1.4, filingQuarter: 'Q4-13F' },
+            { institution: 'BlackRock Institutional Trust', ownershipPct: 7.42, sharesMillions: 1817.2, qoqChangePct: 2.1, filingQuarter: 'Q4-13F' },
+            { institution: 'FMR / Fidelity Management', ownershipPct: 4.18, sharesMillions: 1024.0, qoqChangePct: 3.8, filingQuarter: 'Q4-13F' },
+            { institution: 'Citadel Advisors (Multi-Strat)', ownershipPct: 0.96, sharesMillions: 235.1, qoqChangePct: 14.2, filingQuarter: 'Q4-13F' },
+          ];
 
-    const cdsSpreads = [
-      { referenceEntity: `${cleanSym} Senior Unsecured`, tenor: '5Y' as const, spreadBps: Math.round(seededRange(`${ctx.symbol}:cds`, 24, 68)), dailyChangeBps: -1.4, implied5YDefaultProbPct: 0.52 },
-      { referenceEntity: 'USA Sovereign 5Y CDS', tenor: '5Y' as const, spreadBps: 38, dailyChangeBps: 0.6, implied5YDefaultProbPct: 0.63 },
-      { referenceEntity: 'CDX.NA.IG Investment Grade', tenor: '5Y' as const, spreadBps: 51, dailyChangeBps: -0.9, implied5YDefaultProbPct: 0.85 },
-      { referenceEntity: 'iTraxx Europe Crossover HY', tenor: '5Y' as const, spreadBps: 294, dailyChangeBps: -4.2, implied5YDefaultProbPct: 4.82 },
-    ];
+    const cdsSpreads =
+      assetClass === 'METALS_COMMODITIES'
+        ? [
+            { referenceEntity: `${ctx.symbol} LBMA Lease & Real-Yield Basis`, tenor: '5Y' as const, spreadBps: Math.round(seededRange(`${ctx.symbol}:cds`, 18, 42)), dailyChangeBps: -1.1, implied5YDefaultProbPct: 0.08 },
+            { referenceEntity: 'USA Sovereign 5Y CDS (Fiat Devaluation Hedge)', tenor: '5Y' as const, spreadBps: 38, dailyChangeBps: 0.6, implied5YDefaultProbPct: 0.63 },
+            { referenceEntity: 'US 10Y TIPS Real Yield Basis (bps)', tenor: '5Y' as const, spreadBps: 182, dailyChangeBps: -3.4, implied5YDefaultProbPct: 0.25 },
+            { referenceEntity: 'COMEX EFP Exchange-for-Physical Basis', tenor: '5Y' as const, spreadBps: 29, dailyChangeBps: 1.2, implied5YDefaultProbPct: 0.14 },
+          ]
+        : assetClass === 'FOREX'
+        ? [
+            { referenceEntity: `${ctx.symbol} Cross-Currency XCCY Basis`, tenor: '5Y' as const, spreadBps: Math.round(seededRange(`${ctx.symbol}:cds`, 14, 38)), dailyChangeBps: -0.8, implied5YDefaultProbPct: 0.35 },
+            { referenceEntity: 'USA Sovereign 5Y CDS', tenor: '5Y' as const, spreadBps: 38, dailyChangeBps: 0.6, implied5YDefaultProbPct: 0.63 },
+            { referenceEntity: 'Eurozone BTP-Bund 10Y Spread (bps)', tenor: '5Y' as const, spreadBps: 118, dailyChangeBps: -2.1, implied5YDefaultProbPct: 1.22 },
+            { referenceEntity: 'Japan Sovereign 5Y CDS', tenor: '5Y' as const, spreadBps: 22, dailyChangeBps: 0.3, implied5YDefaultProbPct: 0.37 },
+          ]
+        : [
+            { referenceEntity: `${cleanSym} Senior Unsecured`, tenor: '5Y' as const, spreadBps: Math.round(seededRange(`${ctx.symbol}:cds`, 24, 68)), dailyChangeBps: -1.4, implied5YDefaultProbPct: 0.52 },
+            { referenceEntity: 'USA Sovereign 5Y CDS', tenor: '5Y' as const, spreadBps: 38, dailyChangeBps: 0.6, implied5YDefaultProbPct: 0.63 },
+            { referenceEntity: 'CDX.NA.IG Investment Grade', tenor: '5Y' as const, spreadBps: 51, dailyChangeBps: -0.9, implied5YDefaultProbPct: 0.85 },
+            { referenceEntity: 'iTraxx Europe Crossover HY', tenor: '5Y' as const, spreadBps: 294, dailyChangeBps: -4.2, implied5YDefaultProbPct: 4.82 },
+          ];
 
-    const privateMaMultiples = [
-      { target: 'Run:ai GPU Orchestration', acquirer: 'NVIDIA Corp.', sector: 'AI Infrastructure', dealValueBillions: 0.7, evToEbitda: 28.4, evToRevenue: 14.2, announcedDate: '2024-04-24' },
-      { target: 'Wiz Cloud Security (Ref Comp)', acquirer: 'Alphabet / Consortium', sector: 'Cybersecurity', dealValueBillions: 32.0, evToEbitda: 41.2, evToRevenue: 24.6, announcedDate: '2025-03-18' },
-      { target: 'HashiCorp Multi-Cloud', acquirer: 'IBM Corp.', sector: 'DevOps Infra', dealValueBillions: 6.4, evToEbitda: 31.0, evToRevenue: 10.8, announcedDate: '2024-04-24' },
-    ];
+    const privateMaMultiples =
+      assetClass === 'METALS_COMMODITIES'
+        ? [
+            { target: 'Newcrest Mining Assets', acquirer: 'Newmont Corp.', sector: 'Tier-1 Gold Producers', dealValueBillions: 16.8, evToEbitda: 8.6, evToRevenue: 3.4, announcedDate: '2023-11-06' },
+            { target: 'De Grey Mining (Hemi)', acquirer: 'Northern Star Resources', sector: 'Gold Exploration', dealValueBillions: 3.3, evToEbitda: 10.4, evToRevenue: 4.1, announcedDate: '2024-12-02' },
+            { target: 'Filo / Vicuna Copper-Gold', acquirer: 'BHP / Lundin JV', sector: 'Metals & Mining', dealValueBillions: 3.25, evToEbitda: 9.8, evToRevenue: 3.9, announcedDate: '2024-07-29' },
+          ]
+        : [
+            { target: 'Run:ai GPU Orchestration', acquirer: 'NVIDIA Corp.', sector: 'AI Infrastructure', dealValueBillions: 0.7, evToEbitda: 28.4, evToRevenue: 14.2, announcedDate: '2024-04-24' },
+            { target: 'Wiz Cloud Security (Ref Comp)', acquirer: 'Alphabet / Consortium', sector: 'Cybersecurity', dealValueBillions: 32.0, evToEbitda: 41.2, evToRevenue: 24.6, announcedDate: '2025-03-18' },
+            { target: 'HashiCorp Multi-Cloud', acquirer: 'IBM Corp.', sector: 'DevOps Infra', dealValueBillions: 6.4, evToEbitda: 31.0, evToRevenue: 10.8, announcedDate: '2024-04-24' },
+          ];
 
     const yieldCurveHistory: MacroFundamentalSnapshot['yieldCurveHistory'] = [
       {
@@ -211,11 +292,18 @@ export class FundamentalMacroEngine {
       },
     ];
 
-    const dynamicTaxAdjustment = [
-      { company: cleanSym, statutoryRatePct: 21.0, effectiveRatePct: 13.8, normalizedRatePct: 18.5, reportedEbitMillions: 18400, taxAdjustedNopatMillions: 14996, nopatVariancePct: -5.4 },
-      { company: 'MSFT', statutoryRatePct: 21.0, effectiveRatePct: 18.2, normalizedRatePct: 19.5, reportedEbitMillions: 29200, taxAdjustedNopatMillions: 23506, nopatVariancePct: -1.6 },
-      { company: 'RELIANCE (India Tax)', statutoryRatePct: 25.17, effectiveRatePct: 24.4, normalizedRatePct: 25.17, reportedEbitMillions: 21600, taxAdjustedNopatMillions: 16163, nopatVariancePct: -1.0 },
-    ];
+    const dynamicTaxAdjustment =
+      assetClass === 'METALS_COMMODITIES' || assetClass === 'FOREX' || assetClass === 'CRYPTO'
+        ? [
+            { company: 'Gold Producer Sector AISC Benchmark', statutoryRatePct: 24.0, effectiveRatePct: 21.8, normalizedRatePct: 22.5, reportedEbitMillions: 9850, taxAdjustedNopatMillions: 7633, nopatVariancePct: -0.9 },
+            { company: 'MSFT (Broad Tech Reference)', statutoryRatePct: 21.0, effectiveRatePct: 18.2, normalizedRatePct: 19.5, reportedEbitMillions: 29200, taxAdjustedNopatMillions: 23506, nopatVariancePct: -1.6 },
+            { company: 'RELIANCE (India Tax)', statutoryRatePct: 25.17, effectiveRatePct: 24.4, normalizedRatePct: 25.17, reportedEbitMillions: 21600, taxAdjustedNopatMillions: 16163, nopatVariancePct: -1.0 },
+          ]
+        : [
+            { company: cleanSym, statutoryRatePct: 21.0, effectiveRatePct: 13.8, normalizedRatePct: 18.5, reportedEbitMillions: 18400, taxAdjustedNopatMillions: 14996, nopatVariancePct: -5.4 },
+            { company: 'MSFT', statutoryRatePct: 21.0, effectiveRatePct: 18.2, normalizedRatePct: 19.5, reportedEbitMillions: 29200, taxAdjustedNopatMillions: 23506, nopatVariancePct: -1.6 },
+            { company: 'RELIANCE (India Tax)', statutoryRatePct: 25.17, effectiveRatePct: 24.4, normalizedRatePct: 25.17, reportedEbitMillions: 21600, taxAdjustedNopatMillions: 16163, nopatVariancePct: -1.0 },
+          ];
 
     return {
       symbol: ctx.symbol,

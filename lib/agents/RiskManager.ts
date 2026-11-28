@@ -424,48 +424,39 @@ export class RiskManagerAgent extends BaseAgent {
     );
 
     let lotSize = dynamicSizing.lotSize;
-    // When friction or risk is elevated, dynamically scale down to micro-lot volume (0.01 - 0.02 lots)
-    if (isVetoTriggered || assignedGrade === 'E' || assignedGrade === 'F') {
+    if (isVetoTriggered) {
+      lotSize = 0;
+    } else if (assignedGrade === 'E' || assignedGrade === 'F') {
       lotSize = Math.max(0.01, Math.min(0.02, lotSize));
     }
-    const riskPercent = dynamicSizing.riskPercent;
-    const dollarRisk = dynamicSizing.dollarRisk;
-    const units = Math.round(lotSize * 100000);
-    const projectedGainUsd = Number((dollarRisk * Math.max(dynamicSizing.targetRR, riskRewardRatio)).toFixed(2));
+    const riskPercent = isVetoTriggered ? 0 : dynamicSizing.riskPercent;
+    const dollarRisk = isVetoTriggered ? 0 : dynamicSizing.dollarRisk;
+    const units = isVetoTriggered ? 0 : Math.round(lotSize * 100000);
+    const projectedGainUsd = isVetoTriggered
+      ? 0
+      : Number((dollarRisk * Math.max(dynamicSizing.targetRR, riskRewardRatio)).toFixed(2));
 
     // 6. Monte Carlo Simulation Engine (1,000 runs projection)
     const monteCarlo: MonteCarloProjection = {
       simulationsCount: 1000,
       projectedProfitProbability: calculatedWinProb,
-      var95Usd: Number((dollarRisk * 1.15).toFixed(2)),
-      var99Usd: Number((dollarRisk * 1.35).toFixed(2)),
-      expectedDrawdownPercent: Number((riskPercent * 1.2).toFixed(2)),
+      var95Usd: Number((dynamicSizing.dollarRisk * 1.15).toFixed(2)),
+      var99Usd: Number((dynamicSizing.dollarRisk * 1.35).toFixed(2)),
+      expectedDrawdownPercent: Number((dynamicSizing.riskPercent * 1.2).toFixed(2)),
       sharpeRatio: Number((1.8 + (calculatedWinProb / 100) * 0.85).toFixed(2)),
     };
 
-    // ELIMINATE VETOED STATES PERMANENTLY:
-    // Decouple trade entry from rigid swarm consensus. When risk factors or friction are elevated,
-    // the system never defaults to a veto; instead, it executes with dynamic micro-lot volume
-    // (0.01 to 0.02 lots) with 1:1 Breakeven Ratchet armed.
+    // Enforce Hard Risk Governance Vetoes:
+    // Drawdown breaches, sub-threshold confidence (<68%), thin liquidity, or deadlocked HOLD consensus block execution cleanly.
     let verdict: RiskVerdict = 'APPROVED';
     if (isVetoTriggered) {
-      verdict = 'DYNAMIC_TIER_APPROVED';
+      verdict = 'VETOED';
+      proposedAction = 'NO_TRADE';
       adjustmentsMade.push(
-        `Zero-Veto Override: Hard veto decoupled. Enforced dynamic micro-lot volume (${lotSize} lots) with 1:1 Breakeven Ratchet.`
+        `HARD RISK VETO ENFORCED: Setup blocked from execution (${vetoReasons[0] || 'Threshold not met'}).`
       );
-      if (proposedAction === 'NO_TRADE') {
-        proposedAction = (swarmConsensusDirection && swarmConsensusDirection !== 'HOLD')
-          ? swarmConsensusDirection
-          : (technical.bias.includes('BUY') ? 'BUY' : 'SELL');
-      }
     } else if (adjustmentsMade.length > 0) {
       verdict = 'MODIFIED';
-    }
-
-    if (proposedAction === 'NO_TRADE') {
-      proposedAction = (swarmConsensusDirection && swarmConsensusDirection !== 'HOLD')
-        ? swarmConsensusDirection
-        : (technical.bias.includes('BUY') ? 'BUY' : 'SELL');
     }
 
     const startingBalance = this.config.accountBalance;
@@ -474,7 +465,7 @@ export class RiskManagerAgent extends BaseAgent {
     const freeMargin = startingBalance - marginUsed;
 
     const reasoning = isVetoTriggered
-      ? `ZERO-VETO OVERRIDE ACTIVE: Hard swarm consensus veto decoupled. Executing with Grade ${assignedGrade} dynamic conservative volume (${lotSize} lots). Maximum loss capped at $${dollarRisk.toFixed(2)} (${riskPercent.toFixed(2)}% equity). Risk factors noted: ${vetoReasons.join('; ')}`
+      ? `TRADE VETOED BY RISK GOVERNANCE: Hard safety thresholds violated (${vetoReasons.join('; ')}). Position sizing locked to 0 lots to preserve capital.`
       : verdict === 'MODIFIED'
       ? `PROPOSAL APPROVED WITH RESTRICTIONS (GRADE ${assignedGrade}): Setup validated with risk curtailment. Modifications: ${adjustmentsMade.join('; ')}. Maximum downside capped at $${dollarRisk.toFixed(2)} (${riskPercent.toFixed(2)}% equity). Allocated ${lotSize} lots with hard stop at ${calculatedStopLoss} (${proposedAction === 'SELL' ? 'above entry' : 'below entry'}), targeting ${calculatedTakeProfit1} (${proposedAction === 'SELL' ? 'below entry' : 'above entry'}).`
       : `PROPOSAL FULLY APPROVED (GRADE ${assignedGrade}): Solid 5-agent confluence, verified liquidity session, and strict ${riskRewardRatio}:1 Risk/Reward profile. Allocated ${lotSize} lots with hard stop at ${calculatedStopLoss} (${proposedAction === 'SELL' ? 'above entry' : 'below entry'}) targeting ${calculatedTakeProfit1} (${proposedAction === 'SELL' ? 'below entry' : 'above entry'}).`;

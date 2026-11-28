@@ -4,6 +4,7 @@ import React from 'react';
 import { TrendingUp, TrendingDown, Coins, Snowflake, Lock } from 'lucide-react';
 import { CurrencyPair, MarketSegment, MarketSessionInfo } from '@/lib/types';
 import { FOREX_PAIRS, INDIAN_MARKET_ASSETS, METALS_COMMODITIES } from '@/lib/marketData';
+import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
 
 interface TickerItem {
   pair: CurrencyPair;
@@ -55,13 +56,23 @@ export const TickerBar: React.FC<TickerBarProps> = ({
             : isIndian ? '🇮🇳 NSE/BSE LIVE' : isMetals ? '🏆 PRECIOUS METALS & CRUDE' : '🌐 GLOBAL FX RATES'}
         </span>
 
-        {/* Live WebSocket Streaming Indicator (Zero Delayed Polls) */}
-        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 font-mono text-[10px] font-bold shrink-0 shadow-sm">
-          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-          <span>WS STREAMING</span>
-          <span className="text-slate-500">•</span>
-          <span className="text-emerald-400">14ms</span>
-        </div>
+        {/* Live WebSocket Streaming Indicator synced with Feed Manager Telemetry */}
+        {(() => {
+          const telemetry = LiveMarketFeedManager.getWebSocketTelemetry();
+          const latencyText = isMarketFrozen
+            ? 'FROZEN'
+            : telemetry.isConnected
+            ? `${Math.max(1, telemetry.latencyMs)}ms`
+            : 'SYNC';
+          return (
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 font-mono text-[10px] font-bold shrink-0 shadow-sm">
+              <span className={`w-1.5 h-1.5 rounded-full ${isMarketFrozen ? 'bg-sky-400' : 'bg-cyan-400 animate-ping'}`} />
+              <span>{isMarketFrozen ? 'MARKET CLOSED' : 'WS STREAMING'}</span>
+              <span className="text-slate-500">•</span>
+              <span className={isMarketFrozen ? 'text-sky-300' : 'text-emerald-400'}>{latencyText}</span>
+            </div>
+          );
+        })()}
         {displayRates.map((item) => {
           const isSelected = item.pair === selectedPair;
           const isPositive = item.change24h >= 0;
