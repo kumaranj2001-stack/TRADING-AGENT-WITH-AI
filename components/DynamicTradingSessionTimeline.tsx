@@ -808,8 +808,9 @@ export const DynamicTradingSessionTimeline: React.FC<DynamicTradingSessionTimeli
 
             {/* Current Real-Time Live Cursor */}
             <div 
-              style={{ left: `${(currentUtcFraction * 100).toFixed(2)}%` }}
+              style={{ left: mounted ? `${(currentUtcFraction * 100).toFixed(2)}%` : '0.00%' }}
               className="absolute top-0 bottom-0 w-0.5 bg-rose-500 shadow-md shadow-rose-500 z-20 flex flex-col items-center pointer-events-none"
+              suppressHydrationWarning
             >
               <div className="w-2.5 h-2.5 rounded-full bg-rose-500 border border-white -translate-y-1 animate-ping" />
               <div className="w-2 h-2 rounded-full bg-rose-600 border border-white -translate-y-3.5" />
@@ -823,9 +824,9 @@ export const DynamicTradingSessionTimeline: React.FC<DynamicTradingSessionTimeli
               <span className="w-2 h-2 rounded-full bg-purple-400 inline-block ml-1" /> London (08:00-16:30)
               <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block ml-1" /> New York (13:00-21:00)
             </span>
-            <span className="text-rose-400 font-bold flex items-center gap-1">
+            <span className="text-rose-400 font-bold flex items-center gap-1" suppressHydrationWarning>
               <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-              Live Cursor: {(currentUtcFraction * 100).toFixed(1)}% of 24h Day
+              Live Cursor: {mounted ? (currentUtcFraction * 100).toFixed(1) : '--.-'}% of 24h Day
             </span>
           </div>
         </div>

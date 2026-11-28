@@ -191,7 +191,7 @@ export const OptionsDerivativesDesk: React.FC<Props> = ({
           ))}
           {options.darkPoolPrints.map((dp, i) => (
             <div key={i} className="bg-indigo-500/10 border border-indigo-500/30 p-2 rounded text-[10px] font-mono">
-              <span className="text-white font-bold">DARK POOL {dp.venue}</span>: {dp.shares.toLocaleString()} shs @ {dp.price} (${dp.notionalMillions}M • {dp.printPosition})
+              <span className="text-white font-bold">DARK POOL {dp.venue}</span>: {dp.shares.toLocaleString('en-US')} shs @ {dp.price} (${dp.notionalMillions}M • {dp.printPosition})
             </div>
           ))}
         </div>

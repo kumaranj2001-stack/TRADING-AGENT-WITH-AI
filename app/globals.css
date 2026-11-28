@@ -248,11 +248,16 @@ body {
   font-weight: 500;
 }
 
-/* Headings, Strong, Bold & Numerical Indicators in Light Mode */
+/* Headings, Strong & Bold Text in Light Mode (preserve colored status pills/badges/buttons) */
 .light h1, .light h2, .light h3, .light h4, .light h5, .light h6,
-.light strong, .light b,
-.light .font-bold, .light .font-semibold, .light .font-extrabold, .light .font-black {
-  color: #0f172a !important;
+.light strong, .light b {
+  color: #0f172a;
+}
+.light .font-bold:not([class*="text-"]):not(button *),
+.light .font-semibold:not([class*="text-"]):not(button *),
+.light .font-extrabold:not([class*="text-"]):not(button *),
+.light .font-black:not([class*="text-"]):not(button *) {
+  color: #0f172a;
 }
 
 /* Field Labels & Uppercase Structural Headers */
@@ -639,53 +644,55 @@ body {
 
 /* ========================================================
    CRITICAL: PRESERVE SOLID ACTION BUTTONS & PILLS
-   Buttons with solid saturated backgrounds strictly retain
-   crisp #ffffff text & white SVG strokes across light mode
+   Match exact solid background tokens ([class~="..."]) so
+   translucent /10-/25 buttons keep high-contrast Light text
    ======================================================== */
-.light button[class*="bg-emerald-6"],
-.light button[class*="bg-emerald-7"],
-.light button[class*="bg-green-6"],
-.light button[class*="bg-green-7"],
-.light button[class*="bg-rose-6"],
-.light button[class*="bg-rose-7"],
-.light button[class*="bg-red-6"],
-.light button[class*="bg-red-7"],
-.light button[class*="bg-cyan-6"],
-.light button[class*="bg-cyan-7"],
-.light button[class*="bg-blue-6"],
-.light button[class*="bg-blue-7"],
-.light button[class*="bg-indigo-6"],
-.light button[class*="bg-indigo-7"],
-.light button[class*="bg-purple-6"],
-.light button[class*="bg-violet-6"],
-.light button[class*="bg-orange-6"],
-.light button[class*="bg-gradient-to-r"],
-.light button[class*="bg-gradient-to-tr"],
-.light button[class*="bg-gradient-to-b"],
-.light a[class*="bg-gradient-to-"],
+.light button[class~="bg-emerald-600"],
+.light button[class~="bg-emerald-700"],
+.light button[class~="bg-green-600"],
+.light button[class~="bg-green-700"],
+.light button[class~="bg-rose-600"],
+.light button[class~="bg-rose-700"],
+.light button[class~="bg-red-600"],
+.light button[class~="bg-red-700"],
+.light button[class~="bg-cyan-600"],
+.light button[class~="bg-cyan-700"],
+.light button[class~="bg-blue-600"],
+.light button[class~="bg-blue-700"],
+.light button[class~="bg-indigo-600"],
+.light button[class~="bg-indigo-700"],
+.light button[class~="bg-purple-600"],
+.light button[class~="bg-violet-600"],
+.light button[class~="bg-orange-600"],
+.light button[class~="bg-gradient-to-r"]:not([class*="/10"]):not([class*="/15"]):not([class*="/20"]),
+.light button[class~="bg-gradient-to-tr"]:not([class*="/10"]):not([class*="/15"]):not([class*="/20"]),
+.light button[class~="bg-gradient-to-b"]:not([class*="/10"]):not([class*="/15"]):not([class*="/20"]),
+.light a[class~="bg-gradient-to-r"],
+.light a[class~="bg-gradient-to-tr"],
 .light .btn-solid,
 .light .btn-primary {
   color: #ffffff !important;
 }
 
-.light button[class*="bg-emerald-6"] *,
-.light button[class*="bg-emerald-7"] *,
-.light button[class*="bg-green-6"] *,
-.light button[class*="bg-rose-6"] *,
-.light button[class*="bg-rose-7"] *,
-.light button[class*="bg-red-6"] *,
-.light button[class*="bg-cyan-6"] *,
-.light button[class*="bg-cyan-7"] *,
-.light button[class*="bg-blue-6"] *,
-.light button[class*="bg-blue-7"] *,
-.light button[class*="bg-indigo-6"] *,
-.light button[class*="bg-indigo-7"] *,
-.light button[class*="bg-purple-6"] *,
-.light button[class*="bg-orange-6"] *,
-.light button[class*="bg-gradient-to-r"] *,
-.light button[class*="bg-gradient-to-tr"] *,
-.light button[class*="bg-gradient-to-b"] *,
-.light a[class*="bg-gradient-to-"] *,
+.light button[class~="bg-emerald-600"] *,
+.light button[class~="bg-emerald-700"] *,
+.light button[class~="bg-green-600"] *,
+.light button[class~="bg-rose-600"] *,
+.light button[class~="bg-rose-700"] *,
+.light button[class~="bg-red-600"] *,
+.light button[class~="bg-cyan-600"] *,
+.light button[class~="bg-cyan-700"] *,
+.light button[class~="bg-blue-600"] *,
+.light button[class~="bg-blue-700"] *,
+.light button[class~="bg-indigo-600"] *,
+.light button[class~="bg-indigo-700"] *,
+.light button[class~="bg-purple-600"] *,
+.light button[class~="bg-orange-600"] *,
+.light button[class~="bg-gradient-to-r"]:not([class*="/10"]):not([class*="/15"]):not([class*="/20"]) *,
+.light button[class~="bg-gradient-to-tr"]:not([class*="/10"]):not([class*="/15"]):not([class*="/20"]) *,
+.light button[class~="bg-gradient-to-b"]:not([class*="/10"]):not([class*="/15"]):not([class*="/20"]) *,
+.light a[class~="bg-gradient-to-r"] *,
+.light a[class~="bg-gradient-to-tr"] *,
 .light .btn-solid *,
 .light .btn-primary * {
   color: #ffffff !important;
@@ -693,17 +700,36 @@ body {
 }
 
 /* Solid Amber Buttons (Metals & Commodities Selector) */
-.light button[class*="bg-amber-400"],
-.light button[class*="bg-amber-500"],
-.light button[class*="bg-yellow-400"],
-.light button[class*="bg-yellow-500"] {
+.light button[class~="bg-amber-400"],
+.light button[class~="bg-amber-500"],
+.light button[class~="bg-yellow-400"],
+.light button[class~="bg-yellow-500"] {
   color: #000000 !important;
 }
-.light button[class*="bg-amber-400"] *,
-.light button[class*="bg-amber-500"] *,
-.light button[class*="bg-yellow-400"] *,
-.light button[class*="bg-yellow-500"] * {
+.light button[class~="bg-amber-400"] *,
+.light button[class~="bg-amber-500"] *,
+.light button[class~="bg-yellow-400"] *,
+.light button[class~="bg-yellow-500"] * {
   color: #000000 !important;
+}
+
+/* Translucent status badges/buttons in Light Mode must preserve readable dark/chromatic contrast */
+.light button[class*="bg-emerald-600/"],
+.light button[class*="bg-emerald-500/"] {
+  color: #065f46 !important;
+}
+.light button[class*="bg-amber-600/"],
+.light button[class*="bg-amber-500/"] {
+  color: #92400e !important;
+}
+.light [class~="bg-emerald-700"],
+.light [class~="bg-emerald-700"] *,
+.light [class~="bg-amber-600"],
+.light [class~="bg-amber-600"] *,
+.light [class~="bg-sky-600"],
+.light [class~="bg-sky-600"] * {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
 }
 
 /* Dark Surface Enclave in Light Mode */
@@ -780,14 +806,14 @@ body {
   animation: slideRightSmooth 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* Edge Hover Proximity Trigger Strip */
+/* Edge Hover Proximity Trigger Strip (starts below sticky header so it never interferes with hamburger) */
 .nav-proximity-trigger {
   position: fixed;
-  top: 0;
+  top: 72px;
   left: 0;
   bottom: 0;
-  width: 12px;
-  z-index: 45;
+  width: 8px;
+  z-index: 35;
   background: transparent;
   transition: background-color 0.2s ease;
 }

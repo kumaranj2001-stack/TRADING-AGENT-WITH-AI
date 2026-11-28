@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Code2, Play, RotateCcw, Volume2, Radio, TrendingUp, Flame } from 'lucide-react';
 import type { TechnicalScreenerSnapshot } from '@/lib/institutional/types';
+import { isIndianSymbol } from '@/lib/marketData';
 
 interface Props {
   symbol: string;
@@ -20,6 +21,8 @@ export const TechnicalScreenerDesk: React.FC<Props> = ({
   const [headlineInput, setHeadlineInput] = useState<string>('');
   const [scoredHeadline, setScoredHeadline] = useState(screener.unstructuredNewsSentiment[0]);
   const [voiceActive, setVoiceActive] = useState<boolean>(false);
+  const [isCompiling, setIsCompiling] = useState<boolean>(false);
+  const pnlCurrency = isIndianSymbol(symbol) ? '₹' : '$';
 
   useEffect(() => {
     setPineCode(screener.pineCompiler.sourceCode);
@@ -27,6 +30,15 @@ export const TechnicalScreenerDesk: React.FC<Props> = ({
     setHeadlineInput('');
     setScoredHeadline(screener.unstructuredNewsSentiment[0]);
   }, [symbol, screener]);
+
+  const handleCompilePine = async (codeToRun: string) => {
+    setIsCompiling(true);
+    try {
+      await onRefreshScreener({ symbol, pineCode: codeToRun, replayBarIndex: replayIdx });
+    } finally {
+      setIsCompiling(false);
+    }
+  };
 
   const handleSpeakSquawk = (voiceScript: string) => {
     setVoiceActive(true);
@@ -67,10 +79,12 @@ export const TechnicalScreenerDesk: React.FC<Props> = ({
               <span>Pine Script v5 Custom Indicator Compiler ({screener.pineCompiler.title})</span>
             </h3>
             <button
-              onClick={() => onRefreshScreener({ symbol, pineCode })}
-              className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-bold"
+              type="button"
+              onClick={() => handleCompilePine(pineCode)}
+              disabled={isCompiling}
+              className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-60 text-white text-xs font-mono font-bold"
             >
-              Compile & Execute Pine v5
+              {isCompiling ? 'Compiling Pine v5...' : 'Compile & Execute Pine v5'}
             </button>
           </div>
           <textarea
@@ -106,11 +120,12 @@ export const TechnicalScreenerDesk: React.FC<Props> = ({
                 </div>
                 {s.language === 'Pine Script v5' && (
                   <button
+                    type="button"
                     onClick={() => {
                       setPineCode(s.code);
-                      onRefreshScreener({ symbol, pineCode: s.code });
+                      handleCompilePine(s.code);
                     }}
-                    className="px-2 py-1 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-[10px] shrink-0"
+                    className="px-2 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 text-[10px] shrink-0"
                   >
                     Load
                   </button>
@@ -123,7 +138,7 @@ export const TechnicalScreenerDesk: React.FC<Props> = ({
             <div className="flex items-center justify-between text-xs font-mono">
               <span className="text-white font-bold">Visual Bar Replay ({replayIdx}/{screener.barReplay.totalBars} bars)</span>
               <span className={screener.barReplay.simulatedPnl >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
-                Replay PnL: ${screener.barReplay.simulatedPnl}
+                Replay PnL: {pnlCurrency}{screener.barReplay.simulatedPnl}
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -133,20 +148,28 @@ export const TechnicalScreenerDesk: React.FC<Props> = ({
                 max={screener.barReplay.totalBars}
                 value={replayIdx}
                 onChange={(e) => setReplayIdx(Number(e.target.value))}
+                onMouseUp={() => onRefreshScreener({ symbol, pineCode, replayBarIndex: replayIdx })}
+                onTouchEnd={() => onRefreshScreener({ symbol, pineCode, replayBarIndex: replayIdx })}
                 className="flex-1"
               />
               <button
-                onClick={() => onRefreshScreener({ symbol, replayBarIndex: Math.min(screener.barReplay.totalBars, replayIdx + 1) })}
-                className="px-2 py-1 rounded bg-emerald-600 text-white text-xs font-mono flex items-center gap-1"
+                type="button"
+                onClick={() => {
+                  const nextIdx = Math.min(screener.barReplay.totalBars, replayIdx + 1);
+                  setReplayIdx(nextIdx);
+                  onRefreshScreener({ symbol, pineCode, replayBarIndex: nextIdx });
+                }}
+                className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono flex items-center gap-1"
               >
                 <Play className="w-3 h-3" /> Step +1
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setReplayIdx(20);
-                  onRefreshScreener({ symbol, replayBarIndex: 20 });
+                  onRefreshScreener({ symbol, pineCode, replayBarIndex: 20 });
                 }}
-                className="px-2 py-1 rounded bg-terminal-800 text-slate-300 text-xs font-mono flex items-center gap-1"
+                className="px-2 py-1 rounded bg-terminal-800 hover:bg-terminal-700 text-slate-300 text-xs font-mono flex items-center gap-1"
               >
                 <RotateCcw className="w-3 h-3" /> Reset
               </button>

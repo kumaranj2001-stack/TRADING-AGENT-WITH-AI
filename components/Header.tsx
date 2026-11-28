@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { CurrencyPair, ExecutionMode, MarketSegment, MarketSessionInfo, TimeFrame, NavigationTab } from '@/lib/types';
 import { PortfolioState } from '@/lib/store';
-import { FOREX_PAIRS, INDIAN_MARKET_ASSETS, METALS_COMMODITIES } from '@/lib/marketData';
+import { FOREX_PAIRS, INDIAN_MARKET_ASSETS, METALS_COMMODITIES, CRYPTO_EQUITIES } from '@/lib/marketData';
 
 export interface HeaderProps {
   theme?: 'dark' | 'light';
@@ -80,22 +80,32 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleFreeze,
   cycleNumber,
 }) => {
-  const pairs = marketSegment === 'INDIAN_MARKET' 
-    ? INDIAN_MARKET_ASSETS 
+  const pairs = marketSegment === 'INDIAN_MARKET'
+    ? INDIAN_MARKET_ASSETS
     : marketSegment === 'METALS_COMMODITIES'
     ? METALS_COMMODITIES
+    : marketSegment === 'CRYPTO_EQUITIES'
+    ? CRYPTO_EQUITIES
     : FOREX_PAIRS;
+
+  const availablePairs = pairs.includes(selectedPair)
+    ? pairs
+    : [selectedPair, ...pairs];
 
   const segmentIcon = marketSegment === 'INDIAN_MARKET'
     ? '🇮🇳'
     : marketSegment === 'METALS_COMMODITIES'
     ? <Coins className="w-3.5 h-3.5 text-amber-400" />
+    : marketSegment === 'CRYPTO_EQUITIES'
+    ? <Cpu className="w-3.5 h-3.5 text-violet-400" />
     : <Globe className="w-3.5 h-3.5 text-cyan-400" />;
 
   const segmentLabel = marketSegment === 'INDIAN_MARKET'
     ? 'NSE India'
     : marketSegment === 'METALS_COMMODITIES'
     ? 'Metals & Commodities'
+    : marketSegment === 'CRYPTO_EQUITIES'
+    ? 'Crypto & US Equities'
     : 'Spot Forex';
 
   return (
@@ -105,10 +115,10 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex flex-wrap xl:flex-nowrap items-center justify-between gap-2 sm:gap-3 w-full min-w-0">
           {/* Left: Attached completely to the left - Responsive Hamburger Drawer Trigger + Brand */}
           <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
-            {/* Modern Responsive Hamburger Menu Trigger with Smooth Proximity Hover Pullout */}
+            {/* Modern Responsive Hamburger Menu Trigger (Single-click reliable toggle) */}
             <button
+              type="button"
               onClick={onOpenLeftDrawer}
-              onMouseEnter={onOpenLeftDrawer}
               className={`p-2 rounded-lg transition-all flex items-center justify-center shrink-0 shadow-sm group relative border ${
                 isLeftDrawerOpen
                   ? 'bg-cyan-600/25 text-cyan-300 border-cyan-400 shadow-cyan-500/20'
@@ -208,6 +218,7 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
 
               <button
+                type="button"
                 onClick={() => {
                   onSelectMarketSegment('INDIAN_MARKET');
                   onSelectPair('NIFTY 50');
@@ -220,6 +231,22 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <span>🇮🇳</span>
                 <span>NSE India</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectMarketSegment('CRYPTO_EQUITIES');
+                  onSelectPair('BTC/USD');
+                }}
+                className={`px-2 sm:px-2.5 py-1 rounded flex items-center gap-1 transition-colors ${
+                  marketSegment === 'CRYPTO_EQUITIES'
+                    ? 'bg-violet-600 text-white font-bold shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                <span>Crypto/US</span>
               </button>
             </div>
 
@@ -350,7 +377,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Mobile Sub-Row: Market Scope Selector & Technical Analysis (Visible on <md screens) */}
         <div className="flex md:hidden flex-wrap items-center justify-between gap-2 w-full pt-1 border-t border-terminal-border/40">
-          <div className="flex items-center bg-terminal-950 p-1 rounded-lg border border-terminal-border text-xs flex-1 justify-around">
+          <div className="flex items-center bg-terminal-950 p-1 rounded-lg border border-terminal-border text-xs flex-1 min-w-0 overflow-x-auto scrollbar-none gap-0.5 justify-between sm:justify-around whitespace-nowrap">
             <button
               onClick={() => {
                 onSelectMarketSegment('FOREX');
@@ -382,6 +409,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <button
+              type="button"
               onClick={() => {
                 onSelectMarketSegment('INDIAN_MARKET');
                 onSelectPair('NIFTY 50');
@@ -394,6 +422,22 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <span>🇮🇳</span>
               <span>NSE</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                onSelectMarketSegment('CRYPTO_EQUITIES');
+                onSelectPair('BTC/USD');
+              }}
+              className={`px-2 py-1 rounded flex items-center gap-1 transition-colors ${
+                marketSegment === 'CRYPTO_EQUITIES'
+                  ? 'bg-violet-600 text-white font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Cpu className="w-3 h-3" />
+              <span>Crypto</span>
             </button>
           </div>
 
@@ -466,7 +510,7 @@ export const Header: React.FC<HeaderProps> = ({
                   onChange={(e) => onSelectPair(e.target.value as CurrencyPair)}
                   className="bg-transparent text-white font-mono text-xs sm:text-sm font-extrabold focus:outline-none cursor-pointer tracking-wide appearance-none pr-5 truncate"
                 >
-                  {pairs.map((p) => (
+                  {availablePairs.map((p) => (
                     <option key={p} value={p} className="bg-terminal-900 text-white font-medium">
                       {p}
                     </option>

@@ -118,10 +118,10 @@ export function resolveInstitutionalAssetContext(
   let decimals = 2;
   let tickStep = 0.05;
 
-  if (trimmed.includes('JPY')) {
+  if (trimmed.includes('JPY') || trimmed.includes('/INR')) {
     decimals = 3;
-    tickStep = 0.01;
-  } else if (trimmed.includes('/') && !trimmed.includes('XAU') && !trimmed.includes('XAG') && !trimmed.includes('BTC') && !trimmed.includes('ETH')) {
+    tickStep = trimmed.includes('/INR') ? 0.005 : 0.01;
+  } else if (trimmed.includes('/') && !trimmed.includes('XAU') && !trimmed.includes('XAG') && !trimmed.includes('BTC') && !trimmed.includes('ETH') && !trimmed.includes('SOL')) {
     decimals = 5;
     tickStep = PIP_VALUES[trimmed as CurrencyPair] || 0.0001;
   } else if (trimmed.includes('XAU')) {

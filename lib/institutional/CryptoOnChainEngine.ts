@@ -39,31 +39,89 @@ export class CryptoOnChainEngine {
    */
   public executeDecodedLogsSql(rawQuery: string = DEFAULT_SQL): CryptoOnChainSnapshot['sqlQueryResult'] {
     const start = performance.now();
-    const query = rawQuery.trim() || DEFAULT_SQL;
+    const cleaned = (rawQuery ?? '').replace(/\s+/g, ' ').replace(/;+\s*$/, '').trim();
+    const query = cleaned || DEFAULT_SQL;
+
+    const allCols = Object.keys(DECODED_CONTRACT_LOGS[0]);
+    const hasSelectFrom = /^SELECT\s+.+?\s+FROM\s+[a-z_][a-z0-9_]*/i.test(query);
+    if (!hasSelectFrom) {
+      return {
+        query,
+        columns: ['error'],
+        rows: [],
+        executionTimeMs: Number(Math.max(0.12, performance.now() - start).toFixed(2)),
+        error: 'SQL Syntax Error: Expected SELECT <columns|*> FROM decoded_logs [WHERE ...] [ORDER BY ...] [LIMIT n].',
+      };
+    }
+
+    const fromMatch = query.match(/FROM\s+([a-z_][a-z0-9_]*)/i);
+    if (fromMatch && fromMatch[1].toLowerCase() !== 'decoded_logs') {
+      return {
+        query,
+        columns: ['error'],
+        rows: [],
+        executionTimeMs: Number(Math.max(0.14, performance.now() - start).toFixed(2)),
+        error: `Unknown table '${fromMatch[1]}'. Available indexed dataset: decoded_logs.`,
+      };
+    }
 
     let rows = [...DECODED_CONTRACT_LOGS];
+    let predicatesApplied = 0;
 
-    const whereMatch = query.match(/WHERE\s+(.+?)(?:\s+ORDER\s+BY|\s+LIMIT|$)/i);
-    if (whereMatch) {
-      const cond = whereMatch[1].trim();
-      const numCmp = cond.match(/^([a-z_]+)\s*(>=|<=|>|<|=)\s*(\d+(?:\.\d+)?)$/i);
-      const strCmp = cond.match(/^([a-z_]+)\s*=\s*'([^']+)'$/i);
+    const evalAtomicPredicate = (rawCond: string, row: Record<string, any>): boolean => {
+      const cond = rawCond.trim().replace(/^\(+|\)+$/g, '').trim();
+      const inMatch = cond.match(/^([a-z_]+)\s+IN\s*\(([^)]+)\)$/i);
+      if (inMatch) {
+        const [, col, itemsRaw] = inMatch;
+        const allowed = itemsRaw
+          .split(',')
+          .map((s) => s.trim().replace(/^['"]|['"]$/g, '').toLowerCase());
+        return allowed.includes(String(row[col] ?? '').toLowerCase());
+      }
+
+      const likeMatch = cond.match(/^([a-z_]+)\s+LIKE\s+['"]([^'"]+)['"]$/i);
+      if (likeMatch) {
+        const [, col, pattern] = likeMatch;
+        const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*');
+        return new RegExp(`^${escaped}$`, 'i').test(String(row[col] ?? ''));
+      }
+
+      const numCmp = cond.match(/^([a-z_]+)\s*(>=|<=|!=|<>|>|<|=)\s*(\d+(?:\.\d+)?)$/i);
       if (numCmp) {
         const [, col, op, valStr] = numCmp;
         const target = Number(valStr);
-        rows = rows.filter((r) => {
-          const cell = Number((r as Record<string, any>)[col]);
-          if (!Number.isFinite(cell)) return false;
-          if (op === '>=') return cell >= target;
-          if (op === '<=') return cell <= target;
-          if (op === '>') return cell > target;
-          if (op === '<') return cell < target;
-          return cell === target;
-        });
-      } else if (strCmp) {
-        const [, col, strVal] = strCmp;
-        rows = rows.filter((r) => String((r as Record<string, any>)[col] || '').toLowerCase() === strVal.toLowerCase());
+        const cell = Number(row[col]);
+        if (!Number.isFinite(cell)) return false;
+        if (op === '>=') return cell >= target;
+        if (op === '<=') return cell <= target;
+        if (op === '>' ) return cell > target;
+        if (op === '<') return cell < target;
+        if (op === '!=' || op === '<>') return cell !== target;
+        return cell === target;
       }
+
+      const strCmp = cond.match(/^([a-z_]+)\s*(=|!=|<>)\s*['"]([^'"]+)['"]$/i);
+      if (strCmp) {
+        const [, col, op, strVal] = strCmp;
+        const cell = String(row[col] ?? '').toLowerCase();
+        const cmpVal = strVal.toLowerCase();
+        return op === '=' ? cell === cmpVal : cell !== cmpVal;
+      }
+
+      return true;
+    };
+
+    const whereMatch = query.match(/WHERE\s+(.+?)(?:\s+ORDER\s+BY|\s+LIMIT|$)/i);
+    if (whereMatch) {
+      const whereClause = whereMatch[1].trim();
+      const orBranches = whereClause.split(/\s+OR\s+/i);
+      predicatesApplied = orBranches.length;
+      rows = rows.filter((row) =>
+        orBranches.some((branch) => {
+          const andParts = branch.split(/\s+AND\s+/i);
+          return andParts.every((p) => evalAtomicPredicate(p, row));
+        })
+      );
     }
 
     const orderMatch = query.match(/ORDER\s+BY\s+([a-z_]+)(?:\s+(ASC|DESC))?/i);
@@ -73,7 +131,8 @@ export class CryptoOnChainEngine {
       rows.sort((a, b) => {
         const va = (a as Record<string, any>)[col];
         const vb = (b as Record<string, any>)[col];
-        return va > vb ? dir : va < vb ? -dir : 0;
+        if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+        return String(va ?? '').localeCompare(String(vb ?? '')) * dir;
       });
     }
 
@@ -83,7 +142,6 @@ export class CryptoOnChainEngine {
     }
 
     const selectMatch = query.match(/^SELECT\s+(.+?)\s+FROM\s+/i);
-    const allCols = Object.keys(DECODED_CONTRACT_LOGS[0]);
     const requestedCols =
       selectMatch && selectMatch[1].trim() !== '*'
         ? selectMatch[1].split(',').map((s) => s.trim()).filter((c) => allCols.includes(c))
@@ -98,11 +156,15 @@ export class CryptoOnChainEngine {
       return out;
     });
 
+    const elapsedMs = Number(
+      (Math.max(0.18, performance.now() - start) + projected.length * 0.24 + predicatesApplied * 0.15).toFixed(2)
+    );
+
     return {
       query,
       columns,
       rows: projected,
-      executionTimeMs: Number(Math.max(1.2, performance.now() - start + 2.4).toFixed(2)),
+      executionTimeMs: elapsedMs,
     };
   }
 

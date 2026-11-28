@@ -12,6 +12,10 @@ export const INDIAN_MARKET_ASSETS: CurrencyPair[] = [
   'NIFTY 50', 'BANK NIFTY', 'USD/INR', 'EUR/INR', 'GBP/INR', 'RELIANCE', 'TCS', 'HDFC BANK', 'INFY'
 ];
 
+export const CRYPTO_EQUITIES: CurrencyPair[] = [
+  'BTC/USD', 'ETH/USD', 'NVDA'
+];
+
 export const BASE_PRICES: Record<CurrencyPair, number> = {
   // Forex Majors (Live OANDA / Global Spot Market Parity)
   'EUR/USD': 1.0968,
@@ -39,6 +43,10 @@ export const BASE_PRICES: Record<CurrencyPair, number> = {
   'TCS': 2376.20,
   'HDFC BANK': 846.00,
   'INFY': 1098.00,
+  // Crypto & US Equities
+  'BTC/USD': 96420.00,
+  'ETH/USD': 3410.00,
+  'NVDA': 142.10,
 };
 
 export const PIP_VALUES: Record<CurrencyPair, number> = {
@@ -67,6 +75,10 @@ export const PIP_VALUES: Record<CurrencyPair, number> = {
   'TCS': 0.05,
   'HDFC BANK': 0.05,
   'INFY': 0.05,
+  // Crypto & US Equities
+  'BTC/USD': 1.00,
+  'ETH/USD': 0.10,
+  'NVDA': 0.01,
 };
 
 // Maps internal symbols to real OANDA / TradingView widget symbols!
@@ -97,6 +109,10 @@ export const OANDA_TRADINGVIEW_MAP: Record<CurrencyPair, string> = {
   'TCS': 'NSE:TCS',
   'HDFC BANK': 'NSE:HDFCBANK',
   'INFY': 'NSE:INFY',
+  // Crypto & US Equities
+  'BTC/USD': 'COINBASE:BTCUSD',
+  'ETH/USD': 'COINBASE:ETHUSD',
+  'NVDA': 'NASDAQ:NVDA',
 };
 
 // Authoritative TradingView Global Scanner tickers for instant REST quote aggregation
@@ -124,11 +140,67 @@ export const TRADINGVIEW_SCANNER_MAP: Record<CurrencyPair, string> = {
   'TCS': 'NSE:TCS',
   'HDFC BANK': 'NSE:HDFCBANK',
   'INFY': 'NSE:INFY',
+  'BTC/USD': 'COINBASE:BTCUSD',
+  'ETH/USD': 'COINBASE:ETHUSD',
+  'NVDA': 'NASDAQ:NVDA',
 };
 
-export function getMarketSegmentForSymbol(symbol: CurrencyPair): MarketSegment {
-  if (INDIAN_MARKET_ASSETS.includes(symbol)) return 'INDIAN_MARKET';
-  if (METALS_COMMODITIES.includes(symbol)) return 'METALS_COMMODITIES';
+export function isIndianSymbol(symbol: string): boolean {
+  const s = (symbol || '').toUpperCase().trim();
+  return (
+    s.includes('NIFTY') ||
+    s.includes('/INR') ||
+    s === 'RELIANCE' ||
+    s === 'TCS' ||
+    s === 'HDFC BANK' ||
+    s === 'HDFCBANK' ||
+    s === 'INFY'
+  );
+}
+
+export function isForexSpotSymbol(symbol: string): boolean {
+  const s = (symbol || '').toUpperCase().trim();
+  return (FOREX_PAIRS as string[]).includes(s);
+}
+
+export function getSymbolDecimals(symbol: string): number {
+  const s = (symbol || '').toUpperCase().trim();
+  if (s.includes('JPY') || s.includes('XAG') || s.includes('/INR')) return 3;
+  if (s.includes('COPPER')) return 4;
+  if (isForexSpotSymbol(s)) return 5;
+  return 2;
+}
+
+/**
+ * Formats an instrument quote price with the accurate currency denomination
+ * (₹ for Indian NSE/INR, no $ for Forex spot pairs, $ for Metals/Crypto/US Equities).
+ */
+export function formatInstrumentPrice(symbol: string, price: number): string {
+  if (!Number.isFinite(price)) return '0.00';
+  const dec = getSymbolDecimals(symbol);
+  if (isIndianSymbol(symbol)) {
+    const useLocale = price >= 1000 && !symbol.includes('/INR');
+    const formatted = useLocale
+      ? price.toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec })
+      : price.toFixed(dec);
+    return `₹${formatted}`;
+  }
+  if (isForexSpotSymbol(symbol)) {
+    return price.toFixed(dec);
+  }
+  const formatted = price >= 1000
+    ? price.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec })
+    : price.toFixed(dec);
+  return `$${formatted}`;
+}
+
+export function getMarketSegmentForSymbol(symbol: CurrencyPair | string): MarketSegment {
+  const s = (symbol || '').toUpperCase().trim();
+  if (INDIAN_MARKET_ASSETS.includes(s as CurrencyPair) || isIndianSymbol(s)) return 'INDIAN_MARKET';
+  if (METALS_COMMODITIES.includes(s as CurrencyPair)) return 'METALS_COMMODITIES';
+  if (CRYPTO_EQUITIES.includes(s as CurrencyPair) || s.includes('BTC') || s.includes('ETH') || s === 'NVDA') {
+    return 'CRYPTO_EQUITIES';
+  }
   return 'FOREX';
 }
 
@@ -143,6 +215,7 @@ export function generateCandles(pair: CurrencyPair, timeframe: TimeFrame, count:
   const isPlatinum = pair === 'XPT/USD';
   const isCopper = pair === 'COPPER';
   const isOil = pair === 'WTI_CRUDE' || pair === 'BRENT_CRUDE';
+  const isCryptoOrUsEquity = CRYPTO_EQUITIES.includes(pair);
 
   let pip = 0.0001;
   let volatility = 0.0012;
@@ -153,6 +226,9 @@ export function generateCandles(pair: CurrencyPair, timeframe: TimeFrame, count:
   } else if (isIndianStock) {
     pip = 0.05;
     volatility = basePrice * 0.0025; // ~5-10 INR
+  } else if (isCryptoOrUsEquity) {
+    pip = pair === 'BTC/USD' ? 1.0 : pair === 'ETH/USD' ? 0.5 : 0.05;
+    volatility = basePrice * 0.0022;
   } else if (isGold) {
     pip = 0.10;
     volatility = 3.80; // ~$3.80 per gold candle matching OANDA spot gold
@@ -198,11 +274,7 @@ export function generateCandles(pair: CurrencyPair, timeframe: TimeFrame, count:
     const wave = Math.sin(i / 5) * volatility * 0.6;
     const randomStep = (Math.random() - 0.49) * volatility * 1.4;
     const open = currentClose;
-    
-    let decimalPlaces = 5;
-    if (isIndianIndex || isIndianStock || isGold || isPlatinum || isOil) decimalPlaces = 2;
-    else if (isSilver || isJpy || isRupeePair) decimalPlaces = 3;
-    else if (isCopper) decimalPlaces = 4;
+    const decimalPlaces = getSymbolDecimals(pair);
 
     const close = Number((open + wave + randomStep).toFixed(decimalPlaces));
     const high = Number((Math.max(open, close) + Math.random() * volatility * 0.7).toFixed(decimalPlaces));

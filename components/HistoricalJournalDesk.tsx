@@ -40,11 +40,10 @@ export const HistoricalJournalDesk: React.FC<HistoricalJournalDeskProps> = ({
   journalAnalysis,
 }) => {
   const [liveAnalysis, setLiveAnalysis] = React.useState<HistoricalJournalAnalysis | null>(null);
-  const [dynamicRules, setDynamicRules] = React.useState<FailureConstraintRule[]>(() =>
-    diagnosticReasoningEngine.getDynamicRules()
-  );
+  const [dynamicRules, setDynamicRules] = React.useState<FailureConstraintRule[]>([]);
 
   React.useEffect(() => {
+    setDynamicRules(diagnosticReasoningEngine.getDynamicRules());
     fetch(`/api/journal?symbol=${encodeURIComponent(selectedPair)}`)
       .then(res => res.json())
       .then(json => {

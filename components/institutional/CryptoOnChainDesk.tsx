@@ -10,23 +10,24 @@ interface Props {
   onRefreshCrypto: (payload: Record<string, any>) => Promise<void>;
 }
 
-export const CryptoOnChainDesk: React.FC<Props> = ({ symbol, crypto }) => {
+export const CryptoOnChainDesk: React.FC<Props> = ({ symbol, crypto, onRefreshCrypto }) => {
   const [sqlInput, setSqlInput] = useState<string>(crypto.sqlQueryResult.query);
   const [sqlResult, setSqlResult] = useState(crypto.sqlQueryResult);
+  const [isRunningSql, setIsRunningSql] = useState<boolean>(false);
 
   useEffect(() => {
     setSqlInput(crypto.sqlQueryResult.query);
     setSqlResult(crypto.sqlQueryResult);
   }, [symbol, crypto]);
 
-  const runSql = async () => {
-    const res = await fetch('/api/institutional/crypto-onchain', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'RUN_SQL', asset: symbol, sqlQuery: sqlInput }),
-    });
-    const json = await res.json();
-    if (json?.sqlQueryResult) setSqlResult(json.sqlQueryResult);
+  const runSql = async (overrideQuery?: string) => {
+    const queryToRun = overrideQuery ?? sqlInput;
+    setIsRunningSql(true);
+    try {
+      await onRefreshCrypto({ action: 'RUN_SQL', asset: symbol, sqlQuery: queryToRun });
+    } finally {
+      setIsRunningSql(false);
+    }
   };
 
   return (
@@ -45,7 +46,7 @@ export const CryptoOnChainDesk: React.FC<Props> = ({ symbol, crypto }) => {
         </div>
         <div className="bg-terminal-950 border border-terminal-border rounded-lg p-3">
           <div className="text-[10px] text-slate-400">MINER RESERVES & PUELL</div>
-          <div className="text-base font-bold text-amber-300 mt-1">{crypto.minerReserves.reserveUnits.toLocaleString()} BTC</div>
+          <div className="text-base font-bold text-amber-300 mt-1">{crypto.minerReserves.reserveUnits.toLocaleString('en-US')} BTC</div>
           <div className="text-[10px] text-slate-400">Puell {crypto.minerReserves.puellMultiple} • Hash {crypto.minerReserves.hashrateExahash} EH/s</div>
         </div>
         <div className="bg-terminal-950 border border-terminal-border rounded-lg p-3">
@@ -149,9 +150,38 @@ export const CryptoOnChainDesk: React.FC<Props> = ({ symbol, crypto }) => {
               <Database className="w-4 h-4" />
               <span>Dune-Style SQL Query Over Raw Decoded Smart Contract Logs</span>
             </h4>
-            <button onClick={runSql} className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-bold">
-              Execute SQL ({sqlResult.executionTimeMs}ms)
-            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-terminal-900 border border-terminal-border text-slate-300">
+                {sqlResult.rows.length} rows
+              </span>
+              <button
+                type="button"
+                onClick={() => runSql()}
+                disabled={isRunningSql}
+                className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-60 text-white text-xs font-mono font-bold"
+              >
+                {isRunningSql ? 'Running...' : `Execute SQL (${sqlResult.executionTimeMs}ms)`}
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
+            {[
+              { label: 'All Logs', q: 'SELECT block_time, protocol, event_name, from_label, token, amount_usd FROM decoded_logs ORDER BY amount_usd DESC LIMIT 6' },
+              { label: '>= $10M Whales', q: 'SELECT block_time, protocol, token, amount_usd FROM decoded_logs WHERE amount_usd >= 10000000 ORDER BY amount_usd DESC' },
+              { label: 'ETH / WBTC Inflows', q: "SELECT block_time, protocol, from_label, token, amount_usd FROM decoded_logs WHERE token IN ('ETH', 'WBTC') AND amount_usd >= 6000000 ORDER BY block_number DESC" },
+            ].map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => {
+                  setSqlInput(preset.q);
+                  runSql(preset.q);
+                }}
+                className="px-2 py-0.5 rounded bg-terminal-900 hover:bg-terminal-800 border border-terminal-border text-cyan-300"
+              >
+                {preset.label}
+              </button>
+            ))}
           </div>
           <textarea
             value={sqlInput}
@@ -159,24 +189,34 @@ export const CryptoOnChainDesk: React.FC<Props> = ({ symbol, crypto }) => {
             rows={2}
             className="w-full bg-terminal-900 border border-terminal-border rounded p-2 text-xs font-mono text-emerald-200 focus:outline-none"
           />
-          <div className="overflow-x-auto">
-            <table className="w-full text-[11px] font-mono">
-              <thead>
-                <tr className="text-slate-400 border-b border-terminal-border text-left">
-                  {sqlResult.columns.map((col) => <th key={col} className="py-1 pr-2">{col}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {sqlResult.rows.map((row, idx) => (
-                  <tr key={idx} className="border-b border-terminal-border/30">
-                    {sqlResult.columns.map((col) => (
-                      <td key={col} className="py-1 pr-2 text-slate-200">{String(row[col])}</td>
-                    ))}
+          {sqlResult.error ? (
+            <div className="p-2.5 rounded bg-rose-500/10 border border-rose-500/40 text-xs font-mono text-rose-300">
+              {sqlResult.error}
+            </div>
+          ) : sqlResult.rows.length === 0 ? (
+            <div className="p-2.5 rounded bg-amber-500/10 border border-amber-500/40 text-xs font-mono text-amber-300">
+              Query returned 0 matching rows in decoded_logs.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11px] font-mono">
+                <thead>
+                  <tr className="text-slate-400 border-b border-terminal-border text-left">
+                    {sqlResult.columns.map((col) => <th key={col} className="py-1 pr-2">{col}</th>)}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {sqlResult.rows.map((row, idx) => (
+                    <tr key={idx} className="border-b border-terminal-border/30">
+                      {sqlResult.columns.map((col) => (
+                        <td key={col} className="py-1 pr-2 text-slate-200">{String(row[col])}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>

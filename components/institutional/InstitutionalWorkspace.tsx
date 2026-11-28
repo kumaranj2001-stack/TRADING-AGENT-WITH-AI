@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ArrowLeft,
   Cpu,
@@ -47,6 +47,7 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
   initialSection = 'execution',
   selectedPair = 'XAU/USD',
   timeframe = '1h',
+  onSelectPair,
   onSyncToDebate,
   onBackToTerminal,
 }) => {
@@ -55,45 +56,96 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
   const [overview, setOverview] = useState<InstitutionalOverviewPayload | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [streamPulse, setStreamPulse] = useState<{
+    symbol: string;
     spotPrice: number;
     fixLatencyMs: number;
     zeroGammaFlip: number;
     rvolMultiplier: number;
   } | null>(null);
 
+  const symbolRef = useRef<string>(symbol);
+  const requestSeqRef = useRef<number>(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   useEffect(() => {
     setSection(initialSection);
   }, [initialSection]);
 
+  const handleSymbolSwitch = useCallback(
+    (nextSym: string) => {
+      if (!nextSym) return;
+      symbolRef.current = nextSym;
+      setSymbol(nextSym);
+      setStreamPulse(null);
+      setOverview((prev) => (prev && prev.symbol === nextSym ? prev : null));
+      if (onSelectPair && nextSym !== selectedPair) {
+        onSelectPair(nextSym as CurrencyPair);
+      }
+    },
+    [onSelectPair, selectedPair]
+  );
+
   useEffect(() => {
-    setSymbol(selectedPair);
+    if (selectedPair && selectedPair !== symbolRef.current) {
+      symbolRef.current = selectedPair;
+      setSymbol(selectedPair);
+      setStreamPulse(null);
+      setOverview((prev) => (prev && prev.symbol === selectedPair ? prev : null));
+    }
   }, [selectedPair]);
 
-  const loadOverview = useCallback(async (sym = symbol) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/institutional/overview?symbol=${encodeURIComponent(sym)}&timeframe=${encodeURIComponent(timeframe)}`);
-      const json = await res.json();
-      if (json?.success && json?.data) {
-        setOverview(json.data);
+  const loadOverview = useCallback(
+    async (sym = symbol) => {
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      const seqId = ++requestSeqRef.current;
+
+      setLoading(true);
+      try {
+        const res = await fetch(
+          `/api/institutional/overview?symbol=${encodeURIComponent(sym)}&timeframe=${encodeURIComponent(timeframe)}`,
+          { cache: 'no-store', signal: controller.signal }
+        );
+        const json = await res.json();
+        if (seqId !== requestSeqRef.current || symbolRef.current !== sym) {
+          return;
+        }
+        if (json?.success && json?.data && json.data.symbol === sym) {
+          setOverview(json.data);
+        }
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          console.error('Failed loading institutional suite overview:', err);
+        }
+      } finally {
+        if (seqId === requestSeqRef.current) {
+          setLoading(false);
+        }
       }
-    } catch (err) {
-      console.error('Failed loading institutional suite overview:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [symbol, timeframe]);
+    },
+    [symbol, timeframe]
+  );
 
   useEffect(() => {
+    symbolRef.current = symbol;
     loadOverview(symbol);
+    return () => {
+      abortControllerRef.current?.abort();
+    };
   }, [symbol, timeframe, loadOverview]);
 
   useEffect(() => {
-    const es = new EventSource(`/api/institutional/stream?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}`);
+    const targetSym = symbol;
+    const es = new EventSource(
+      `/api/institutional/stream?symbol=${encodeURIComponent(targetSym)}&timeframe=${encodeURIComponent(timeframe)}`
+    );
     es.onmessage = (ev) => {
       try {
         const pkt = JSON.parse(ev.data);
+        if (pkt?.symbol && pkt.symbol !== symbolRef.current) return;
         setStreamPulse({
+          symbol: pkt.symbol || targetSym,
           spotPrice: pkt.spotPrice,
           fixLatencyMs: pkt.fixLatencyMs,
           zeroGammaFlip: pkt.zeroGammaFlip,
@@ -111,20 +163,51 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
     payload: Record<string, any>,
     key: keyof InstitutionalOverviewPayload
   ) => {
+    const reqSymbol = symbolRef.current;
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, symbol, timeframe }),
+      cache: 'no-store',
+      body: JSON.stringify({ ...payload, symbol: reqSymbol, timeframe }),
     });
     const json = await res.json();
-    if (json?.data && overview) {
+    if (reqSymbol !== symbolRef.current) return;
+
+    if (json?.data) {
       setOverview((prev) => (prev ? { ...prev, [key]: json.data } : prev));
-    } else if (json && key === 'execution' && json.geneticOptimization && overview) {
+    } else if (json && key === 'execution' && json.geneticOptimization) {
       setOverview((prev) =>
         prev
           ? {
               ...prev,
               execution: { ...prev.execution, geneticOptimization: json.geneticOptimization },
+            }
+          : prev
+      );
+    } else if (json && key === 'quant' && json.cloudWebhookScanner) {
+      setOverview((prev) =>
+        prev
+          ? {
+              ...prev,
+              quant: { ...prev.quant, cloudWebhookScanner: json.cloudWebhookScanner },
+            }
+          : prev
+      );
+    } else if (json && key === 'quant' && json.formulaBacktester) {
+      setOverview((prev) =>
+        prev
+          ? {
+              ...prev,
+              quant: { ...prev.quant, formulaBacktester: json.formulaBacktester },
+            }
+          : prev
+      );
+    } else if (json && key === 'crypto' && json.sqlQueryResult) {
+      setOverview((prev) =>
+        prev
+          ? {
+              ...prev,
+              crypto: { ...prev.crypto, sqlQueryResult: json.sqlQueryResult },
             }
           : prev
       );
@@ -138,29 +221,33 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
     );
   };
 
+  const activeOverview = overview && overview.symbol === symbol ? overview : null;
+  const activePulse = streamPulse && streamPulse.symbol === symbol ? streamPulse : null;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0">
       {/* Top Institutional Command Header */}
-      <div className="bg-terminal-900 border border-cyan-500/30 rounded-xl p-4 shadow-lg space-y-3">
+      <div className="bg-terminal-900 border border-cyan-500/30 rounded-xl p-3 sm:p-4 shadow-lg space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <Cpu className="w-5 h-5 text-cyan-400" />
-              <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
+              <Cpu className="w-5 h-5 text-cyan-400 shrink-0" />
+              <h2 className="text-sm sm:text-lg font-bold text-white tracking-wide break-words">
                 QRI INSTITUTIONAL EXECUTION, DERIVATIVES, ON-CHAIN & RISK SUITE
               </h2>
             </div>
-            <p className="text-xs font-mono text-slate-400 mt-0.5">
+            <p className="text-[11px] sm:text-xs font-mono text-slate-400 mt-0.5 break-words">
               Additive 50-Platform Institutional Architecture • MetaTrader 5 Bridge, 8-Agent Debate, Macro Calendar & Knowledge Base Strictly Preserved
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {['XAU/USD', 'EUR/USD', 'NVDA', 'BTC/USD', 'NIFTY 50'].map((sym) => (
               <button
+                type="button"
                 key={sym}
-                onClick={() => setSymbol(sym)}
-                className={`px-2.5 py-1 rounded text-xs font-mono border ${
+                onClick={() => handleSymbolSwitch(sym)}
+                className={`px-2.5 py-1 rounded text-xs font-mono border transition-colors ${
                   symbol === sym
                     ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 font-bold'
                     : 'bg-terminal-950 text-slate-400 border-terminal-border hover:text-white'
@@ -170,11 +257,12 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
               </button>
             ))}
 
-            {onSyncToDebate && overview && (
+            {onSyncToDebate && activeOverview && (
               <button
+                type="button"
                 onClick={() =>
                   onSyncToDebate(
-                    `Institutional Briefing (${symbol}): ${overview.debateEnrichment.summaryBulletPoints.join(' | ')}`
+                    `Institutional Briefing (${symbol}): ${activeOverview.debateEnrichment.summaryBulletPoints.join(' | ')}`
                   )
                 }
                 className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-mono font-bold flex items-center gap-1.5"
@@ -185,6 +273,7 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
             )}
 
             <button
+              type="button"
               onClick={handleOpenTearSheet}
               className="px-3 py-1.5 rounded-lg bg-terminal-800 hover:bg-terminal-700 text-cyan-300 border border-terminal-border text-xs font-mono font-bold flex items-center gap-1.5"
             >
@@ -194,6 +283,7 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
 
             {onBackToTerminal && (
               <button
+                type="button"
                 onClick={onBackToTerminal}
                 className="px-3 py-1.5 rounded-lg bg-terminal-800 hover:bg-terminal-700 text-slate-200 border border-terminal-border text-xs font-mono flex items-center gap-1"
               >
@@ -208,13 +298,17 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-2 bg-terminal-950 px-3 py-2 rounded-lg border border-terminal-border text-xs font-mono">
           <div className="flex items-center gap-2 text-emerald-400">
             <Radio className="w-3.5 h-3.5 animate-pulse" />
-            <span>SSE STREAM SYNCED ({symbol} • {timeframe.toUpperCase()})</span>
+            <span>
+              {activeOverview || activePulse
+                ? `SSE STREAM SYNCED (${symbol} • ${timeframe.toUpperCase()})`
+                : `SYNCING STREAM (${symbol} • ${timeframe.toUpperCase()})...`}
+            </span>
           </div>
-          <div className="flex flex-wrap items-center gap-4 text-slate-300">
-            <span>Spot: <strong className="text-white">{streamPulse?.spotPrice ?? overview?.spotPrice ?? '—'}</strong></span>
-            <span>FIX/MT5 Latency: <strong className="text-emerald-400">{streamPulse?.fixLatencyMs ?? 1.8}ms</strong></span>
-            <span>Zero Gamma Flip: <strong className="text-cyan-300">{streamPulse?.zeroGammaFlip ?? overview?.options.zeroGammaFlipLevel ?? '—'}</strong></span>
-            <span>RVOL Alert: <strong className="text-amber-300">{streamPulse?.rvolMultiplier ?? 2.8}x</strong></span>
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-slate-300">
+            <span>Spot: <strong className="text-white">{activePulse?.spotPrice ?? activeOverview?.spotPrice ?? '—'}</strong></span>
+            <span>FIX/MT5 Latency: <strong className="text-emerald-400">{activePulse?.fixLatencyMs ?? 1.8}ms</strong></span>
+            <span>Zero Gamma Flip: <strong className="text-cyan-300">{activePulse?.zeroGammaFlip ?? activeOverview?.options.zeroGammaFlipLevel ?? '—'}</strong></span>
+            <span>RVOL Alert: <strong className="text-amber-300">{activePulse?.rvolMultiplier ?? 2.8}x</strong></span>
             <span className="flex items-center gap-1 text-emerald-400">
               <ShieldCheck className="w-3.5 h-3.5" /> MT5 CONNECTIVITY INTACT
             </span>
@@ -222,12 +316,13 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
         </div>
 
         {/* 9-Pillar Institutional Module Selector */}
-        <div className="flex flex-wrap gap-1.5 pt-1">
+        <div className="flex flex-nowrap sm:flex-wrap overflow-x-auto scrollbar-none gap-1.5 pt-1 pb-1">
           {SECTION_TABS.map((t) => (
             <button
+              type="button"
               key={t.id}
               onClick={() => setSection(t.id)}
-              className={`px-2.5 py-1.5 rounded-lg text-xs font-mono border transition-all flex items-center gap-1.5 ${
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-mono border transition-all flex items-center gap-1.5 shrink-0 ${
                 section === t.id
                   ? 'bg-gradient-to-r from-cyan-600/30 to-indigo-600/30 text-white border-cyan-400 font-bold shadow-sm'
                   : 'bg-terminal-950 text-slate-400 border-terminal-border hover:text-white'
@@ -241,19 +336,19 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
       </div>
 
       {/* Active Institutional Module Desk */}
-      {loading && !overview ? (
+      {!activeOverview ? (
         <div className="bg-terminal-900 border border-terminal-border rounded-xl p-8 flex items-center justify-center gap-2 text-xs font-mono text-cyan-300">
           <RefreshCw className="w-4 h-4 animate-spin" />
           <span>Hydrating 50-Platform Institutional Modules for {symbol}...</span>
         </div>
-      ) : overview ? (
-        <div className="bg-terminal-900 border border-terminal-border rounded-xl p-4 shadow-lg">
+      ) : (
+        <div className="bg-terminal-900 border border-terminal-border rounded-xl p-3 sm:p-4 shadow-lg">
           {(section === 'execution' || section === 'microstructure') && (
             <ExecutionMicrostructureDesk
               mode={section}
               symbol={symbol}
-              execution={overview.execution}
-              microstructure={overview.microstructure}
+              execution={activeOverview.execution}
+              microstructure={activeOverview.microstructure}
               onRefreshExecution={(p) => postAndPatch('/api/institutional/execution-bridge', p, 'execution')}
               onRefreshMicrostructure={(p) => postAndPatch('/api/institutional/microstructure', p, 'microstructure')}
             />
@@ -262,7 +357,7 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
           {section === 'macro' && (
             <MacroFundamentalDesk
               symbol={symbol}
-              macro={overview.macro}
+              macro={activeOverview.macro}
               onRefreshMacro={(p) => postAndPatch('/api/institutional/macro-fundamental', p, 'macro')}
               onDownloadTearSheet={handleOpenTearSheet}
             />
@@ -271,7 +366,7 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
           {section === 'screener' && (
             <TechnicalScreenerDesk
               symbol={symbol}
-              screener={overview.screener}
+              screener={activeOverview.screener}
               onRefreshScreener={(p) => postAndPatch('/api/institutional/technical-screener', p, 'screener')}
             />
           )}
@@ -279,7 +374,7 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
           {section === 'options' && (
             <OptionsDerivativesDesk
               symbol={symbol}
-              options={overview.options}
+              options={activeOverview.options}
               onRefreshOptions={(p) => postAndPatch('/api/institutional/options-derivatives', p, 'options')}
             />
           )}
@@ -287,7 +382,7 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
           {section === 'crypto' && (
             <CryptoOnChainDesk
               symbol={symbol}
-              crypto={overview.crypto}
+              crypto={activeOverview.crypto}
               onRefreshCrypto={(p) => postAndPatch('/api/institutional/crypto-onchain', p, 'crypto')}
             />
           )}
@@ -296,15 +391,15 @@ export const InstitutionalWorkspace: React.FC<InstitutionalWorkspaceProps> = ({
             <AltDataQuantRiskDesk
               mode={section}
               symbol={symbol}
-              altData={overview.altData}
-              quant={overview.quant}
-              riskAudit={overview.riskAudit}
+              altData={activeOverview.altData}
+              quant={activeOverview.quant}
+              riskAudit={activeOverview.riskAudit}
               onRefreshQuant={(p) => postAndPatch('/api/institutional/quant-backtest', p, 'quant')}
               onRefreshRisk={(p) => postAndPatch('/api/institutional/risk-audit', p, 'riskAudit')}
             />
           )}
         </div>
-      ) : null}
+      )}
     </div>
   );
 };

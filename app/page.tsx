@@ -1249,7 +1249,7 @@ export default function Home() {
         onOpenNewsWire={() => setActiveTab('wire')}
         onOpenFirebase={() => setActiveTab('firebase')}
         onOpenJournal={() => setActiveTab('journals')}
-        onOpenLeftDrawer={() => setIsLeftDrawerOpen(true)}
+        onOpenLeftDrawer={() => setIsLeftDrawerOpen((prev) => !prev)}
         isLeftDrawerOpen={isLeftDrawerOpen}
         isAnalyzing={isAnalyzing}
         onTriggerAnalysis={() => triggerSwarm(selectedPair, timeframe, candles)}
@@ -1284,6 +1284,7 @@ export default function Home() {
         {activeTab !== 'vision-atlas' && (activeTab as string) !== 'vision-atlas-lab' && (
           <MarketCloseFreezeBanner
             sessionInfo={sessionInfo}
+            theme={theme}
             onToggleManualOverride={(override) => {
               const frozen = !override && MarketSessionManager.isMarketFrozen(selectedPair);
               setIsMarketFrozen(frozen);
@@ -1436,7 +1437,7 @@ export default function Home() {
             initialSymbol={selectedPair}
             onSymbolChange={(sym) => {
               if (sym in BASE_PRICES) {
-                setSelectedPair(sym as CurrencyPair);
+                handleSelectPair(sym as CurrencyPair);
               }
             }}
             onBackToTerminal={() => setActiveTab('terminal')}

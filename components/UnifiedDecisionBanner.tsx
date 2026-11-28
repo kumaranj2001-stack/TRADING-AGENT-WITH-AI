@@ -47,6 +47,7 @@ import {
   Crosshair
 } from 'lucide-react';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { formatInstrumentPrice } from '@/lib/marketData';
 import { SevenStagePipelineVisualizer } from './SevenStagePipelineVisualizer';
 
 interface UnifiedDecisionBannerProps {
@@ -660,7 +661,7 @@ export const UnifiedDecisionBanner: React.FC<UnifiedDecisionBannerProps> = ({
                   </span>
                 </div>
                 <div className="font-bold text-emerald-300 text-sm font-mono tracking-tight">
-                  ${consensus.unifiedProfitableSetup?.singleHighConfidenceTarget || consensus.agents.risk.parameters.takeProfit1}
+                  {formatInstrumentPrice(pair, consensus.unifiedProfitableSetup?.singleHighConfidenceTarget || consensus.agents.risk.parameters.takeProfit1)}
                 </div>
                 <span className="text-[9px] text-emerald-400/90 block mt-0.5 font-semibold">
                   +{consensus.unifiedProfitableSetup?.targetDistancePips || 24} Pips • Analytical Zone Target
@@ -676,7 +677,7 @@ export const UnifiedDecisionBanner: React.FC<UnifiedDecisionBannerProps> = ({
                   <span className="text-slate-400 font-mono">Dynamic Structure</span>
                 </div>
                 <div className="font-bold text-rose-300 text-sm font-mono tracking-tight">
-                  ${consensus.unifiedProfitableSetup?.anchoredStopLoss || consensus.agents.risk.parameters.stopLoss}
+                  {formatInstrumentPrice(pair, consensus.unifiedProfitableSetup?.anchoredStopLoss || consensus.agents.risk.parameters.stopLoss)}
                 </div>
                 <span className="text-[9px] text-rose-400/90 block mt-0.5 font-semibold">
                   -{consensus.unifiedProfitableSetup?.stopDistancePips || 14} Pips • S1/R1 Structural Barrier

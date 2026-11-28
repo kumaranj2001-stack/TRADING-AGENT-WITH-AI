@@ -3,6 +3,7 @@ import { technicalScreenerEngine } from '@/lib/institutional/TechnicalScreenerEn
 import type { TimeFrame } from '@/lib/types';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);

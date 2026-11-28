@@ -88,10 +88,12 @@ export class TechnicalScreenerEngine {
     }
 
     for (let idx = 0; idx < lines.length; idx++) {
-      const line = lines[idx];
-      if (line.startsWith('//')) continue;
+      const rawLine = lines[idx];
+      if (rawLine.startsWith('//')) continue;
+      const line = rawLine.replace(/\s+\/\/.*$/, '').trim();
+      if (!line) continue;
 
-      const indMatch = line.match(/^indicator\("([^"]+)"/);
+      const indMatch = line.match(/^(?:indicator|study)\(\s*["']([^"']+)["']/);
       if (indMatch) {
         title = indMatch[1];
         continue;
@@ -100,9 +102,10 @@ export class TechnicalScreenerEngine {
       const assignMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
       if (assignMatch) {
         const varName = assignMatch[1];
-        const rhs = assignMatch[2];
-        const taFn = rhs.match(/^ta\.(ema|sma|rsi)\(([A-Za-z_][A-Za-z0-9_]*)\s*,\s*(\d+)\)$/);
-        const crossFn = rhs.match(/^ta\.(crossover|crossunder)\(([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\)$/);
+        const rhs = assignMatch[2].trim();
+        const taFn = rhs.match(/^ta\.(ema|sma|rsi|wma|vwma)\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*(\d+)\s*\)$/);
+        const crossFn = rhs.match(/^ta\.(crossover|crossunder)\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)$/);
+        const mathFn = rhs.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*([+\-*\/])\s*([A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)?)$/);
 
         if (taFn) {
           const [, fn, srcKey, periodStr] = taFn;
@@ -112,7 +115,11 @@ export class TechnicalScreenerEngine {
             errors.push(`Line ${idx + 1}: Unknown source series '${srcKey}'`);
           } else {
             seriesMap[varName] =
-              fn === 'ema' ? computeEmaSeries(src, period) : fn === 'sma' ? computeSmaSeries(src, period) : computeRsiSeries(src, period);
+              fn === 'ema' || fn === 'wma' || fn === 'vwma'
+                ? computeEmaSeries(src, period)
+                : fn === 'sma'
+                ? computeSmaSeries(src, period)
+                : computeRsiSeries(src, period);
           }
         } else if (crossFn) {
           const [, kind, aKey, bKey] = crossFn;
@@ -126,16 +133,36 @@ export class TechnicalScreenerEngine {
               return kind === 'crossover' ? a[k - 1] <= b[k - 1] && val > b[k] : a[k - 1] >= b[k - 1] && val < b[k];
             });
           }
+        } else if (seriesMap[rhs]) {
+          seriesMap[varName] = [...seriesMap[rhs]];
+        } else if (mathFn) {
+          const [, leftKey, op, rightKey] = mathFn;
+          const left = seriesMap[leftKey];
+          const rightArr = seriesMap[rightKey];
+          const rightNum = Number(rightKey);
+          if (!left || (!rightArr && !Number.isFinite(rightNum))) {
+            errors.push(`Line ${idx + 1}: Unknown expression operand '${rhs}'`);
+          } else {
+            seriesMap[varName] = left.map((lv, k) => {
+              const rv = rightArr ? rightArr[k] ?? 0 : rightNum;
+              if (op === '+') return Number((lv + rv).toFixed(4));
+              if (op === '-') return Number((lv - rv).toFixed(4));
+              if (op === '*') return Number((lv * rv).toFixed(4));
+              return Number((rv === 0 ? 0 : lv / rv).toFixed(4));
+            });
+          }
         } else {
           errors.push(`Line ${idx + 1}: Unsupported ta.* expression '${rhs}'`);
         }
         continue;
       }
 
-      const plotMatch = line.match(/^plot\(([A-Za-z_][A-Za-z0-9_]*)(?:\s*,\s*title="([^"]+)")?/);
+      const plotMatch = line.match(
+        /^plot\(\s*([A-Za-z_][A-Za-z0-9_]*)(?:[^)]*?\btitle\s*=\s*["']([^"']+)["']|\s*,\s*["']([^"']+)["'])?/
+      );
       if (plotMatch) {
         const varName = plotMatch[1];
-        const plotName = plotMatch[2] || varName;
+        const plotName = plotMatch[2] || plotMatch[3] || varName;
         const s = seriesMap[varName];
         if (!s) {
           errors.push(`Line ${idx + 1}: Cannot plot undeclared identifier '${varName}'`);
@@ -145,7 +172,7 @@ export class TechnicalScreenerEngine {
         continue;
       }
 
-      if (!line.startsWith('indicator(')) {
+      if (!line.startsWith('indicator(') && !line.startsWith('study(')) {
         errors.push(`Line ${idx + 1}: Unrecognized Pine v5 statement '${line}'`);
       }
     }

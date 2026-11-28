@@ -52,6 +52,49 @@ export class MarketSessionManager {
       statusLabel = 'MANUAL GLOBAL FREEZE';
       sessionName = 'EMERGENCY STATE FREEZE';
       reason = 'Global state manually frozen by risk governance or trader override.';
+    } else if (segment === 'CRYPTO_EQUITIES') {
+      const upper = pair.toUpperCase();
+      if (upper.includes('BTC') || upper.includes('ETH')) {
+        // Spot Crypto trades 24/7 continuously with zero weekend closure
+        isOpen = true;
+        status = 'OPEN';
+        statusLabel = 'CRYPTO 24/7 LIVE';
+        sessionName = 'GLOBAL CRYPTO 24/7 LIQUIDITY';
+        reason = 'Spot crypto markets operate continuously 24/7/365.';
+      } else {
+        // US Equities (NASDAQ/NYSE regular session 14:30 - 21:00 UTC)
+        const isUsWeekend = utcDay === 0 || utcDay === 6;
+        const nyOpenMin = 14 * 60 + 30;
+        const nyCloseMin = 21 * 60;
+        if (isUsWeekend) {
+          isOpen = false;
+          status = 'CLOSED_WEEKEND';
+          statusLabel = 'US EQUITIES WEEKEND CLOSE';
+          sessionName = 'NASDAQ/NYSE WEEKEND FREEZE';
+          reason = 'US equity exchanges closed for weekend. State frozen.';
+          const daysUntilMon = (8 - utcDay) % 7 || 7;
+          nextOpenDate = new Date(targetDate);
+          nextOpenDate.setUTCDate(nextOpenDate.getUTCDate() + daysUntilMon);
+          nextOpenDate.setUTCHours(14, 30, 0, 0);
+        } else if (utcTimeInMinutes < nyOpenMin || utcTimeInMinutes >= nyCloseMin) {
+          isOpen = false;
+          status = 'CLOSED_AFTER_HOURS';
+          statusLabel = 'US EQUITIES AFTER-HOURS';
+          sessionName = 'NASDAQ/NYSE EXTENDED HOURS FREEZE';
+          reason = 'Regular NASDAQ/NYSE session runs 14:30 - 21:00 UTC.';
+          nextOpenDate = new Date(targetDate);
+          if (utcTimeInMinutes >= nyCloseMin) {
+            nextOpenDate.setUTCDate(nextOpenDate.getUTCDate() + (utcDay === 5 ? 3 : 1));
+          }
+          nextOpenDate.setUTCHours(14, 30, 0, 0);
+        } else {
+          isOpen = true;
+          status = 'OPEN';
+          statusLabel = 'NASDAQ/NYSE ACTIVE';
+          sessionName = 'US REGULAR MARKET HOURS';
+          reason = 'NASDAQ/NYSE cash equities active.';
+        }
+      }
     } else if (segment === 'INDIAN_MARKET') {
       // NSE India: Monday - Friday 09:15 to 15:30 IST (03:45 to 10:00 UTC)
       const isIsteWeekend = istDay === 0 || istDay === 6; // Sunday or Saturday

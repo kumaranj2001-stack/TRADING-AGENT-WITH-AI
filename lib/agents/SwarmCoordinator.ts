@@ -25,7 +25,7 @@ import { NewsAnalystAgent } from './NewsAnalyst';
 import { OrderFlowAnalystAgent } from './OrderFlowAnalyst';
 import { CandlestickPatternAnalystAgent } from './CandlestickPatternAnalyst';
 import { RiskManagerAgent, RiskManagerConfig, DEFAULT_RISK_CONFIG } from './RiskManager';
-import { BASE_PRICES, FOREX_PAIRS, INDIAN_MARKET_ASSETS, METALS_COMMODITIES, PIP_VALUES, generateCandles, getMarketSegmentForSymbol } from '../marketData';
+import { BASE_PRICES, CRYPTO_EQUITIES, FOREX_PAIRS, INDIAN_MARKET_ASSETS, METALS_COMMODITIES, PIP_VALUES, generateCandles, getMarketSegmentForSymbol } from '../marketData';
 import { knowledgeEngine } from '../knowledge/KnowledgeEngine';
 import { JournalStorageManager } from '../journalStorage';
 import { riskRatioController } from '../riskRatioController';
@@ -728,6 +728,17 @@ export class SwarmCoordinator {
       activeDirection = trendGate.effectiveSignal === 'SELL' ? 'SELL' : 'BUY';
       unifiedDecision.direction = activeDirection;
       unifiedDecision.summary = `Trend Gate Flip: ${activeDirection} reversal triggered via real-time telemetry bridge (${trendGate.rationale})`;
+      // Re-anchor entry/SL/TP strictly for the flipped direction so SL/TP never invert or contradict
+      const flippedPlan = liveMarketAnchorConstraintEngine.enforceTightVarianceConstraint({
+        symbol: pair,
+        direction: activeDirection,
+        proposedEntry: calculatedEntry,
+        customSpotPrice: currentPrice,
+      });
+      calculatedEntry = flippedPlan.entryPrice;
+      finalStopLoss = flippedPlan.stopLoss;
+      finalTakeProfit = flippedPlan.takeProfit1;
+      finalRiskReward = flippedPlan.riskRewardRatio;
     } else if (trendGate.downgradeOrFlipAction === 'DOWNGRADE_CONVICTION') {
       finalLots = Math.max(0.01, Math.min(0.02, finalLots));
     }
@@ -827,6 +838,32 @@ export class SwarmCoordinator {
       streamLatencyMs,
     };
 
+    // Reconcile Unified High-Conviction Setup strictly with final direction & constrained SL/TP
+    const finalDirectionForSetup: 'BUY' | 'SELL' | 'HOLD' =
+      hardGateBlocked ? 'HOLD' : activeDirection;
+    const stopDistPips = Number((Math.abs(calculatedEntry - finalStopLoss) / pipMultiplier).toFixed(1));
+    const targetDistPips = Number((Math.abs(finalTakeProfit - calculatedEntry) / pipMultiplier).toFixed(1));
+    const alignedUnifiedSetup = exhaustiveCorpus.unifiedProfitableSetup
+      ? {
+          ...exhaustiveCorpus.unifiedProfitableSetup,
+          direction: finalDirectionForSetup,
+          entryPrice: calculatedEntry,
+          singleHighConfidenceTarget: finalTakeProfit,
+          anchoredStopLoss: finalStopLoss,
+          stopDistancePips: stopDistPips || exhaustiveCorpus.unifiedProfitableSetup.stopDistancePips,
+          targetDistancePips: targetDistPips || exhaustiveCorpus.unifiedProfitableSetup.targetDistancePips,
+          riskRewardRatio: existingLatched?.anchoredRiskReward || finalRiskReward,
+          proportionalLotSize: finalLots,
+          structuralInvalidation: {
+            ...exhaustiveCorpus.unifiedProfitableSetup.structuralInvalidation,
+            invalidationPriceFormula:
+              finalDirectionForSetup === 'SELL'
+                ? 'SupplyOrderBlock.High (Structural Liquidity Ceiling)'
+                : 'DemandOrderBlock.Low (Structural Liquidity Floor)',
+          },
+        }
+      : undefined;
+
     const consensusResult: SwarmConsensusResult = {
       pair,
       marketSegment,
@@ -856,11 +893,14 @@ export class SwarmCoordinator {
       riskGovernanceGatekeeper,
       multiAssetTickTelemetry: multiAssetIngestionEngine.getLatestTick(pair),
       trendGate,
-      exhaustiveStrategyCorpus: exhaustiveCorpus,
+      exhaustiveStrategyCorpus: {
+        ...exhaustiveCorpus,
+        unifiedProfitableSetup: alignedUnifiedSetup,
+      },
       capitalPreservationGate,
       sevenStagePipeline,
       multiTierScreening: exhaustiveCorpus.multiTierScreening,
-      unifiedProfitableSetup: exhaustiveCorpus.unifiedProfitableSetup,
+      unifiedProfitableSetup: alignedUnifiedSetup,
       preTradeValidationGate: exhaustiveCorpus.preTradeValidationGate,
       buySideChannelWeight,
       sellSideChannelWeight,
@@ -929,6 +969,8 @@ export class SwarmCoordinator {
       ? INDIAN_MARKET_ASSETS 
       : segment === 'METALS_COMMODITIES'
       ? METALS_COMMODITIES
+      : segment === 'CRYPTO_EQUITIES'
+      ? CRYPTO_EQUITIES
       : segment === 'FOREX' 
       ? FOREX_PAIRS 
       : (Object.keys(BASE_PRICES) as CurrencyPair[]);

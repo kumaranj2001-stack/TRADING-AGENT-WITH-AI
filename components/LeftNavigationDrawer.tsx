@@ -88,24 +88,54 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
 }) => {
   const [isPinned, setIsPinned] = useState<boolean>(false);
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hoverOpenTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastClosedAtRef = useRef<number>(0);
+
+  const closeDrawerCleanly = () => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+    if (hoverOpenTimeoutRef.current) {
+      clearTimeout(hoverOpenTimeoutRef.current);
+      hoverOpenTimeoutRef.current = null;
+    }
+    lastClosedAtRef.current = Date.now();
+    setIsPinned(false);
+    onClose();
+  };
+
+  // Clear stale hover timers whenever drawer open state changes
+  useEffect(() => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+    if (hoverOpenTimeoutRef.current) {
+      clearTimeout(hoverOpenTimeoutRef.current);
+      hoverOpenTimeoutRef.current = null;
+    }
+  }, [isOpen]);
 
   // Close drawer on Escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) {
-        setIsPinned(false);
-        onClose();
+        closeDrawerCleanly();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  // Clean up timer on unmount
+  // Clean up timers on unmount
   useEffect(() => {
     return () => {
       if (closeTimeoutRef.current) {
         clearTimeout(closeTimeoutRef.current);
+      }
+      if (hoverOpenTimeoutRef.current) {
+        clearTimeout(hoverOpenTimeoutRef.current);
       }
     };
   }, []);
@@ -118,20 +148,32 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
   };
 
   const handleMouseLeaveDrawer = () => {
-    if (isPinned) return;
+    if (isPinned || !isOpen) return;
     if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
     closeTimeoutRef.current = setTimeout(() => {
-      onClose();
+      closeDrawerCleanly();
     }, 320); // 320ms smooth grace delay
   };
 
   const handleEdgeProximityEnter = () => {
+    if (Date.now() - lastClosedAtRef.current < 700) return;
     if (closeTimeoutRef.current) {
       clearTimeout(closeTimeoutRef.current);
       closeTimeoutRef.current = null;
     }
-    if (onOpen) {
-      onOpen();
+    if (hoverOpenTimeoutRef.current) {
+      clearTimeout(hoverOpenTimeoutRef.current);
+    }
+    hoverOpenTimeoutRef.current = setTimeout(() => {
+      hoverOpenTimeoutRef.current = null;
+      if (onOpen) onOpen();
+    }, 180);
+  };
+
+  const handleEdgeProximityLeave = () => {
+    if (hoverOpenTimeoutRef.current) {
+      clearTimeout(hoverOpenTimeoutRef.current);
+      hoverOpenTimeoutRef.current = null;
     }
   };
 
@@ -573,6 +615,7 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
         <div
           className="nav-proximity-trigger group cursor-pointer"
           onMouseEnter={handleEdgeProximityEnter}
+          onMouseLeave={handleEdgeProximityLeave}
           aria-hidden="true"
           title="Hover cursor near left edge to pull out Navigation Desk"
         >
@@ -582,7 +625,7 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
 
       {/* Navigation Drawer Container with Smooth Hardware-Accelerated Sliding */}
       <div 
-        className={`fixed inset-0 z-50 overflow-hidden transition-all duration-300 ${
+        className={`fixed inset-0 z-[1000] overflow-hidden transition-all duration-300 ${
           isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
         }`}
         role="dialog" 
@@ -594,10 +637,7 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
           className={`fixed inset-0 bg-black/75 backdrop-blur-sm transition-opacity duration-300 ease-out ${
             isOpen ? 'opacity-100' : 'opacity-0'
           }`}
-          onClick={() => {
-            setIsPinned(false);
-            onClose();
-          }}
+          onClick={closeDrawerCleanly}
           aria-hidden="true"
         />
 
@@ -605,7 +645,7 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
         <div 
           onMouseEnter={handleMouseEnterDrawer}
           onMouseLeave={handleMouseLeaveDrawer}
-          className={`fixed inset-y-0 left-0 max-w-[85vw] w-72 sm:w-80 bg-terminal-900 border-r border-terminal-border shadow-2xl flex flex-col z-50 transform transition-transform duration-300 ease-out select-none ${
+          className={`fixed inset-y-0 left-0 max-w-[85vw] w-72 sm:w-80 bg-terminal-900 border-r border-terminal-border shadow-2xl flex flex-col z-[1010] transform transition-transform duration-300 ease-out select-none ${
             isOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
         >
@@ -628,7 +668,11 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
             <div className="flex items-center gap-1.5">
               {/* Pin / Auto-Hide Mode Toggle Button */}
               <button
-                onClick={() => setIsPinned(!isPinned)}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsPinned(!isPinned);
+                }}
                 className={`p-1.5 rounded-lg border text-xs transition-colors flex items-center gap-1 ${
                   isPinned 
                     ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 shadow-sm' 
@@ -637,18 +681,19 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
                 title={isPinned ? 'Drawer Pinned (Will stay open on mouse leave)' : 'Auto-Hide Active (Hover near edge to pull out)'}
                 aria-label="Toggle Pin Navigation Drawer"
               >
-                {isPinned ? <Pin className="w-3.5 h-3.5 text-cyan-400" /> : <PinOff className="w-3.5 h-3.5 text-slate-300" />}
+                {isPinned ? <Pin className="w-3.5 h-3.5 text-cyan-400 pointer-events-none" /> : <PinOff className="w-3.5 h-3.5 text-slate-300 pointer-events-none" />}
               </button>
 
               <button
-                onClick={() => {
-                  setIsPinned(false);
-                  onClose();
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeDrawerCleanly();
                 }}
                 className="p-1.5 rounded-lg bg-terminal-800 hover:bg-terminal-700 text-slate-300 hover:text-white border border-terminal-border transition-colors"
                 aria-label="Close navigation drawer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4 pointer-events-none" />
               </button>
             </div>
           </div>
@@ -712,26 +757,64 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
           </nav>
 
         {/* Drawer Footer with Execution Mode, Settings, Theme Toggle & Status */}
-        <div className="p-3 border-t border-terminal-border bg-terminal-950/80 space-y-2 shrink-0">
+        {/* Drawer Footer with Execution Mode, Theme Toggle, Settings & Status */}
+        <div className="p-3 pb-14 sm:pb-6 border-t border-terminal-border bg-terminal-950/80 space-y-2 shrink-0">
           {/* Quick Execution Mode Controller */}
           {onToggleExecutionMode && executionMode && (
             <button
+              type="button"
               onClick={onToggleExecutionMode}
               className={`w-full py-2 px-3 rounded-lg border flex items-center justify-between text-xs font-semibold transition-all shadow-sm ${
                 executionMode === 'FULL_AUTOPILOT'
-                  ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500/50 hover:bg-emerald-600/30'
+                  ? theme === 'light'
+                    ? 'bg-emerald-50 text-emerald-900 border-emerald-400 hover:bg-emerald-100'
+                    : 'bg-emerald-600/20 text-emerald-300 border-emerald-500/50 hover:bg-emerald-600/30'
                   : executionMode === 'SEMI_AUTONOMOUS'
-                  ? 'bg-amber-600/20 text-amber-300 border-amber-500/50 hover:bg-amber-600/30'
+                  ? theme === 'light'
+                    ? 'bg-amber-50 text-amber-900 border-amber-400 hover:bg-amber-100'
+                    : 'bg-amber-600/20 text-amber-300 border-amber-500/50 hover:bg-amber-600/30'
                   : 'bg-terminal-800 text-slate-300 border-terminal-border hover:bg-terminal-700'
               }`}
               title="Toggle Autopilot / Semi-Autonomous Execution"
             >
-              <div className="flex items-center gap-2">
-                <PlayCircle className="w-4 h-4 text-cyan-400" />
-                <span>Execution Mode</span>
+              <div className="flex items-center gap-2 pointer-events-none">
+                <PlayCircle className={`w-4 h-4 ${theme === 'light' ? 'text-cyan-700' : 'text-cyan-400'}`} />
+                <span className={theme === 'light' ? 'text-slate-900 font-bold' : ''}>Execution Mode</span>
               </div>
-              <span className="font-mono text-[10px] uppercase px-2 py-0.5 rounded bg-terminal-900 border border-terminal-border text-white">
+              <span
+                className={`pointer-events-none font-mono text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${
+                  executionMode === 'FULL_AUTOPILOT' && theme === 'light'
+                    ? 'bg-emerald-700 text-white border-emerald-800'
+                    : executionMode === 'SEMI_AUTONOMOUS' && theme === 'light'
+                    ? 'bg-amber-600 text-white border-amber-700'
+                    : 'bg-terminal-900 border-terminal-border text-white'
+                }`}
+              >
                 {executionMode.replace('_', ' ')}
+              </span>
+            </button>
+          )}
+
+          {onToggleTheme && (
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              className="w-full py-2 px-3 rounded-lg bg-terminal-800 hover:bg-terminal-700 border border-terminal-border text-slate-200 hover:text-white flex items-center justify-between text-xs font-semibold transition-colors shadow-sm"
+            >
+              <div className="flex items-center gap-2 pointer-events-none">
+                {theme === 'dark' ? (
+                  <Sun className="w-4 h-4 text-amber-400 animate-spin-slow" />
+                ) : (
+                  <Moon className="w-4 h-4 text-indigo-600" />
+                )}
+                <span>Theme Mode</span>
+              </div>
+              <span className={`pointer-events-none font-mono text-[10px] uppercase px-2 py-0.5 rounded border ${
+                theme === 'light'
+                  ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-bold'
+                  : 'bg-terminal-900 border-terminal-border text-cyan-400'
+              }`}>
+                {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
               </span>
             </button>
           )}
@@ -739,18 +822,19 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
           {/* Dedicated Risk Ratio Controller (Dynamic Tier Sizing & Hard Risk Veto Gate) */}
           {onOpenRiskRatioController && (
             <button
+              type="button"
               onClick={() => {
-                onClose();
+                closeDrawerCleanly();
                 onOpenRiskRatioController();
               }}
               className="w-full py-2 px-3 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:text-amber-200 flex items-center justify-between text-xs font-semibold transition-all shadow-sm group"
               title="Configure Dynamic Lot Sizing & Hard Drawdown/Confidence Risk Gate"
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 pointer-events-none">
                 <ShieldAlert className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
                 <span>Risk Ratio Controller</span>
               </div>
-              <span className="font-mono text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/50 text-amber-300">
+              <span className="pointer-events-none font-mono text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/50 text-amber-300">
                 HARD-VETO
               </span>
             </button>
@@ -759,55 +843,38 @@ export const LeftNavigationDrawer: React.FC<LeftNavigationDrawerProps> = ({
           {/* Quick Risk Parameters & Settings */}
           {onOpenSettings && (
             <button
+              type="button"
               onClick={() => {
-                onClose();
+                closeDrawerCleanly();
                 onOpenSettings();
               }}
               className="w-full py-2 px-3 rounded-lg bg-terminal-800 hover:bg-terminal-700 border border-terminal-border text-slate-200 hover:text-white flex items-center justify-between text-xs font-semibold transition-colors shadow-sm"
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 pointer-events-none">
                 <Sliders className="w-4 h-4 text-indigo-400" />
                 <span>Risk & Account Settings</span>
               </div>
-              <span className="font-mono text-[10px] text-slate-400">CONFIG</span>
+              <span className="pointer-events-none font-mono text-[10px] text-slate-400">CONFIG</span>
             </button>
           )}
 
           {/* Quick Backtest Walk-Forward Engine Access */}
           <button
+            type="button"
             onClick={() => {
               setActiveTab('backtest');
-              onClose();
+              closeDrawerCleanly();
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             className="w-full py-2 px-3 rounded-lg bg-terminal-800 hover:bg-terminal-700 border border-terminal-border text-slate-200 hover:text-white flex items-center justify-between text-xs font-semibold transition-colors shadow-sm"
             title="Launch Walk-Forward Algorithmic Backtester"
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 pointer-events-none">
               <History className="w-4 h-4 text-purple-400" />
               <span>Backtest Engine</span>
             </div>
-            <span className="font-mono text-[10px] text-purple-300 px-1.5 py-0.5 rounded bg-purple-500/20 border border-purple-500/30">RUN</span>
+            <span className="pointer-events-none font-mono text-[10px] text-purple-300 px-1.5 py-0.5 rounded bg-purple-500/20 border border-purple-500/30">RUN</span>
           </button>
-
-          {onToggleTheme && (
-            <button
-              onClick={onToggleTheme}
-              className="w-full py-2 px-3 rounded-lg bg-terminal-800 hover:bg-terminal-700 border border-terminal-border text-slate-200 hover:text-white flex items-center justify-between text-xs font-semibold transition-colors shadow-sm"
-            >
-              <div className="flex items-center gap-2">
-                {theme === 'dark' ? (
-                  <Sun className="w-4 h-4 text-amber-400 animate-spin-slow" />
-                ) : (
-                  <Moon className="w-4 h-4 text-indigo-400" />
-                )}
-                <span>Theme Mode</span>
-              </div>
-              <span className="font-mono text-[10px] uppercase px-2 py-0.5 rounded bg-terminal-900 border border-terminal-border text-cyan-400">
-                {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
-              </span>
-            </button>
-          )}
 
           <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 pt-1">
             <span className="flex items-center gap-1">

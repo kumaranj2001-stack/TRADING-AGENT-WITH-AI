@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Bot, Satellite, Activity, Lock } from 'lucide-react';
+import { isIndianSymbol } from '@/lib/marketData';
 import type {
   AlternativeDataSnapshot,
   JournalRiskAuditSnapshot,
@@ -24,30 +25,74 @@ export const AltDataQuantRiskDesk: React.FC<Props> = ({
   altData,
   quant,
   riskAudit,
+  onRefreshQuant,
   onRefreshRisk,
 }) => {
   const [formulaScript, setFormulaScript] = useState<string>(quant.formulaBacktester.script);
+  const [formulaLanguage, setFormulaLanguage] = useState<'POWER_LANGUAGE' | 'CSHARP_QC'>(quant.formulaBacktester.language);
   const [webhookStatus, setWebhookStatus] = useState<string>(quant.cloudWebhookScanner.lastMt5BridgeStatus);
   const [webhookCount, setWebhookCount] = useState<number>(quant.cloudWebhookScanner.dispatchedCount);
+  const [includeDelisted, setIncludeDelisted] = useState<boolean>(
+    quant.eventDrivenTickBacktest.universeMode === 'SURVIVORSHIP_FREE_WITH_DELISTED'
+  );
+  const [topNRotation, setTopNRotation] = useState<number>(quant.aflArrayBacktest.topNRotation || 4);
+  const [lookbackMonths, setLookbackMonths] = useState<number>(12);
+  const [isRunningBacktest, setIsRunningBacktest] = useState<boolean>(false);
+  const [isRunningFormula, setIsRunningFormula] = useState<boolean>(false);
+  const [isDispatchingWebhook, setIsDispatchingWebhook] = useState<boolean>(false);
   const [mcResult, setMcResult] = useState(riskAudit.monteCarloEquity);
 
   useEffect(() => {
     setFormulaScript(quant.formulaBacktester.script);
+    setFormulaLanguage(quant.formulaBacktester.language);
     setWebhookStatus(quant.cloudWebhookScanner.lastMt5BridgeStatus);
     setWebhookCount(quant.cloudWebhookScanner.dispatchedCount);
+    setIncludeDelisted(quant.eventDrivenTickBacktest.universeMode === 'SURVIVORSHIP_FREE_WITH_DELISTED');
+    setTopNRotation(quant.aflArrayBacktest.topNRotation || 4);
     setMcResult(riskAudit.monteCarloEquity);
   }, [symbol, quant, riskAudit]);
 
+  const handleRunTickBacktest = async () => {
+    setIsRunningBacktest(true);
+    try {
+      await onRefreshQuant({
+        action: 'RUN_TICK_BACKTEST',
+        symbol,
+        includeDelisted,
+        topNRotation,
+        lookbackMonths,
+      });
+    } finally {
+      setIsRunningBacktest(false);
+    }
+  };
+
+  const handleRunFormula = async () => {
+    setIsRunningFormula(true);
+    try {
+      await onRefreshQuant({
+        action: 'RUN_FORMULA',
+        symbol,
+        script: formulaScript,
+        language: formulaLanguage,
+      });
+    } finally {
+      setIsRunningFormula(false);
+    }
+  };
+
   const handleTriggerWebhook = async () => {
-    const res = await fetch('/api/institutional/quant-backtest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'DISPATCH_WEBHOOK', symbol, side: 'BUY', lots: 0.5 }),
-    });
-    const json = await res.json();
-    if (json?.cloudWebhookScanner) {
-      setWebhookStatus(json.cloudWebhookScanner.lastMt5BridgeStatus);
-      setWebhookCount(json.cloudWebhookScanner.dispatchedCount);
+    setIsDispatchingWebhook(true);
+    try {
+      await onRefreshQuant({
+        action: 'DISPATCH_WEBHOOK',
+        symbol,
+        side: 'BUY',
+        lots: 0.5,
+        previousCount: webhookCount,
+      });
+    } finally {
+      setIsDispatchingWebhook(false);
     }
   };
 
@@ -135,10 +180,61 @@ export const AltDataQuantRiskDesk: React.FC<Props> = ({
         {/* Tick Backtest (Survivorship-Free), AFL Array Rotation, Composer Symphonies */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
           <div className="xl:col-span-6 bg-terminal-950 border border-terminal-border rounded-xl p-4 space-y-2.5">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Activity className="w-4 h-4 text-emerald-400" />
-              <span>Survivorship-Free Event-Driven Tick Backtester & AFL Array Rotation</span>
-            </h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Activity className="w-4 h-4 text-emerald-400" />
+                <span>Survivorship-Free Event-Driven Tick Backtester & AFL Array Rotation</span>
+              </h3>
+              <button
+                type="button"
+                onClick={handleRunTickBacktest}
+                disabled={isRunningBacktest}
+                className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-60 text-white text-xs font-mono font-bold"
+              >
+                {isRunningBacktest ? 'Running Tick Sim...' : 'Run Tick Backtest'}
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
+              <button
+                type="button"
+                onClick={() => setIncludeDelisted((v) => !v)}
+                className={`px-2 py-0.5 rounded border ${
+                  includeDelisted
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                }`}
+              >
+                Delisted Universe: {includeDelisted ? 'INCLUDED' : 'ACTIVE ONLY'}
+              </button>
+              <label className="flex items-center gap-1 text-slate-300 bg-terminal-900 px-2 py-0.5 rounded border border-terminal-border">
+                <span>Top-N:</span>
+                <select
+                  value={topNRotation}
+                  onChange={(e) => setTopNRotation(Number(e.target.value))}
+                  className="bg-transparent text-cyan-300 font-bold focus:outline-none"
+                >
+                  {[2, 3, 4, 5, 6].map((n) => (
+                    <option key={n} value={n} className="bg-terminal-900">
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-1 text-slate-300 bg-terminal-900 px-2 py-0.5 rounded border border-terminal-border">
+                <span>Horizon:</span>
+                <select
+                  value={lookbackMonths}
+                  onChange={(e) => setLookbackMonths(Number(e.target.value))}
+                  className="bg-transparent text-cyan-300 font-bold focus:outline-none"
+                >
+                  {[6, 12, 24].map((m) => (
+                    <option key={m} value={m} className="bg-terminal-900">
+                      {m}M
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
               <div className="bg-terminal-900 p-2 rounded border border-terminal-border">
                 <div className="text-[10px] text-slate-400">DELISTED INCL.</div>
@@ -172,17 +268,29 @@ export const AltDataQuantRiskDesk: React.FC<Props> = ({
           </div>
 
           <div className="xl:col-span-6 bg-terminal-950 border border-terminal-border rounded-xl p-4 space-y-2.5">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <Bot className="w-4 h-4 text-cyan-400" />
                 <span>PowerLanguage/C# Backtester & Cloud Webhook → MT5 Bridge</span>
               </h3>
-              <button
-                onClick={handleTriggerWebhook}
-                className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold"
-              >
-                Dispatch Webhook → MT5
-              </button>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleRunFormula}
+                  disabled={isRunningFormula}
+                  className="px-2.5 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-60 text-white text-xs font-mono font-bold"
+                >
+                  {isRunningFormula ? 'Compiling...' : 'Run Formula'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTriggerWebhook}
+                  disabled={isDispatchingWebhook}
+                  className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-xs font-mono font-bold"
+                >
+                  {isDispatchingWebhook ? 'Dispatching...' : 'Dispatch Webhook → MT5'}
+                </button>
+              </div>
             </div>
             <textarea
               value={formulaScript}
@@ -190,17 +298,32 @@ export const AltDataQuantRiskDesk: React.FC<Props> = ({
               rows={5}
               className="w-full bg-terminal-900 border border-terminal-border rounded p-2 text-[11px] font-mono text-cyan-200"
             />
-            <div className="text-xs font-mono text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 p-2 rounded">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono bg-terminal-900 px-2.5 py-1.5 rounded border border-terminal-border">
+              <span className={quant.formulaBacktester.compiledValid ? 'text-emerald-400 font-bold' : 'text-amber-300 font-bold'}>
+                Formula: {quant.formulaBacktester.compiledValid ? 'VALID' : 'CHECK SYNTAX'} ({quant.formulaBacktester.totalSignals} signals)
+              </span>
+              <span className="text-cyan-300">
+                PF {quant.formulaBacktester.profitFactor} • Net +{quant.formulaBacktester.netReturnPct}%
+              </span>
+            </div>
+            <div className="text-xs font-mono text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 p-2 rounded break-words">
               Webhook Bridge: {webhookStatus} (Dispatched #{webhookCount}) • Trailing Stop ({quant.trailingStopEngine.mode}): {quant.trailingStopEngine.currentStopPrice} (+{quant.trailingStopEngine.lockedProfitR}R Locked)
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {quant.dcaGridBots.map((bot) => (
-                <div key={bot.botName} className="bg-terminal-900 p-2.5 rounded border border-terminal-border text-[11px] font-mono">
-                  <div className="text-white font-bold">{bot.botName}</div>
-                  <div className="text-emerald-400">PnL +${bot.realizedPnlUsd} • Est {bot.estimatedAprPct}% APR</div>
-                  <div className="text-slate-400">Range {bot.rangeLow}–{bot.rangeHigh} ({bot.gridLevelsOrSafetyOrders} lvls)</div>
-                </div>
-              ))}
+              {quant.dcaGridBots.map((bot) => {
+                const isInrBot = isIndianSymbol(bot.pair);
+                const pnlPrefix = isInrBot ? '₹' : '$';
+                const formattedPnl = isInrBot
+                  ? bot.realizedPnlUsd.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                  : bot.realizedPnlUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                return (
+                  <div key={bot.botName} className="bg-terminal-900 p-2.5 rounded border border-terminal-border text-[11px] font-mono">
+                    <div className="text-white font-bold">{bot.botName}</div>
+                    <div className="text-emerald-400">PnL +{pnlPrefix}{formattedPnl} • Est {bot.estimatedAprPct}% APR</div>
+                    <div className="text-slate-400">Range {bot.rangeLow}–{bot.rangeHigh} ({bot.gridLevelsOrSafetyOrders} lvls)</div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

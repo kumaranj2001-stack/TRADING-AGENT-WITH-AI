@@ -644,6 +644,23 @@ export class LiveMarketFeedManager {
       };
     }
 
+    // Synchronize unifiedProfitableSetup strictly with live direction, SL, and TP (prevents conflicting bull/bear targets)
+    const syncedStopPips = Number((Math.abs(liveEntryPrice - dynamicStopLoss) / pipMultiplier).toFixed(1));
+    const syncedTargetPips = Number((Math.abs(dynamicTakeProfit - liveEntryPrice) / pipMultiplier).toFixed(1));
+    const updatedUnifiedSetup = consensus.unifiedProfitableSetup
+      ? {
+          ...consensus.unifiedProfitableSetup,
+          direction,
+          entryPrice: liveEntryPrice,
+          singleHighConfidenceTarget: dynamicTakeProfit,
+          anchoredStopLoss: dynamicStopLoss,
+          stopDistancePips: syncedStopPips || consensus.unifiedProfitableSetup.stopDistancePips,
+          targetDistancePips: syncedTargetPips || consensus.unifiedProfitableSetup.targetDistancePips,
+          riskRewardRatio: anchoredRiskReward,
+          proportionalLotSize: safeLots,
+        }
+      : undefined;
+
     return {
       ...consensus,
       currentPrice: livePrice,
@@ -655,6 +672,13 @@ export class LiveMarketFeedManager {
       latchedState: updatedLatchedState,
       entryProximityFilter: updatedEntryProximityFilter,
       chiefReviewerAudit: updatedChiefReviewerAudit,
+      unifiedProfitableSetup: updatedUnifiedSetup,
+      exhaustiveStrategyCorpus: consensus.exhaustiveStrategyCorpus
+        ? {
+            ...consensus.exhaustiveStrategyCorpus,
+            unifiedProfitableSetup: updatedUnifiedSetup,
+          }
+        : consensus.exhaustiveStrategyCorpus,
       agents: {
         ...consensus.agents,
         technical: updatedTechnical,

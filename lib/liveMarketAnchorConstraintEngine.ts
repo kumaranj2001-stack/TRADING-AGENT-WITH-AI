@@ -216,6 +216,41 @@ export class LiveMarketAnchorConstraintEngine {
       };
     }
 
+    // 6b. Crypto (BTC/USD, ETH/USD)
+    if (sym.includes('BTC') || sym.includes('ETH')) {
+      const isBtc = sym.includes('BTC');
+      return {
+        decimals: 2,
+        pipMultiplier: isBtc ? 1.0 : 0.1,
+        maxEntryVariancePoints: isBtc ? 120.0 : 4.5,
+        maxEntryVariancePips: 12.0,
+        minStopLossPips: isBtc ? 320.0 : 120.0,
+        maxStopLossPips: isBtc ? 750.0 : 280.0,
+        target1MinRRPips: isBtc ? 600.0 : 220.0,
+        target1MaxRRPips: isBtc ? 1400.0 : 520.0,
+        target2MinRRPips: isBtc ? 1200.0 : 450.0,
+        target2MaxRRPips: isBtc ? 2600.0 : 950.0,
+        maxPermissibleDeviationFromSpot: isBtc ? 250.0 : 10.0,
+      };
+    }
+
+    // 6c. US Equities (NVDA, AAPL, MSFT, TSLA)
+    if (sym === 'NVDA' || sym === 'AAPL' || sym === 'MSFT' || sym === 'TSLA') {
+      return {
+        decimals: 2,
+        pipMultiplier: 0.01,
+        maxEntryVariancePoints: 0.35,
+        maxEntryVariancePips: 35.0,
+        minStopLossPips: 80.0,
+        maxStopLossPips: 220.0,
+        target1MinRRPips: 160.0,
+        target1MaxRRPips: 420.0,
+        target2MinRRPips: 320.0,
+        target2MaxRRPips: 780.0,
+        maxPermissibleDeviationFromSpot: 1.0,
+      };
+    }
+
     // 7. Forex Majors Standard (EUR/USD, GBP/USD ~1.09 - 1.30)
     const pipMultiplier = 0.0001;
     return {

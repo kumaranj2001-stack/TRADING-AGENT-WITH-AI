@@ -25,6 +25,9 @@ export const YAHOO_SYMBOL_MAP: Record<CurrencyPair, string> = {
   'TCS': 'TCS.NS',
   'HDFC BANK': 'HDFCBANK.NS',
   'INFY': 'INFY.NS',
+  'BTC/USD': 'BTC-USD',
+  'ETH/USD': 'ETH-USD',
+  'NVDA': 'NVDA',
 };
 
 export interface LiveMarketQuote {
@@ -100,6 +103,7 @@ export class RealMarketDataService {
           columns: ['name', 'close', 'bid', 'ask', 'change', 'high', 'low', 'volume'],
         }),
         cache: 'no-store',
+        signal: AbortSignal.timeout(2500),
       });
 
       if (res.ok) {
@@ -291,6 +295,7 @@ export class RealMarketDataService {
     const isOil = pair === 'WTI_CRUDE' || pair === 'BRENT_CRUDE';
     const isJpy = pair.includes('JPY');
     const isRupee = pair.includes('/INR');
+    const isCryptoOrUsEquity = pair === 'BTC/USD' || pair === 'ETH/USD' || pair === 'NVDA';
 
     let decimals = 5;
     let volatility = basePrice * 0.0012;
@@ -298,6 +303,9 @@ export class RealMarketDataService {
     if (isGold) {
       decimals = 2;
       volatility = 18.50; // ~$18-20 candle swings on $4,070 Gold
+    } else if (isCryptoOrUsEquity) {
+      decimals = 2;
+      volatility = basePrice * 0.0022;
     } else if (isSilver) {
       decimals = 3;
       volatility = 0.65;

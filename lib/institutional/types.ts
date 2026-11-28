@@ -646,6 +646,7 @@ export interface CryptoOnChainSnapshot {
     columns: string[];
     rows: Array<Record<string, string | number>>;
     executionTimeMs: number;
+    error?: string;
   };
 }
 
@@ -703,7 +704,7 @@ export interface AlternativeDataSnapshot {
 export interface QuantBacktestSnapshot {
   symbol: string;
   eventDrivenTickBacktest: {
-    universeMode: 'SURVIVORSHIP_FREE_WITH_DELISTED';
+    universeMode: 'SURVIVORSHIP_FREE_WITH_DELISTED' | 'SURVIVORSHIP_BIASED_ACTIVE_ONLY';
     activeConstituents: number;
     delistedConstituentsIncluded: number;
     totalTrades: number;

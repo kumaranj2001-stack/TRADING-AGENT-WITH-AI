@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const positions: Position[] = Array.isArray(body?.positions) ? body.positions : [];
     const balance = typeof body?.balance === 'number' ? body.balance : 25000;
     const dailyStartingBalance =

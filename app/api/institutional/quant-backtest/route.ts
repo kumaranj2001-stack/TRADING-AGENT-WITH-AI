@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { quantBacktestEngine } from '@/lib/institutional/QuantBacktestEngine';
+import { resolveInstitutionalAssetContext } from '@/lib/institutional/helpers';
 import type { TimeFrame } from '@/lib/types';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -19,13 +21,18 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const symbol = String(body?.symbol || 'XAU/USD');
+    const timeframe = (body?.timeframe as TimeFrame) || '1h';
+
     if (body?.action === 'DISPATCH_WEBHOOK') {
+      const ctx = resolveInstitutionalAssetContext(symbol, timeframe);
       const cloudWebhookScanner = quantBacktestEngine.dispatchCloudWebhookSignal({
-        symbol: String(body.symbol || 'XAU/USD'),
+        symbol: ctx.symbol,
         side: body.side === 'SELL' ? 'SELL' : 'BUY',
-        price: Number(body.price || 3538.2),
+        price: Number(body.price) > 0 ? Number(body.price) : ctx.spotPrice,
         lots: Number(body.lots || 0.5),
         condition: body.condition,
+        previousCount: typeof body.previousCount === 'number' ? body.previousCount : undefined,
       });
       return NextResponse.json({ success: true, cloudWebhookScanner });
     }
@@ -34,7 +41,7 @@ export async function POST(req: NextRequest) {
       const formulaBacktester = quantBacktestEngine.evaluateFormulaBacktest(
         body.script,
         body.language === 'CSHARP_QC' ? 'CSHARP_QC' : 'POWER_LANGUAGE',
-        body.symbol || 'XAU/USD'
+        symbol
       );
       return NextResponse.json({ success: true, formulaBacktester });
     }
@@ -42,11 +49,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       data: quantBacktestEngine.getSnapshot({
-        symbol: body?.symbol || 'XAU/USD',
-        timeframe: (body?.timeframe as TimeFrame) || '1h',
+        symbol,
+        timeframe,
         formulaScript: body?.script,
         formulaLanguage: body?.language,
         topNRotation: Number(body?.topNRotation || 4),
+        includeDelisted: typeof body?.includeDelisted === 'boolean' ? body.includeDelisted : true,
+        lookbackMonths: Number(body?.lookbackMonths || 12),
       }),
     });
   } catch (err: any) {

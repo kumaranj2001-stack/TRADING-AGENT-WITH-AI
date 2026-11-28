@@ -1,4 +1,4 @@
-export type MarketSegment = 'FOREX' | 'METALS_COMMODITIES' | 'INDIAN_MARKET';
+export type MarketSegment = 'FOREX' | 'METALS_COMMODITIES' | 'INDIAN_MARKET' | 'CRYPTO_EQUITIES';
 
 export type ForexPair = 
   | 'EUR/USD' 
@@ -29,7 +29,12 @@ export type IndianMarketAsset =
   | 'HDFC BANK' 
   | 'INFY';
 
-export type TradableSymbol = ForexPair | MetalCommodityAsset | IndianMarketAsset;
+export type CryptoEquityAsset =
+  | 'BTC/USD'
+  | 'ETH/USD'
+  | 'NVDA';
+
+export type TradableSymbol = ForexPair | MetalCommodityAsset | IndianMarketAsset | CryptoEquityAsset;
 
 export type CurrencyPair = TradableSymbol;
 

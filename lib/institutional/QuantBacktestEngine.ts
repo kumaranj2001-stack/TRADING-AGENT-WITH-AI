@@ -28,22 +28,25 @@ export class QuantBacktestEngine {
   public dispatchCloudWebhookSignal(params: {
     symbol: string;
     side: 'BUY' | 'SELL';
-    price: number;
+    price?: number;
     lots?: number;
     condition?: string;
+    previousCount?: number;
   }): QuantBacktestSnapshot['cloudWebhookScanner'] {
+    const ctx = resolveInstitutionalAssetContext(params.symbol);
+    const execPrice = Number.isFinite(params.price) && (params.price ?? 0) > 0 ? Number(params.price) : ctx.spotPrice;
     const order = executionBridgeEngine.submitDomOrder({
-      symbol: params.symbol,
+      symbol: ctx.symbol,
       side: params.side,
       orderType: 'MARKET',
-      price: params.price,
+      price: execPrice,
       quantityLots: params.lots ?? 0.5,
       venue: 'CLOUD_WEBHOOK -> MT5_ECN',
     });
-    this.webhookDispatchCount += 1;
+    this.webhookDispatchCount = Math.max(this.webhookDispatchCount, params.previousCount ?? 0) + 1;
     this.lastMt5BridgeStatus = `ROUTED_FIX_${order.id}_SEQ_${order.fixMsgSeqNum}`;
 
-    const conditionExpression = params.condition || `CLOSE > EMA(20) AND RVOL >= 2.0 ON ${params.symbol}`;
+    const conditionExpression = params.condition || `CLOSE > EMA(20) AND RVOL >= 2.0 ON ${ctx.symbol}`;
     return {
       webhookUrl: 'https://api.qri-trader.internal/v1/institutional/quant-backtest/webhook',
       conditionExpression,
@@ -51,8 +54,8 @@ export class QuantBacktestEngine {
         {
           secret: 'QRI_HMAC_VERIFIED',
           action: params.side,
-          symbol: params.symbol,
-          price: params.price,
+          symbol: ctx.symbol,
+          price: execPrice,
           lots: params.lots ?? 0.5,
           bridge: 'MT5_PRESERVED_FIX_4_4',
           orderId: order.id,
@@ -76,8 +79,8 @@ export class QuantBacktestEngine {
       script,
       compiledValid: valid,
       totalSignals: valid ? Math.round(seededRange(`${symbol}:qb:${script.length}`, 84, 240)) : 0,
-      profitFactor: valid ? Number(seededRange(`${symbol}:qpf:${language}`, 1.62, 2.48).toFixed(2)) : 0,
-      netReturnPct: valid ? Number(seededRange(`${symbol}:qret:${language}`, 28.4, 86.2).toFixed(1)) : 0,
+      profitFactor: valid ? Number(seededRange(`${symbol}:qpf:${language}:${script.length}`, 1.62, 2.48).toFixed(2)) : 0,
+      netReturnPct: valid ? Number(seededRange(`${symbol}:qret:${language}:${script.length}`, 28.4, 86.2).toFixed(1)) : 0,
     };
   }
 
@@ -87,17 +90,32 @@ export class QuantBacktestEngine {
     formulaScript?: string;
     formulaLanguage?: 'POWER_LANGUAGE' | 'CSHARP_QC';
     topNRotation?: number;
+    includeDelisted?: boolean;
+    lookbackMonths?: number;
   }): QuantBacktestSnapshot {
     const ctx = resolveInstitutionalAssetContext(params?.symbol || 'XAU/USD', params?.timeframe || '1h');
     const spot = ctx.spotPrice;
     const topN = Math.max(2, Math.min(6, params?.topNRotation ?? 4));
+    const includeDelisted = params?.includeDelisted ?? true;
+    const lookbackMonths = Math.max(3, Math.min(24, params?.lookbackMonths ?? 12));
 
-    const equityCurve = Array.from({ length: 12 }, (_, idx) => {
+    const equityCurve = Array.from({ length: lookbackMonths }, (_, idx) => {
       const m = `M${idx + 1}`;
-      const port = Number((100000 * (1 + idx * 0.036 + seededRange(`${ctx.symbol}:eq:${idx}`, -0.015, 0.032))).toFixed(0));
+      const biasLift = includeDelisted ? 0 : 0.008;
+      const port = Number(
+        (100000 * (1 + idx * (0.032 + biasLift + (topN - 2) * 0.002) + seededRange(`${ctx.symbol}:eq:${topN}:${includeDelisted}:${idx}`, -0.015, 0.032))).toFixed(0)
+      );
       const bench = Number((100000 * (1 + idx * 0.015 + seededRange(`${ctx.symbol}:bm:${idx}`, -0.01, 0.02))).toFixed(0));
       return { date: m, portfolioEquity: port, benchmarkEquity: bench };
     });
+
+    const delistedCount = includeDelisted ? Math.round(seededRange(`${ctx.symbol}:delisted`, 290, 340)) : 0;
+    const cagrBase = seededRange(`${ctx.symbol}:cagr:${topN}:${lookbackMonths}`, 21.5, 29.4);
+    const cagrPct = Number((cagrBase + (includeDelisted ? 0 : 3.1) - (lookbackMonths === 24 ? 1.4 : 0)).toFixed(1));
+    const sharpeRatio = Number((seededRange(`${ctx.symbol}:sharpe:${topN}:${includeDelisted}`, 1.78, 2.34) + (includeDelisted ? 0 : 0.22)).toFixed(2));
+    const sortinoRatio = Number((sharpeRatio * 1.38).toFixed(2));
+    const maxDrawdownPct = Number((-seededRange(`${ctx.symbol}:mdd:${topN}:${includeDelisted}`, 6.8, 11.4)).toFixed(1));
+    const totalTrades = Math.round(lookbackMonths * (95 + topN * 12) + (includeDelisted ? 180 : 0));
 
     const rotationalCandidates = [
       { symbol: 'NVDA', positionScore: 94.2 },
@@ -119,19 +137,19 @@ export class QuantBacktestEngine {
     return {
       symbol: ctx.symbol,
       eventDrivenTickBacktest: {
-        universeMode: 'SURVIVORSHIP_FREE_WITH_DELISTED',
+        universeMode: includeDelisted ? 'SURVIVORSHIP_FREE_WITH_DELISTED' : 'SURVIVORSHIP_BIASED_ACTIVE_ONLY',
         activeConstituents: 500,
-        delistedConstituentsIncluded: 318,
-        totalTrades: 1420,
-        cagrPct: 24.8,
-        sharpeRatio: 2.04,
-        sortinoRatio: 2.86,
-        maxDrawdownPct: -8.4,
+        delistedConstituentsIncluded: delistedCount,
+        totalTrades,
+        cagrPct,
+        sharpeRatio,
+        sortinoRatio,
+        maxDrawdownPct,
         equityCurve,
       },
       formulaBacktester: this.evaluateFormulaBacktest(params?.formulaScript, params?.formulaLanguage, ctx.symbol),
       aflArrayBacktest: {
-        computeTimeMs: 4.8,
+        computeTimeMs: Number((3.6 + topN * 0.35 + lookbackMonths * 0.04).toFixed(1)),
         topNRotation: topN,
         cagrPct: Number((19.4 + topN * 1.6).toFixed(1)),
         rotationalHoldings,

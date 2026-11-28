@@ -49,8 +49,9 @@ export class OrderFlowEngine {
     const isPlatinum = symbol === 'XPT/USD';
     const isCopper = symbol === 'COPPER';
     const isOil = symbol === 'WTI_CRUDE' || symbol === 'BRENT_CRUDE';
-    const isCrypto = symbol.includes('BTC');
-    const isIndia = symbol.includes('NIFTY') || symbol === 'RELIANCE' || symbol === 'TCS' || symbol === 'HDFC BANK' || symbol === 'INFY';
+    const isCrypto = symbol.includes('BTC') || symbol.includes('ETH');
+    const isUsEquity = symbol === 'NVDA';
+    const isIndia = symbol.includes('NIFTY') || symbol.includes('/INR') || symbol === 'RELIANCE' || symbol === 'TCS' || symbol === 'HDFC BANK' || symbol === 'INFY';
     const isJpy = symbol.includes('JPY');
 
     // Dynamic step size and decimal precision per asset class
@@ -60,8 +61,9 @@ export class OrderFlowEngine {
     else if (isSilver) { step = 0.05; decimals = 3; }
     else if (isPlatinum || isOil) { step = 0.25; decimals = 2; }
     else if (isCopper) { step = 0.001; decimals = 4; }
-    else if (isCrypto) { step = 50.0; decimals = 0; }
-    else if (isIndia) { step = 2.0; decimals = 2; }
+    else if (isCrypto) { step = symbol.includes('BTC') ? 50.0 : 2.5; decimals = 2; }
+    else if (isUsEquity) { step = 0.25; decimals = 2; }
+    else if (isIndia) { step = symbol.includes('/INR') ? 0.05 : 2.0; decimals = symbol.includes('/INR') ? 3 : 2; }
     else if (isJpy) { step = 0.02; decimals = 3; }
 
     const levelsCount = 14;
@@ -532,8 +534,11 @@ export class OrderFlowEngine {
     const isPlatinum = symbol === 'XPT/USD';
     const isCopper = symbol === 'COPPER';
     const isOil = symbol === 'WTI_CRUDE' || symbol === 'BRENT_CRUDE';
-    const isIndian = symbol.includes('NIFTY') || symbol === 'RELIANCE' || symbol === 'TCS' || symbol === 'HDFC BANK' || symbol === 'INFY';
-    const isForex = symbol.includes('/') && !isGold && !isSilver && !isPlatinum && !symbol.includes('INR');
+    const isIndian = symbol.includes('NIFTY') || symbol.includes('/INR') || symbol === 'RELIANCE' || symbol === 'TCS' || symbol === 'HDFC BANK' || symbol === 'INFY';
+    const isCrypto = symbol.includes('BTC') || symbol.includes('ETH');
+    const isUsEquity = symbol === 'NVDA';
+    const isJpy = symbol.includes('JPY');
+    const isForex = symbol.includes('/') && !isGold && !isSilver && !isPlatinum && !isCrypto && !symbol.includes('INR');
 
     let tickStep = 0.0002;
     let decimals = 5;
@@ -541,7 +546,10 @@ export class OrderFlowEngine {
     else if (isSilver) { tickStep = 0.05; decimals = 3; }
     else if (isPlatinum || isOil) { tickStep = 0.25; decimals = 2; }
     else if (isCopper) { tickStep = 0.001; decimals = 4; }
-    else if (isIndian) { tickStep = 1.0; decimals = 2; }
+    else if (isCrypto) { tickStep = symbol.includes('BTC') ? 25.0 : 2.5; decimals = 2; }
+    else if (isUsEquity) { tickStep = 0.25; decimals = 2; }
+    else if (isIndian) { tickStep = symbol.includes('/INR') ? 0.025 : 2.0; decimals = symbol.includes('/INR') ? 3 : 2; }
+    else if (isJpy) { tickStep = 0.02; decimals = 3; }
 
     const lastClose = candles && candles.length > 0 ? Number(candles[candles.length - 1].close) : 0;
     const isMismatchedCandle = Math.abs(lastClose - basePrice) / basePrice > 0.5;
@@ -570,13 +578,17 @@ export class OrderFlowEngine {
       let candleBuy = 0;
       let candleSell = 0;
 
-      for (let p = cLow; p <= cHigh + 0.00001; p = Number((p + tickStep).toFixed(decimals))) {
-        const distFromMid = Math.abs(p - (cHigh + cLow) / 2) / Math.max(tickStep, cHigh - cLow);
+      const range = Math.max(tickStep, cHigh - cLow);
+      const effectiveStep = Math.max(tickStep, Number((range / 24).toFixed(decimals)) || tickStep);
+      let stepIter = 0;
+
+      for (let p = cLow; p <= cHigh + 1e-8 && stepIter < 40; p = Number((p + effectiveStep).toFixed(decimals)), stepIter++) {
+        const distFromMid = Math.abs(p - (cHigh + cLow) / 2) / Math.max(effectiveStep, cHigh - cLow);
         const baseVol = Math.round(45 + 65 * Math.exp(-2.2 * distFromMid * distFromMid));
         let askVol = Math.floor(baseVol * (isBull ? 0.62 : 0.38));
         let bidVol = Math.floor(baseVol * (isBull ? 0.38 : 0.62));
 
-        const isNearClose = Math.abs(p - c.close) < tickStep * 1.5;
+        const isNearClose = Math.abs(p - c.close) < effectiveStep * 1.5;
         const isImbalanceBuy = isBull && isNearClose && askVol >= bidVol * 2.8;
         const isImbalanceSell = !isBull && isNearClose && bidVol >= askVol * 2.8;
 
