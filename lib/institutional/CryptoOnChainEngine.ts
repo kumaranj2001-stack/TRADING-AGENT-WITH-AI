@@ -1,5 +1,10 @@
 import type { CryptoOnChainSnapshot } from './types';
-import { seededRange } from './helpers';
+import { formatInstrumentPrice } from '../marketData';
+import {
+  classifyInstitutionalAsset,
+  resolveInstitutionalAssetContext,
+  seededRange,
+} from './helpers';
 
 const DECODED_CONTRACT_LOGS: Array<{
   block_number: number;
@@ -68,8 +73,27 @@ export class CryptoOnChainEngine {
     let rows = [...DECODED_CONTRACT_LOGS];
     let predicatesApplied = 0;
 
+    const unwrapOuterParens = (input: string): string => {
+      let s = input.trim();
+      while (s.startsWith('(') && s.endsWith(')')) {
+        let depth = 0;
+        let wrapsAll = true;
+        for (let i = 0; i < s.length; i++) {
+          if (s[i] === '(') depth++;
+          else if (s[i] === ')') depth--;
+          if (depth === 0 && i < s.length - 1) {
+            wrapsAll = false;
+            break;
+          }
+        }
+        if (!wrapsAll || depth !== 0) break;
+        s = s.slice(1, -1).trim();
+      }
+      return s;
+    };
+
     const evalAtomicPredicate = (rawCond: string, row: Record<string, any>): boolean => {
-      const cond = rawCond.trim().replace(/^\(+|\)+$/g, '').trim();
+      const cond = unwrapOuterParens(rawCond);
       const inMatch = cond.match(/^([a-z_]+)\s+IN\s*\(([^)]+)\)$/i);
       if (inMatch) {
         const [, col, itemsRaw] = inMatch;
@@ -108,7 +132,7 @@ export class CryptoOnChainEngine {
         return op === '=' ? cell === cmpVal : cell !== cmpVal;
       }
 
-      return true;
+      return false;
     };
 
     const whereMatch = query.match(/WHERE\s+(.+?)(?:\s+ORDER\s+BY|\s+LIMIT|$)/i);
@@ -169,11 +193,32 @@ export class CryptoOnChainEngine {
   }
 
   public getSnapshot(params?: { asset?: string; sqlQuery?: string }): CryptoOnChainSnapshot {
-    const asset = (params?.asset || 'BTC/USD').toUpperCase();
-    const spotPrice = asset.includes('ETH') ? 3410 : asset.includes('SOL') ? 218.4 : 96420;
+    const rawAsset = (params?.asset || 'BTC/USD').toUpperCase();
+    const isCryptoNative =
+      rawAsset.includes('BTC') ||
+      rawAsset.includes('ETH') ||
+      rawAsset.includes('SOL') ||
+      rawAsset.includes('CRYPTO');
+    const proxyAsset = isCryptoNative ? rawAsset : 'BTC/USD';
+    const ctx = resolveInstitutionalAssetContext(rawAsset as any, '1h');
+    const assetClass = classifyInstitutionalAsset(ctx.symbol);
+    const spotPrice = isCryptoNative
+      ? rawAsset.includes('ETH')
+        ? 3410
+        : rawAsset.includes('SOL')
+          ? 218.4
+          : ctx.spotPrice || 96420
+      : ctx.spotPrice;
+    const contextBanner = isCryptoNative
+      ? undefined
+      : `${ctx.symbol} is a non-crypto ${assetClass.replace('_', ' ')} instrument (Spot ${formatInstrumentPrice(ctx.symbol, spotPrice)}). BTC/ETH On-Chain & Stablecoin Liquidity metrics below are shown strictly as a secondary Cross-Asset Liquidity Proxy — never confuse BTC Miner Reserves or token netflows with ${ctx.symbol} spot supply.`;
+    const asset = proxyAsset;
 
     return {
-      asset,
+      asset: ctx.symbol,
+      assetClass,
+      isCryptoNative,
+      contextBanner,
       spotPrice,
       soprMetrics: {
         entityAdjustedSopr: Number(seededRange(`${asset}:asopr`, 1.01, 1.09).toFixed(3)),

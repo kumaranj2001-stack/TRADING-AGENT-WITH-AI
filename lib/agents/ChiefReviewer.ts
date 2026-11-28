@@ -172,14 +172,14 @@ export class ChiefReviewerAgent extends BaseAgent {
     const fxSellArg = `Cross-market correlation headwinds, DXY reversal risk, or thin session liquidity creating slippage exposure.`;
     const fxVerdict: DeskAuditVerdict = {
       desk: 'FOREX_INTERMARKET',
-      analystName: 'Kenji Sato (Intermarket Order Flow)',
+      analystName: 'Mateo Silva (Intermarket Order Flow)',
       verdict: forex.activeTradingSession.liquidityRating === 'THIN' ? 'WARNING' : fxVote === 'AGREE' ? 'COMPLIANT' : 'WARNING',
       score: forex.confidenceScore,
       finding: `Session Audit: Trading during ${forex.activeTradingSession.session} session with ${forex.activeTradingSession.liquidityRating} liquidity. DXY Index trend: ${forex.dxyTrend}. Spread risk assessed.`,
     };
     const fxVoteDetail: DeskVoteDetail = {
       desk: 'FOREX_INTERMARKET',
-      analystName: 'Kenji Sato (Intermarket Order Flow)',
+      analystName: 'Mateo Silva (Intermarket Order Flow)',
       bias: forex.bias,
       vote: fxVote,
       confidence: forex.confidenceScore,
@@ -323,9 +323,37 @@ export class ChiefReviewerAgent extends BaseAgent {
     };
 
     // ===============================================================
-    // 2. CONSENSUS AGREEMENT RULE EVALUATION
-    // Evaluates all 7 specialist desks (Technical, Fundamental, News, Forex, Order Flow, Candlestick Pattern, Risk)
+    // 2. STRICT 8-AGENT ACCOUNTABILITY VOTE (Minimum 5/8 Agreement Rule)
+    // Evaluates all 8 agents: Technical, Fundamental, News, Forex, Order Flow, Candlestick Pattern, Risk & Chief Reviewer
     // ===============================================================
+    const preReviewerAgreeCount = [techVote, fundVote, newsVote, fxVote, ofVote, candleVote, riskVote].filter(v => v === 'AGREE').length;
+    const gatekeeperCleared =
+      proposedDirection !== 'HOLD' &&
+      risk.verdict !== 'VETOED' &&
+      confidenceScore >= 68 &&
+      preReviewerAgreeCount >= 4;
+    const reviewerVote: 'AGREE' | 'DISAGREE' = gatekeeperCleared ? 'AGREE' : 'DISAGREE';
+    const reviewerVerdict: DeskAuditVerdict = {
+      desk: 'CHIEF_REVIEWER',
+      analystName: this.name,
+      verdict: reviewerVote === 'AGREE' ? 'COMPLIANT' : 'NON_COMPLIANT',
+      score: confidenceScore,
+      finding: gatekeeperCleared
+        ? `Gatekeeper Verified: ${proposedDirection} passes >=68% confidence, risk bounds, and structural invalidation rules.`
+        : `Gatekeeper Veto Triggered: ${risk.verdict === 'VETOED' ? 'Risk veto' : confidenceScore < 68 ? `Confidence ${confidenceScore}% < 68%` : 'Insufficient multi-desk alignment'}.`,
+    };
+    const reviewerVoteDetail: DeskVoteDetail = {
+      desk: 'CHIEF_REVIEWER',
+      analystName: this.name,
+      bias: gatekeeperCleared ? proposedDirection : 'HOLD',
+      vote: reviewerVote,
+      confidence: confidenceScore,
+      buySideArgument: `Gatekeeper validation of Buy-Side structural support & risk envelope on ${pair}.`,
+      sellSideArgument: `Gatekeeper validation of Sell-Side overhead resistance & drawdown governance on ${pair}.`,
+      verdict: reviewerVerdict.verdict,
+      finding: reviewerVerdict.finding,
+    };
+
     const allVotes = [
       { desk: 'TECHNICAL' as const, vote: techVote, name: techVoteDetail.analystName },
       { desk: 'FUNDAMENTAL' as const, vote: fundVote, name: fundVoteDetail.analystName },
@@ -334,10 +362,13 @@ export class ChiefReviewerAgent extends BaseAgent {
       { desk: 'ORDER_FLOW' as const, vote: ofVote, name: ofVoteDetail.analystName },
       { desk: 'CANDLESTICK_PATTERN' as const, vote: candleVote, name: candleVoteDetail.analystName },
       { desk: 'RISK_GOVERNANCE' as const, vote: riskVote, name: riskVoteDetail.analystName },
+      { desk: 'CHIEF_REVIEWER' as const, vote: reviewerVote, name: reviewerVoteDetail.analystName },
     ];
 
     const agreeCount = allVotes.filter(v => v.vote === 'AGREE').length;
-    const disagreeCount = allVotes.length - agreeCount;
+    const totalDesksReviewed = allVotes.length;
+    const disagreeCount = totalDesksReviewed - agreeCount;
+    const agreementRatio = `${agreeCount}/${totalDesksReviewed}`;
     const disagreeingDesks = allVotes.filter(v => v.vote === 'DISAGREE').map(v => v.desk);
     const consensusRuleSatisfied = agreeCount >= 5;
 
@@ -349,10 +380,10 @@ export class ChiefReviewerAgent extends BaseAgent {
     const sellSideCase = `SELL SIDE COUNTER-ARGUMENT: Technical desk identifies overhead resistance ceiling at ${technical.keyResistance} with potential liquidity hunt and exhaustion wicks. Macro desk cautions against ${fundamental.quoteCurrencyOutlook.currency} hawkish pivot and real yield spread compression. Candlestick desk monitors upper-wick rejection boundary at ${candlestickPattern?.definingCandleBoundary?.extremeWickPrice || technical.keyResistance}. News wire monitors potential contrarian geopolitical or breaking headline risk across 38 outlets. Intermarket desk flags currency strength divergence and session liquidity transition risks. Risk governance enforces mandatory hard stop loss at ${risk.parameters.stopLoss} to guard against tail-risk invalidation.`;
 
     let comparativeVerdict = '';
-    if (agreeCount >= 5) {
-      comparativeVerdict = `CHIEF REVIEWER VERDICT: ${proposedDirection} DIRECTION AUTHORIZED (${agreeCount}/7 Specialist Desks in Alignment). The 8-agent debate rigorously evaluated both Buy-Side and Sell-Side arguments against 1,170+ quantitative models (525 technical, 525 fundamental, 120 candlestick patterns) alongside live 95-source wire feeds. The ${proposedDirection} thesis maintains a dominant mathematical edge. Mandatory execution authorized.`;
+    if (agreeCount >= 5 && risk.verdict !== 'VETOED' && confidenceScore >= 68 && proposedDirection !== 'HOLD') {
+      comparativeVerdict = `CHIEF REVIEWER VERDICT: ${proposedDirection} DIRECTION AUTHORIZED (${agreementRatio} Agents in Alignment). The 8-agent debate rigorously evaluated both Buy-Side and Sell-Side arguments against 1,170 quantitative models (525 technical, 525 fundamental, 120 candlestick patterns) alongside live 95-source wire feeds. The ${proposedDirection} thesis maintains a dominant mathematical edge.`;
     } else {
-      comparativeVerdict = `CHIEF REVIEWER VERDICT: ${proposedDirection} MANDATORY EXECUTION AUTHORIZED (${agreeCount}/7 Desks Aligned). Dialectical friction safely absorbed via dynamic micro-lot sizing (0.01 - 0.02 Lots) and tight structural stops anchored to defining candle boundary. Zero hard vetoes enforced.`;
+      comparativeVerdict = `CHIEF REVIEWER HARD VETO / HOLD (${agreementRatio} Agents Aligned < 5/8 Supermajority or Gate Failed). Contradictions across specialist desks prevent execution authorization. Zero trade dispatch permitted until supermajority confluence is restored.`;
     }
 
     // ===============================================================
@@ -367,9 +398,9 @@ export class ChiefReviewerAgent extends BaseAgent {
     if (!consensusRuleSatisfied) {
       hasContradiction = true;
       contradictionType = 'SPECIALIST_CONSENSUS_FAILURE';
-      resolutionAction = 'REDUCE_SIZE_50_PERCENT';
-      consensusDirective = 'MODIFY_PARAMETERS';
-      contradictionExplanation = `ELEVATED DIALECTICAL FRICTION RESOLVED: Desk agreement (${agreeCount}/7 desks, 8 agents in chamber) absorbed via dynamic micro-lot scaling (0.01-0.02 Lots). Execution remains mandatory with 1:1 Breakeven Ratchet.`;
+      resolutionAction = 'FORCE_VETO';
+      consensusDirective = 'AVOID_TRADE';
+      contradictionExplanation = `HARD GATEKEEPER VETO: Supermajority consensus failed (${agreementRatio} agents < 5/8 minimum). Execution blocked to prevent counter-trend entry (${disagreeingDesks.join(', ')} in disagreement).`;
     } else if (newsBiasOpposes && Math.abs(news.sentimentScore) >= 60) {
       hasContradiction = true;
       contradictionType = 'NEWS_TECHNICAL_INVERSION';
@@ -416,7 +447,7 @@ export class ChiefReviewerAgent extends BaseAgent {
       proposedDirection === 'HOLD' ||
       risk.verdict === 'VETOED' ||
       confidenceScore < 68 ||
-      agreeCount < 4 ||
+      agreeCount < 5 ||
       severeCrossDeskConflict
     ) {
       status = 'VETOED';
@@ -432,7 +463,7 @@ export class ChiefReviewerAgent extends BaseAgent {
           ? `Confidence (${confidenceScore}%) below mandatory 68% threshold.`
           : severeCrossDeskConflict
           ? `Directional contradiction: Technical/Candlestick price action opposes ${proposedDirection}.`
-          : `Insufficient desk agreement (${agreeCount}/7 < 4/7 minimum).`
+          : `Insufficient agent agreement (${agreementRatio} < 5/8 supermajority minimum).`
       }`;
     } else if (capitalPreservationGate && !capitalPreservationGate.passed) {
       status = 'MODIFIED';
@@ -454,7 +485,7 @@ export class ChiefReviewerAgent extends BaseAgent {
     const institutionalTierNote = institutionalGrading
       ? ` | Calibrated Tier: ${institutionalGrading.grade} (${institutionalGrading.isGradeAPlus ? 'Grade A+ Unanimous/Supermajority Core' : institutionalGrading.isGradeA ? 'Grade A Primary Institutional' : 'Retail Dilution Filtered'}) | Dialectical Friction: ${institutionalGrading.dialecticalFriction}% | Order Book Depth Wall: ${institutionalGrading.liquidityWallVerified ? 'CONFIRMED' : 'UNVERIFIED'}`
       : '';
-    const crossExaminationNotes = `Continuous 24/7 cross-examination of all ${totalStrats} strategies (${exhaustiveCorpus?.technicalEvaluatedCount || 1050} Technical + ${exhaustiveCorpus?.fundamentalEvaluatedCount || 1050} Fundamental models across 8 orthogonal families) with zero heuristic pruning. Meta-consensus score: ${exhaustiveCorpus?.metaConsensusScore ?? confidenceScore}%, dialectical friction: ${exhaustiveCorpus?.debateFrictionIndex ?? 22.5}%. Capital preservation gate: ${capitalPreservationGate?.status || 'VERIFIED'}. Cross-desk debate audited: ${agreeCount}/7 desks agree, ${disagreeCount}/7 desks disagree.${institutionalTierNote}`;
+    const crossExaminationNotes = `Continuous 24/7 cross-examination of all ${totalStrats} strategies (${exhaustiveCorpus?.technicalEvaluatedCount || 525} Technical + ${exhaustiveCorpus?.fundamentalEvaluatedCount || 525} Fundamental + ${exhaustiveCorpus?.candlestickEvaluatedCount || 120} Candlestick models across 8 orthogonal families) with zero heuristic pruning. Meta-consensus score: ${exhaustiveCorpus?.metaConsensusScore ?? confidenceScore}%, dialectical friction: ${exhaustiveCorpus?.debateFrictionIndex ?? 22.5}%. Capital preservation gate: ${capitalPreservationGate?.status || 'VERIFIED'}. 8-agent debate audited: ${agreeCount}/8 agents agree, ${disagreeCount}/8 agents disagree.${institutionalTierNote}`;
 
     return {
       auditorName: this.name,
@@ -462,6 +493,8 @@ export class ChiefReviewerAgent extends BaseAgent {
       overallConfluenceScore: confidenceScore,
       agreeCount,
       disagreeCount,
+      totalDesksReviewed,
+      agreementRatio,
       consensusRuleSatisfied,
       consensusDirective,
       buySideCase,
@@ -475,6 +508,7 @@ export class ChiefReviewerAgent extends BaseAgent {
         orderFlow: ofVerdict,
         candlestickPattern: candleVerdict,
         riskGovernance: riskVerdict,
+        chiefReviewer: reviewerVerdict,
       },
       deskVotes: {
         TECHNICAL: techVoteDetail,
@@ -484,6 +518,7 @@ export class ChiefReviewerAgent extends BaseAgent {
         ORDER_FLOW: ofVoteDetail,
         CANDLESTICK_PATTERN: candleVoteDetail,
         RISK_GOVERNANCE: riskVoteDetail,
+        CHIEF_REVIEWER: reviewerVoteDetail,
       },
       completeInvalidationCriteriaList,
       contradictionResolution: {

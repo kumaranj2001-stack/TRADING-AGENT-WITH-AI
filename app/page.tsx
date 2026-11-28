@@ -1263,6 +1263,11 @@ export default function Home() {
           const next = !isMarketFrozen;
           MarketSessionManager.setManualFreeze(next);
           setIsMarketFrozen(next);
+          if (next) {
+            LiveMarketFeedManager.stopLiveFeed();
+          } else {
+            LiveMarketFeedManager.startLiveFeed(selectedPair, timeframe, 1500);
+          }
           showNotification(next ? '❄️ Global State Freeze activated.' : '🟢 Trading resumed. Global State Unfrozen.');
         }}
         cycleNumber={consensus?.autonomousLoopTelemetry?.cycleNumber || swarmTelemetry?.cycleCount}

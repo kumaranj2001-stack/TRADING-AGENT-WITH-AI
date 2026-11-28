@@ -1,4 +1,5 @@
 import { Candle, TechnicalIndicators } from './types';
+import { clampSupportResistanceLevels } from './canonicalMarketStore';
 
 export function calculateSMA(data: number[], period: number): number[] {
   const sma: number[] = [];
@@ -379,6 +380,15 @@ export function computeTechnicalIndicators(candles: Candle[]): TechnicalIndicato
   const s1 = 2 * p - lastCandle.high;
   const r2 = p + (lastCandle.high - lastCandle.low);
   const s2 = p - (lastCandle.high - lastCandle.low);
+  const atrVal = atrArr[lastIndex] || Math.max(0.0005, lastCandle.close * 0.0015);
+  const decimals = lastCandle.close >= 100 ? 2 : 5;
+  const clampedSR = clampSupportResistanceLevels(
+    lastCandle.close,
+    [s1, s2],
+    [r1, r2],
+    atrVal * 0.35,
+    decimals
+  );
 
   return {
     rsi: rsiArr[lastIndex] || 50,
@@ -396,8 +406,8 @@ export function computeTechnicalIndicators(candles: Candle[]): TechnicalIndicato
       lower: bbData.lower[lastIndex] || closes[lastIndex],
       bandwidth: bbData.bandwidth[lastIndex] || 0,
     },
-    atr: atrArr[lastIndex] || 0.0015,
-    supportLevels: [Number(s1.toFixed(5)), Number(s2.toFixed(5))],
-    resistanceLevels: [Number(r1.toFixed(5)), Number(r2.toFixed(5))],
+    atr: atrVal,
+    supportLevels: clampedSR.supportLevels,
+    resistanceLevels: clampedSR.resistanceLevels,
   };
 }

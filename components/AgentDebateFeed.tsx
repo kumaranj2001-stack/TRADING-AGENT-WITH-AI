@@ -340,10 +340,10 @@ export const AgentDebateFeed: React.FC<AgentDebateFeedProps> = ({
     };
 
     return [
-      findAgent('technical_analyst', 'Alex Vance', 'Technical Desk (SMC & FVG)', 'text-cyan-400'),
+      findAgent('technical_analyst', 'Marcus Vance', 'Technical Desk (SMC & FVG)', 'text-cyan-400'),
       findAgent('fundamental_analyst', 'Elena Rostova', 'Fundamental Desk (Yields & CBs)', 'text-purple-400'),
-      findAgent('news_analyst', 'Arthur Wright', 'News & Macro Intelligence', 'text-sky-400'),
-      findAgent('forex_analyst', 'Kenji Sato', 'Forex & Cross-Asset Corridors', 'text-amber-400'),
+      findAgent('news_analyst', 'Alexander Wright', 'News & Macro Intelligence', 'text-sky-400'),
+      findAgent('forex_analyst', 'Mateo Silva', 'Forex & Cross-Asset Corridors', 'text-amber-400'),
       findAgent('order_flow_analyst', 'Kaelen Voss', 'Order Flow & Liquidity Desk', 'text-orange-400'),
       findAgent('candlestick_pattern_analyst', 'Kenji Takahashi', 'Candlestick Pattern Specialist (120 Rules)', 'text-rose-400'),
       findAgent('risk_manager', 'Sarah Stirling', 'Chief Risk Officer (CRO)', 'text-emerald-400'),
@@ -522,7 +522,7 @@ export const AgentDebateFeed: React.FC<AgentDebateFeedProps> = ({
             3. Alexander Vance (38 Wires)
           </span>
           <span className="px-2 py-0.5 rounded bg-amber-950/60 border border-amber-800 text-amber-300">
-            4. Kenji Sato (Intermarket Flow)
+            4. Mateo Silva (Intermarket Flow)
           </span>
           <span className="px-2 py-0.5 rounded bg-orange-950/60 border border-orange-800 text-orange-300">
             5. Kaelen Voss (Order Flow & Depth)
@@ -735,15 +735,11 @@ export const AgentDebateFeed: React.FC<AgentDebateFeedProps> = ({
                       </div>
 
                       <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold shrink-0 ${
-                        isGatekeeper
-                          ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                          : isCRO
-                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                          : isBull
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        isBull
+                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                           : isBear
-                          ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                          : 'bg-amber-500/10 text-amber-300 border border-amber-500/20'
+                          ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                          : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                       }`}>
                         {ag.sentiment}
                       </span>

@@ -32,6 +32,17 @@ export const CryptoOnChainDesk: React.FC<Props> = ({ symbol, crypto, onRefreshCr
 
   return (
     <div className="space-y-4">
+      {crypto.isCryptoNative === false && crypto.contextBanner && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2.5 text-xs font-mono text-amber-200 flex items-center justify-between gap-2">
+          <span>
+            <strong className="text-amber-300">CROSS-ASSET CRYPTO LIQUIDITY PROXY:</strong> {crypto.contextBanner}
+          </span>
+          <span className="shrink-0 px-2 py-0.5 rounded bg-terminal-900 border border-amber-500/40 text-amber-300 font-bold">
+            Active: {crypto.asset}
+          </span>
+        </div>
+      )}
+
       {/* On-Chain SOPR, Miner Reserves & Stablecoin Ratio KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 font-mono">
         <div className="bg-terminal-950 border border-cyan-500/30 rounded-lg p-3">

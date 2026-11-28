@@ -320,7 +320,7 @@ export function generateTechnicalKnowledgeBase(): KnowledgeRule[] {
       conditionDescription: isBull
         ? `Confirmed Bullish ${sub}: Price sweeps sell-side liquidity into an unmitigated Bullish Order Block or Fair Value Gap, followed by rapid displacement candle closing above structural swing pivot.`
         : `Confirmed Bearish ${sub}: Price sweeps buy-side liquidity into an unmitigated Bearish Order Block or Fair Value Gap, followed by rapid displacement lower printing Bearish CHoCH.`,
-      confidenceWeight: 10 + (i % 3),
+      confidenceWeight: Math.min(10, 9 + (i % 2)),
       signalAction: isBull ? 'STRONG_BUY' : 'STRONG_SELL',
       invalidationCriteria: isBull ? 'Candle body close below the bottom of the Order Block or FVG boundary.' : 'Candle body close above the top of the Bearish Order Block.',
       ...metrics,
@@ -344,7 +344,7 @@ export function generateTechnicalKnowledgeBase(): KnowledgeRule[] {
       conditionDescription: isBull
         ? `High-volume buyers defend Point of Control / Value Area Low with positive Cumulative Volume Delta divergence, absorbing institutional liquidity wall.`
         : `High-volume sellers defend Value Area High with negative Cumulative Volume Delta divergence, signaling overhead institutional distribution.`,
-      confidenceWeight: 9 + (i % 3),
+      confidenceWeight: Math.min(10, 8 + (i % 3)),
       signalAction: isBull ? 'STRONG_BUY' : 'STRONG_SELL',
       invalidationCriteria: isBull ? 'Volume delta collapses below -2.5σ with VWAP breach.' : 'Volume delta surges above +2.5σ with VWAP breach.',
       ...metrics,
@@ -368,7 +368,7 @@ export function generateTechnicalKnowledgeBase(): KnowledgeRule[] {
       conditionDescription: isBull
         ? `Validated ${sub}: Price completes geometric XABCD harmonic pattern terminating precisely within the 0.618 - 0.786 Fibonacci Golden Pocket with ATR volatility expansion clearance.`
         : `Validated ${sub}: Price terminates at 0.786 Fibonacci deep retest zone meeting heavy resistance confluence with descending supply line and ATR volatility clearance.`,
-      confidenceWeight: 9 + (i % 3),
+      confidenceWeight: Math.min(10, 8 + (i % 3)),
       signalAction: isBull ? 'STRONG_BUY' : 'STRONG_SELL',
       invalidationCriteria: isBull ? 'Candle close beyond 1.00 swing low Point X.' : 'Candle close beyond 1.00 swing high Point X.',
       ...metrics,

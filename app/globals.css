@@ -261,9 +261,9 @@ body {
 }
 
 /* Field Labels & Uppercase Structural Headers */
-.light span[class*="uppercase"],
+.light span[class*="uppercase"]:not([class~="bg-emerald-700"]):not([class~="bg-emerald-600"]):not([class~="bg-amber-600"]):not([class~="bg-sky-600"]):not([class~="bg-rose-700"]):not([class~="bg-rose-600"]),
 .light label[class*="uppercase"],
-.light div[class*="uppercase"] {
+.light div[class*="uppercase"]:not([class~="bg-emerald-700"]):not([class~="bg-emerald-600"]):not([class~="bg-amber-600"]):not([class~="bg-sky-600"]):not([class~="bg-rose-700"]):not([class~="bg-rose-600"]) {
   color: #334155 !important;
   font-weight: 700 !important;
   letter-spacing: 0.03em;
@@ -724,10 +724,15 @@ body {
 }
 .light [class~="bg-emerald-700"],
 .light [class~="bg-emerald-700"] *,
+.light span[class~="bg-emerald-700"],
+.light [role="dialog"] button span[class~="bg-emerald-700"],
 .light [class~="bg-amber-600"],
 .light [class~="bg-amber-600"] *,
+.light span[class~="bg-amber-600"],
+.light [role="dialog"] button span[class~="bg-amber-600"],
 .light [class~="bg-sky-600"],
-.light [class~="bg-sky-600"] * {
+.light [class~="bg-sky-600"] *,
+.light span[class~="bg-sky-600"] {
   color: #ffffff !important;
   stroke: #ffffff !important;
 }

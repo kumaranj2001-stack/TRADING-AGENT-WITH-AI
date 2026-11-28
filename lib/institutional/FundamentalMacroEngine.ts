@@ -239,11 +239,29 @@ export class FundamentalMacroEngine {
             { target: 'De Grey Mining (Hemi)', acquirer: 'Northern Star Resources', sector: 'Gold Exploration', dealValueBillions: 3.3, evToEbitda: 10.4, evToRevenue: 4.1, announcedDate: '2024-12-02' },
             { target: 'Filo / Vicuna Copper-Gold', acquirer: 'BHP / Lundin JV', sector: 'Metals & Mining', dealValueBillions: 3.25, evToEbitda: 9.8, evToRevenue: 3.9, announcedDate: '2024-07-29' },
           ]
-        : [
-            { target: 'Run:ai GPU Orchestration', acquirer: 'NVIDIA Corp.', sector: 'AI Infrastructure', dealValueBillions: 0.7, evToEbitda: 28.4, evToRevenue: 14.2, announcedDate: '2024-04-24' },
-            { target: 'Wiz Cloud Security (Ref Comp)', acquirer: 'Alphabet / Consortium', sector: 'Cybersecurity', dealValueBillions: 32.0, evToEbitda: 41.2, evToRevenue: 24.6, announcedDate: '2025-03-18' },
-            { target: 'HashiCorp Multi-Cloud', acquirer: 'IBM Corp.', sector: 'DevOps Infra', dealValueBillions: 6.4, evToEbitda: 31.0, evToRevenue: 10.8, announcedDate: '2024-04-24' },
-          ];
+        : assetClass === 'FOREX'
+          ? [
+              { target: 'LiquidityEdge FX Venue', acquirer: 'MarketAxess Holdings', sector: 'Institutional FX ECN', dealValueBillions: 0.15, evToEbitda: 14.2, evToRevenue: 5.8, announcedDate: '2019-08-12' },
+              { target: 'GTX Electronic FX', acquirer: 'Cboe Global Markets', sector: 'FX Prime Settlement', dealValueBillions: 0.1, evToEbitda: 12.6, evToRevenue: 4.9, announcedDate: '2018-06-29' },
+              { target: 'NEX Group (EBS Direct)', acquirer: 'CME Group Inc.', sector: 'Interbank FX Infrastructure', dealValueBillions: 5.5, evToEbitda: 18.4, evToRevenue: 7.2, announcedDate: '2018-11-02' },
+            ]
+          : assetClass === 'INDIAN_EQUITY_INDEX'
+            ? [
+                { target: 'Bharat Forge Industrial Units', acquirer: 'Tata / Domestic Consortium', sector: 'India Core Industrials', dealValueBillions: 2.1, evToEbitda: 15.8, evToRevenue: 3.6, announcedDate: '2024-09-14' },
+                { target: 'HDFC / HDFC Bank Merger Comp', acquirer: 'HDFC Bank Ltd.', sector: 'Indian Banking & BFSI', dealValueBillions: 40.0, evToEbitda: 17.2, evToRevenue: 6.1, announcedDate: '2023-07-01' },
+                { target: 'Airtel Africa / Towers Infra', acquirer: 'Indus Towers / Bharti', sector: 'India Telecom & Digital', dealValueBillions: 4.4, evToEbitda: 11.9, evToRevenue: 4.2, announcedDate: '2024-11-18' },
+              ]
+            : assetClass === 'CRYPTO'
+              ? [
+                  { target: 'Deribit Options Venue', acquirer: 'Institutional Exchange Bid', sector: 'Digital Asset Derivatives', dealValueBillions: 4.2, evToEbitda: 19.5, evToRevenue: 9.8, announcedDate: '2025-02-10' },
+                  { target: 'Bridge Stablecoin Rails', acquirer: 'Stripe Inc.', sector: 'On-Chain Settlement', dealValueBillions: 1.1, evToEbitda: 24.0, evToRevenue: 11.4, announcedDate: '2024-10-21' },
+                  { target: 'Kaiko Market Data', acquirer: 'Quant Analytics Syndicate', sector: 'Crypto Institutional Telemetry', dealValueBillions: 0.45, evToEbitda: 16.8, evToRevenue: 7.4, announcedDate: '2024-06-04' },
+                ]
+              : [
+                  { target: 'Run:ai GPU Orchestration', acquirer: 'NVIDIA Corp.', sector: 'AI Infrastructure', dealValueBillions: 0.7, evToEbitda: 28.4, evToRevenue: 14.2, announcedDate: '2024-04-24' },
+                  { target: 'Wiz Cloud Security (Ref Comp)', acquirer: 'Alphabet / Consortium', sector: 'Cybersecurity', dealValueBillions: 32.0, evToEbitda: 41.2, evToRevenue: 24.6, announcedDate: '2025-03-18' },
+                  { target: 'HashiCorp Multi-Cloud', acquirer: 'IBM Corp.', sector: 'DevOps Infra', dealValueBillions: 6.4, evToEbitda: 31.0, evToRevenue: 10.8, announcedDate: '2024-04-24' },
+                ];
 
     const yieldCurveHistory: MacroFundamentalSnapshot['yieldCurveHistory'] = [
       {

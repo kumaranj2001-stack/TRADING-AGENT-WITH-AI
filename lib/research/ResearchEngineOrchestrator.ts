@@ -26,6 +26,8 @@ import { fundamentalAnalysisWorker } from './agents/FundamentalAnalysisWorker';
 import { sentimentMomentumWorker } from './agents/SentimentMomentumWorker';
 import { riskAssessmentWorker } from './agents/RiskAssessmentWorker';
 import { thesisSynthesisWorker } from './agents/ThesisSynthesisWorker';
+import { canonicalMarketStore } from '../canonicalMarketStore';
+import type { CurrencyPair, TimeFrame } from '../types';
 
 export class ResearchEngineOrchestrator {
   private static instance: ResearchEngineOrchestrator;
@@ -228,6 +230,29 @@ export class ResearchEngineOrchestrator {
       grade = 'F';
       signal = 'AVOID';
       gradeDescription = 'Severe fundamental/technical deterioration or extreme tail-risk exposure. Avoid new long exposure.';
+    }
+
+    // Align with published CanonicalSignalObject when terminal consensus has run for this symbol/timeframe
+    const canonSig = canonicalMarketStore.getSignal(
+      resolvedSym as CurrencyPair,
+      (chartContext?.timeframe || timeframe || '1h') as TimeFrame
+    );
+    if (canonSig && canonSig.symbol === resolvedSym) {
+      if (canonSig.haltedByCircuitBreaker) {
+        grade = 'F';
+        signal = 'AVOID';
+        gradeDescription = `CIRCUIT BREAKER HALT: ${canonSig.invalidationReason || 'Feed staleness/drift detected.'}`;
+      } else if (canonSig.direction === 'HOLD') {
+        grade = canonSig.grade === 'F' ? 'F' : canonSig.grade === 'D' ? 'D' : 'C';
+        signal = 'NEUTRAL_CAUTION';
+        gradeDescription = canonSig.invalidationReason || gradeDescription;
+      } else {
+        grade = canonSig.grade === 'E' ? 'D' : (canonSig.grade as DefinitiveGrade);
+        signal =
+          canonSig.direction === 'BUY'
+            ? (canonSig.probability >= 85 ? 'STRONG_BUY' : 'BUY')
+            : (canonSig.probability >= 75 ? 'AVOID' : 'CAUTION');
+      }
     }
 
     // -------------------------------------------------------------

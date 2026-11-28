@@ -1,9 +1,9 @@
-import { 
-  Candle, 
-  CurrencyPair, 
-  TimeFrame, 
-  VisionAtlasPayload, 
-  VisionAtlasTimeframe, 
+import {
+  Candle,
+  CurrencyPair,
+  TimeFrame,
+  VisionAtlasPayload,
+  VisionAtlasTimeframe,
   VisionAtlasTimeframeTrend,
   SMCZone,
   SMCOrderBlock,
@@ -17,8 +17,9 @@ import {
   KnowledgeRule,
   MultiFactorConfluenceReport,
   ConfluenceFactorItem,
-  ConfluenceGrade
+  ConfluenceGrade,
 } from './types';
+import { canonicalMarketStore, validateDirectionalInvariants } from './canonicalMarketStore';
 import { BASE_PRICES } from './marketData';
 import { LiveMarketFeedManager } from './liveMarketFeed';
 import { liveMarketAnchorConstraintEngine } from './liveMarketAnchorConstraintEngine';
@@ -222,6 +223,34 @@ export class VisionAtlasLabEngine {
       synthesisGrade: multiFactorConfluence.grade,
     };
 
+    // Synchronize executionBlueprint and confluence with published CanonicalSignalObject when present
+    const canonSig = canonicalMarketStore.getSignal(symbol, timeframe);
+    let finalBias = directionalBias;
+    if (canonSig && canonSig.symbol === symbol && canonSig.direction !== 'HOLD') {
+      finalBias = canonSig.direction === 'BUY' ? 'BULLISH' : 'BEARISH';
+      multiFactorConfluence.directionalBias = finalBias;
+      multiFactorConfluence.grade = canonSig.grade === 'A+' ? 'A+' : canonSig.grade === 'A' ? 'A' : 'B';
+      multiFactorConfluence.compositeScore = canonSig.probability;
+      patternRecognition.activeGrade = canonSig.grade === 'A+' ? 'A+' : 'A';
+    }
+
+    const bpDir = finalBias === 'BEARISH' ? 'SELL' : 'BUY';
+    const bpInv = validateDirectionalInvariants({
+      symbol,
+      direction: bpDir,
+      entry: canonSig && canonSig.symbol === symbol && canonSig.entry > 0 ? canonSig.entry : executionBlueprint.recommendedEntry,
+      stopLoss: canonSig && canonSig.symbol === symbol && canonSig.stopLoss > 0 ? canonSig.stopLoss : executionBlueprint.hardStopLoss,
+      takeProfit: canonSig && canonSig.symbol === symbol && canonSig.takeProfit > 0 ? canonSig.takeProfit : executionBlueprint.takeProfit1,
+      atr,
+    });
+    executionBlueprint.recommendedEntry = bpInv.entry;
+    executionBlueprint.hardStopLoss = bpInv.stopLoss;
+    executionBlueprint.takeProfit1 = bpInv.takeProfit;
+    executionBlueprint.riskRewardRatio = bpInv.rrRatio;
+    if (canonSig && canonSig.symbol === symbol && canonSig.lotSize > 0) {
+      executionBlueprint.recommendedLotSize = canonSig.lotSize;
+    }
+
     return {
       symbol,
       timeframe,
@@ -230,7 +259,7 @@ export class VisionAtlasLabEngine {
       multiFactorConfluence,
       telemetry: {
         currentPrice: livePrice,
-        directionalBias,
+        directionalBias: finalBias,
         trendStrengthPercent,
         smcStructure,
         rsiMomentum: Number(rsi.toFixed(1)),

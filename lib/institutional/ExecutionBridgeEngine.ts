@@ -8,7 +8,7 @@ import type {
   SmartRouterVenueSplit,
   VwapSliceBucket,
 } from './types';
-import { resolveInstitutionalAssetContext, seededRange } from './helpers';
+import { classifyInstitutionalAsset, resolveInstitutionalAssetContext, seededRange } from './helpers';
 
 const DEFAULT_CBOT_CODE = `using cAlgo.API;
 using cAlgo.API.Indicators;
@@ -64,7 +64,15 @@ export class ExecutionBridgeEngine {
   }
 
   public buildLevel2Book(symbol: string, spotPrice: number, tickStep: number, decimals: number): Level2BookLevel[] {
-    const venues = ['LMAX LD4', 'CURRENEX NY4', 'EBS DIRECT', 'CBOE FX', 'IEX DARK', 'NASDAQ ITCH', 'MT5 ECN', 'PRIME SWEEP'];
+    const assetClass = classifyInstitutionalAsset(symbol);
+    const venues =
+      assetClass === 'US_EQUITY'
+        ? ['IEX DARK', 'NASDAQ ITCH', 'ARCA BOOK', 'BATS BZX', 'EDGX', 'MEMX LIT', 'MIDPOINT PEG', 'UBS ATS']
+        : assetClass === 'INDIAN_EQUITY_INDEX'
+          ? ['NSE CM L2', 'NSE F&O', 'BSE DIRECT', 'GIFT NIFTY', 'ICCL CLEAR', 'NSE CO-LOC', 'ZERODHA DMA', 'KOTAK INST']
+          : assetClass === 'CRYPTO'
+            ? ['COINBASE L3', 'LMAX DIGITAL', 'CME MICRO', 'BINANCE INST', 'KRAKEN PRO', 'OKX PRIME', 'DERIBIT', 'FIREBLOCKS']
+            : ['LMAX LD4', 'CURRENEX NY4', 'EBS DIRECT', 'CBOE FX', 'MT5 ECN', 'HOTSPOT FX', '360T PRIME', 'PRIME SWEEP'];
     const levels: Level2BookLevel[] = [];
     let cumBid = 0;
     let cumAsk = 0;

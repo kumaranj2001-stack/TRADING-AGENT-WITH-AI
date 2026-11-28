@@ -33,6 +33,8 @@ export class MarketSessionManager {
     const utcTimeInMinutes = utcHour * 60 + utcMinute;
 
     // IST time calculation (UTC + 5 hours 30 mins)
+    const istOffsetMs = 330 * 60 * 1000;
+    const istTime = new Date(targetDate.getTime() + istOffsetMs);
     const istTotalMinutes = utcTimeInMinutes + 330;
     const istDay = (utcDay + Math.floor(istTotalMinutes / 1440)) % 7;
     const istHour = Math.floor((istTotalMinutes / 60) % 24);
@@ -108,20 +110,21 @@ export class MarketSessionManager {
         sessionName = 'NSE INDIA WEEKEND FREEZE';
         reason = 'National Stock Exchange of India (NSE) is closed for the weekend. State is frozen.';
         
-        // Next open: Next Monday at 09:15 IST
+        // Next open: Next Monday at 09:15 IST (03:45 UTC) computed strictly in IST shifted calendar
+        const istRef = new Date(istTime.getTime());
         const daysUntilMonday = (8 - istDay) % 7 || 7;
-        nextOpenDate = new Date(targetDate);
-        nextOpenDate.setUTCDate(nextOpenDate.getUTCDate() + (daysUntilMonday === 0 ? 1 : daysUntilMonday));
-        // 09:15 IST is 03:45 UTC
-        nextOpenDate.setUTCHours(3, 45, 0, 0);
+        istRef.setUTCDate(istRef.getUTCDate() + daysUntilMonday);
+        istRef.setUTCHours(9, 15, 0, 0);
+        nextOpenDate = new Date(istRef.getTime() - istOffsetMs);
       } else if (istTimeInMinutes < nseOpenMinutes) {
         isOpen = false;
         status = 'CLOSED_AFTER_HOURS';
         statusLabel = 'NSE PRE-MARKET';
         sessionName = 'NSE PRE-OPEN FREEZE';
         reason = 'NSE market opens at 09:15 IST (03:45 UTC). State is frozen until open bell.';
-        nextOpenDate = new Date(targetDate);
-        nextOpenDate.setUTCHours(3, 45, 0, 0);
+        const istRef = new Date(istTime.getTime());
+        istRef.setUTCHours(9, 15, 0, 0);
+        nextOpenDate = new Date(istRef.getTime() - istOffsetMs);
       } else if (istTimeInMinutes > nseCloseMinutes) {
         isOpen = false;
         status = 'CLOSED_AFTER_HOURS';
@@ -132,9 +135,10 @@ export class MarketSessionManager {
         // Next open: Tuesday-Friday 09:15 IST, or Monday if Friday
         const isFriday = istDay === 5;
         const addDays = isFriday ? 3 : 1;
-        nextOpenDate = new Date(targetDate);
-        nextOpenDate.setUTCDate(nextOpenDate.getUTCDate() + addDays);
-        nextOpenDate.setUTCHours(3, 45, 0, 0);
+        const istRef = new Date(istTime.getTime());
+        istRef.setUTCDate(istRef.getUTCDate() + addDays);
+        istRef.setUTCHours(9, 15, 0, 0);
+        nextOpenDate = new Date(istRef.getTime() - istOffsetMs);
       } else {
         isOpen = true;
         status = 'OPEN';

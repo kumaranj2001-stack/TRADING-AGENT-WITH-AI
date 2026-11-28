@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { CurrencyPair, OrderFlowAnalysisReport, FootprintPriceLevel } from '@/lib/types';
-import { BASE_PRICES } from '@/lib/marketData';
+import { BASE_PRICES, formatInstrumentPrice } from '@/lib/marketData';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
+import { MarketSessionManager } from '@/lib/marketSessionManager';
 import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
 import { 
   Activity, 
@@ -69,26 +70,36 @@ export const OrderFlowDesk: React.FC<OrderFlowDeskProps> = ({
   const [liveBuyingPct, setLiveBuyingPct] = useState<number>(62.4);
 
   const eventSourceRef = useRef<EventSource | null>(null);
+  const symbolRef = useRef<CurrencyPair>(initialPair);
 
-  // Synchronize pair if prop changes
+  // Synchronize pair if prop changes and immediately purge prior-symbol telemetry
+  useEffect(() => {
+    symbolRef.current = symbol;
+  }, [symbol]);
+
   useEffect(() => {
     if (initialPair && initialPair !== symbol) {
+      symbolRef.current = initialPair;
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
       setSymbol(initialPair);
-      setReport(null); // Purge stale report immediately to prevent displaying legacy depth walls
+      setReport(null);
       setIsLoading(true);
-      const base = BASE_PRICES[initialPair] || 1.0;
-      setLiveBid(base);
-      setLiveAsk(base + (initialPair.includes('XAU') ? 0.25 : initialPair === 'COPPER' ? 0.002 : 0.0002));
+      const quote = LiveMarketFeedManager.getCanonicalBidAsk(initialPair);
+      setLiveBid(quote.bid);
+      setLiveAsk(quote.ask);
     }
-  }, [initialPair]);
+  }, [initialPair, symbol]);
 
-  // Fetch initial REST snapshot
+  // Fetch initial REST snapshot with strict symbol match guard
   const fetchSnapshot = async (targetSymbol: CurrencyPair) => {
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/order-flow?symbol=${encodeURIComponent(targetSymbol)}`);
+      const res = await fetch(`/api/order-flow?symbol=${encodeURIComponent(targetSymbol)}`, { cache: 'no-store' });
       const json = await res.json();
-      if (json.success && json.data) {
+      if (json.success && json.data && symbolRef.current === targetSymbol) {
         setReport(json.data);
         setLiveBid(json.data.liveWebSocketTelemetry.bidPrice);
         setLiveAsk(json.data.liveWebSocketTelemetry.askPrice);
@@ -110,31 +121,44 @@ export const OrderFlowDesk: React.FC<OrderFlowDeskProps> = ({
       eventSourceRef.current.close();
     }
 
+    symbolRef.current = symbol;
+    if (MarketSessionManager.isMarketFrozen(symbol)) {
+      setIsStreaming(false);
+    }
+
     try {
       const sse = new EventSource(`/api/order-flow/stream?symbol=${encodeURIComponent(symbol)}`);
       eventSourceRef.current = sse;
 
       sse.onopen = () => {
-        setIsStreaming(true);
+        setIsStreaming(!MarketSessionManager.isMarketFrozen(symbolRef.current));
       };
 
       sse.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          const msgSymbol = data.symbol || data.payload?.symbol;
+          if (msgSymbol && msgSymbol !== symbolRef.current) return;
+
           if (data.type === 'ORDER_FLOW_SNAPSHOT' && data.payload) {
             setReport(data.payload);
             setLiveBid(data.payload.liveWebSocketTelemetry.bidPrice);
             setLiveAsk(data.payload.liveWebSocketTelemetry.askPrice);
             setLiveCvd(data.payload.volumeProfile.cumulativeVolumeDelta);
             setLiveBuyingPct(data.payload.volumeProfile.buyingPressurePercent);
+            if (data.isFrozen) setIsStreaming(false);
           } else if (data.type === 'ORDER_FLOW_TICK') {
+            if (data.isFrozen || MarketSessionManager.isMarketFrozen(symbolRef.current)) {
+              setIsStreaming(false);
+              return;
+            }
             setLiveTicksCount(prev => prev + 1);
             setLiveBid(data.bid);
             setLiveAsk(data.ask);
             setLiveCvd(data.cumulativeVolumeDelta);
             setLiveBuyingPct(data.buyingPressurePercent);
           }
-        } catch (e) {
+        } catch {
           // ignore parsing error
         }
       };
@@ -247,11 +271,13 @@ export const OrderFlowDesk: React.FC<OrderFlowDeskProps> = ({
         <div className="p-3 rounded-xl bg-terminal-900 border border-terminal-border">
           <span className="text-[10px] text-slate-400 block uppercase font-semibold">Live Bid / Ask</span>
           <div className="flex items-baseline gap-1.5 mt-0.5">
-            <span className="text-base font-bold text-white">${liveBid.toFixed(symbol.includes('XAU') ? 2 : 4)}</span>
+            <span className="text-base font-bold text-white">{formatInstrumentPrice(symbol, liveBid)}</span>
             <span className="text-slate-500 text-xs">/</span>
-            <span className="text-sm font-semibold text-slate-300">${liveAsk.toFixed(symbol.includes('XAU') ? 2 : 4)}</span>
+            <span className="text-sm font-semibold text-slate-300">{formatInstrumentPrice(symbol, liveAsk)}</span>
           </div>
-          <span className="text-[9px] text-slate-500 block">Spread: ${(liveAsk - liveBid).toFixed(4)}</span>
+          <span className="text-[9px] text-slate-500 block">
+            Spread: {Math.max(0, liveAsk - liveBid).toFixed(symbol.includes('JPY') || symbol.includes('XAG') ? 3 : symbol.includes('XAU') || symbol.includes('NIFTY') || symbol.includes('BTC') ? 2 : 5)}
+          </span>
         </div>
 
         <div className="p-3 rounded-xl bg-terminal-900 border border-terminal-border">

@@ -3,7 +3,8 @@ import {
   CurrencyPair, 
   SwarmConsensusResult, 
   TimeFrame, 
-  AgentDebateMessage, 
+  AgentDebateMessage,
+  CanonicalSignalObject,
   MarketScannerOpportunity, 
   MarketSegment, 
   UnifiedDecision,
@@ -43,6 +44,11 @@ import { institutionalBrokerBridge } from '../execution/InstitutionalBrokerBridg
 import { activeTradeLifecycleManager } from '../execution/ActiveTradeLifecycleManager';
 import { continuousFineTuningPipeline } from '../memory/ContinuousFineTuningPipeline';
 import { LiveMarketFeedManager } from '../liveMarketFeed';
+import {
+  canonicalMarketStore,
+  getCanonicalExchangeForSymbol,
+  validateDirectionalInvariants,
+} from '../canonicalMarketStore';
 import { liveMarketAnchorConstraintEngine } from '../liveMarketAnchorConstraintEngine';
 
 export class SwarmCoordinator {
@@ -515,10 +521,73 @@ export class SwarmCoordinator {
     if (buySideChannelWeight < 12) { buySideChannelWeight = 12.0; sellSideChannelWeight = 88.0; }
     if (buySideChannelWeight > 88) { buySideChannelWeight = 88.0; sellSideChannelWeight = 12.0; }
 
-    // Fail-safe pauses against stale data: if stream latency exceeds threshold (>1500ms or disconnected)
-    const failSafePauseActive = streamLatencyMs > 1500;
+    // Fail-safe pauses against stale data or circuit breaker: if stream latency exceeds threshold (>1500ms) or breaker tripped
+    const breakerState = canonicalMarketStore.getCircuitBreakerState(pair);
+    const failSafePauseActive = streamLatencyMs > 1500 || breakerState.tripped;
 
-    const dynamicPositionLots = risk.parameters.positionSizeLots > 0 ? risk.parameters.positionSizeLots : tierParams.defaultLots;
+    // Strict Multi-Agent Directional Gate BEFORE Signal Emission:
+    // 1. Block on circuit breaker
+    // 2. Never emit BUY when MTF 1m-1h is unanimously BEARISH, bearish candlestick pattern dominates, or Sell Channel > 55%
+    // 3. Symmetrically block SELL when MTF 1m-1h is unanimously BULLISH, bullish candlestick pattern dominates, or Buy Channel > 55%
+    const mtfCheck = macroTelemetryBridge.evaluateMultiTimeframeMomentum(pair, marketCandles);
+    const mtfUnanimousBearish =
+      mtfCheck.m1 === 'BEARISH' &&
+      mtfCheck.m5 === 'BEARISH' &&
+      mtfCheck.m15 === 'BEARISH' &&
+      mtfCheck.h1 === 'BEARISH';
+    const mtfUnanimousBullish =
+      mtfCheck.m1 === 'BULLISH' &&
+      mtfCheck.m5 === 'BULLISH' &&
+      mtfCheck.m15 === 'BULLISH' &&
+      mtfCheck.h1 === 'BULLISH';
+
+    const bearishCandlePattern =
+      !candlestick.rejectionStatus.isRejectedNoise &&
+      (/SHOOTING_STAR|BEARISH_ENGULFING|EVENING_STAR|HANGING_MAN|GRAVESTONE/i.test(candlestick.detectedPattern) ||
+        candlestick.bias.includes('SELL'));
+    const bullishCandlePattern =
+      !candlestick.rejectionStatus.isRejectedNoise &&
+      (/HAMMER|BULLISH_ENGULFING|MORNING_STAR|DRAGONFLY/i.test(candlestick.detectedPattern) ||
+        candlestick.bias.includes('BUY'));
+
+    let gateInvalidationReason: string | undefined = breakerState.tripped ? breakerState.reason : undefined;
+
+    if (breakerState.tripped || streamLatencyMs > 1500) {
+      activeDirection = 'HOLD';
+      overallConfidence = Math.min(overallConfidence, 40);
+      gateInvalidationReason =
+        gateInvalidationReason || `CIRCUIT_BREAKER_LATENCY: Stream latency ${streamLatencyMs}ms > 1500ms`;
+    } else if (
+      activeDirection === 'BUY' &&
+      (mtfUnanimousBearish || bearishCandlePattern || sellSideChannelWeight > 55.0)
+    ) {
+      if (techIsSell && fundIsSell && candlestick.bias.includes('SELL')) {
+        activeDirection = 'SELL';
+        gateInvalidationReason = undefined;
+      } else {
+        activeDirection = 'HOLD';
+        overallConfidence = Math.min(overallConfidence, 54);
+        gateInvalidationReason = `DIRECTIONAL_VETO_BUY: Blocked by ${mtfUnanimousBearish ? 'unanimous 1m-1h BEARISH MTF' : bearishCandlePattern ? `bearish pattern (${candlestick.detectedPattern})` : `Sell Channel dominance (${sellSideChannelWeight}%)`}`;
+      }
+    } else if (
+      activeDirection === 'SELL' &&
+      (mtfUnanimousBullish || bullishCandlePattern || buySideChannelWeight > 55.0)
+    ) {
+      if (techIsBuy && fundIsBuy && candlestick.bias.includes('BUY')) {
+        activeDirection = 'BUY';
+        gateInvalidationReason = undefined;
+      } else {
+        activeDirection = 'HOLD';
+        overallConfidence = Math.min(overallConfidence, 54);
+        gateInvalidationReason = `DIRECTIONAL_VETO_SELL: Blocked by ${mtfUnanimousBullish ? 'unanimous 1m-1h BULLISH MTF' : bullishCandlePattern ? `bullish pattern (${candlestick.detectedPattern})` : `Buy Channel dominance (${buySideChannelWeight}%)`}`;
+      }
+    }
+
+    const dynamicPositionLots = activeDirection === 'HOLD'
+      ? 0
+      : risk.parameters.positionSizeLots > 0
+      ? risk.parameters.positionSizeLots
+      : tierParams.defaultLots;
 
     const unifiedDecision: UnifiedDecision = {
       direction: activeDirection,
@@ -838,11 +907,34 @@ export class SwarmCoordinator {
       streamLatencyMs,
     };
 
+    // Enforce hard invariant ordering BEFORE building & publishing immutable CanonicalSignalObject
+    const finalEmittedDirection: 'BUY' | 'SELL' | 'HOLD' = hardGateBlocked ? 'HOLD' : activeDirection;
+    if (hardGateBlocked) {
+      activeDirection = 'HOLD';
+      unifiedDecision.direction = 'HOLD';
+      if (gateInvalidationReason || breakerState.reason) {
+        unifiedDecision.recommendedAction = `HALTED / NO TRADE on ${pair} (${gateInvalidationReason || breakerState.reason})`;
+      }
+    }
+
+    const invValidated = validateDirectionalInvariants({
+      symbol: pair,
+      direction: finalEmittedDirection,
+      entry: calculatedEntry,
+      stopLoss: finalStopLoss,
+      takeProfit: finalTakeProfit,
+      atr: technical.indicators?.atr,
+    });
+
+    calculatedEntry = invValidated.entry;
+    finalStopLoss = invValidated.stopLoss;
+    finalTakeProfit = invValidated.takeProfit;
+    finalRiskReward = finalEmittedDirection === 'HOLD' ? 0 : invValidated.rrRatio;
+
     // Reconcile Unified High-Conviction Setup strictly with final direction & constrained SL/TP
-    const finalDirectionForSetup: 'BUY' | 'SELL' | 'HOLD' =
-      hardGateBlocked ? 'HOLD' : activeDirection;
-    const stopDistPips = Number((Math.abs(calculatedEntry - finalStopLoss) / pipMultiplier).toFixed(1));
-    const targetDistPips = Number((Math.abs(finalTakeProfit - calculatedEntry) / pipMultiplier).toFixed(1));
+    const finalDirectionForSetup: 'BUY' | 'SELL' | 'HOLD' = finalEmittedDirection;
+    const stopDistPips = finalEmittedDirection === 'HOLD' ? 0 : Number((Math.abs(calculatedEntry - finalStopLoss) / pipMultiplier).toFixed(1));
+    const targetDistPips = finalEmittedDirection === 'HOLD' ? 0 : Number((Math.abs(finalTakeProfit - calculatedEntry) / pipMultiplier).toFixed(1));
     const alignedUnifiedSetup = exhaustiveCorpus.unifiedProfitableSetup
       ? {
           ...exhaustiveCorpus.unifiedProfitableSetup,
@@ -850,9 +942,9 @@ export class SwarmCoordinator {
           entryPrice: calculatedEntry,
           singleHighConfidenceTarget: finalTakeProfit,
           anchoredStopLoss: finalStopLoss,
-          stopDistancePips: stopDistPips || exhaustiveCorpus.unifiedProfitableSetup.stopDistancePips,
-          targetDistancePips: targetDistPips || exhaustiveCorpus.unifiedProfitableSetup.targetDistancePips,
-          riskRewardRatio: existingLatched?.anchoredRiskReward || finalRiskReward,
+          stopDistancePips: stopDistPips,
+          targetDistancePips: targetDistPips,
+          riskRewardRatio: finalRiskReward,
           proportionalLotSize: finalLots,
           structuralInvalidation: {
             ...exhaustiveCorpus.unifiedProfitableSetup.structuralInvalidation,
@@ -864,13 +956,32 @@ export class SwarmCoordinator {
         }
       : undefined;
 
+    const publishedCanonicalSignal: CanonicalSignalObject = canonicalMarketStore.publishSignal({
+      id: `sig-${pair.replace(/[^A-Z0-9]/gi, '')}-${timeframe}-${Date.now()}`,
+      symbol: pair,
+      exchange: getCanonicalExchangeForSymbol(pair),
+      timeframe,
+      timestamp: Date.now(),
+      direction: finalEmittedDirection,
+      grade: confluenceGrade,
+      probability: overallConfidence,
+      entry: calculatedEntry,
+      stopLoss: finalStopLoss,
+      takeProfit: finalTakeProfit,
+      rrRatio: finalRiskReward,
+      lotSize: finalLots,
+      agreementRatio: chiefReviewerAudit.agreementRatio || `${chiefReviewerAudit.agreeCount}/8`,
+      invalidationReason: gateInvalidationReason || (hardGateBlocked ? chiefReviewerAudit.contradictionResolution.explanation : undefined),
+      haltedByCircuitBreaker: breakerState.tripped || streamLatencyMs > 1500,
+    });
+
     const consensusResult: SwarmConsensusResult = {
       pair,
       marketSegment,
       timeframe,
       currentPrice,
       timestamp: new Date().toISOString(),
-      consensusDirection: activeDirection,
+      consensusDirection: finalEmittedDirection,
       overallConfidence,
       confluenceGrade,
       unifiedDecision,
@@ -902,6 +1013,7 @@ export class SwarmCoordinator {
       multiTierScreening: exhaustiveCorpus.multiTierScreening,
       unifiedProfitableSetup: alignedUnifiedSetup,
       preTradeValidationGate: exhaustiveCorpus.preTradeValidationGate,
+      canonicalSignal: publishedCanonicalSignal,
       buySideChannelWeight,
       sellSideChannelWeight,
       streamLatencyMs,
@@ -933,14 +1045,14 @@ export class SwarmCoordinator {
         entry: calculatedEntry,
         stopLoss: finalStopLoss,
         takeProfit: finalTakeProfit,
-        riskReward: existingLatched?.anchoredRiskReward || finalRiskReward,
-        riskAmountUsd: finalMaxRisk,
+        riskReward: finalRiskReward,
+        riskAmountUsd: hardGateBlocked ? 0 : finalMaxRisk,
         status: executionStatus,
         gradingTier: confluenceGrade,
         tierDescription: failSafePauseActive
-          ? `FAIL-SAFE PAUSE ACTIVE: WebSocket/SSE stream latency (${streamLatencyMs}ms) exceeded 1500ms safety threshold.`
+          ? `FAIL-SAFE / CIRCUIT BREAKER PAUSE: ${gateInvalidationReason || `Latency ${streamLatencyMs}ms > 1500ms`}.`
           : !executionAuthorized
-          ? `TRADE VETOED: Hard risk governance or 68% minimum confidence threshold not satisfied.`
+          ? `TRADE VETOED: ${gateInvalidationReason || 'Hard risk governance or 5/8 consensus gate not satisfied.'}`
           : tierParams.executionPolicy,
       },
       autonomousLoopTelemetry: {
@@ -949,17 +1061,21 @@ export class SwarmCoordinator {
         latencyMs: streamLatencyMs,
         activeDesksCount: 8,
         autonomousCadenceSeconds: 1.5,
-        executionReadiness: !failSafePauseActive,
+        executionReadiness: !failSafePauseActive && executionAuthorized,
         isAutonomousLooping: true,
       },
     };
 
-    // Attach or initialize the deterministic latched state
-    const finalLatched = (isStateLatched && existingLatched) 
-      ? existingLatched 
-      : stateLatchingEngine.latchConsensus(pair, consensusResult, marketCandles, 20);
+    // Only latch actionable validated setups; release latch immediately if vetoed/HOLD
+    if (hardGateBlocked || finalEmittedDirection === 'HOLD') {
+      stateLatchingEngine.purgeLatch(pair);
+    } else {
+      const finalLatched = (isStateLatched && existingLatched) 
+        ? existingLatched 
+        : stateLatchingEngine.latchConsensus(pair, consensusResult, marketCandles, 20);
+      consensusResult.latchedState = finalLatched;
+    }
 
-    consensusResult.latchedState = finalLatched;
     return consensusResult;
   }
 
@@ -989,19 +1105,20 @@ export class SwarmCoordinator {
       else if (result.confluenceGrade === 'E' || result.confluenceGrade === 'F') status = 'DYNAMIC_CONSERVATIVE';
       else if (result.overallConfidence < 30) status = 'AVOID_NO_EDGE';
 
+      const sig = result.canonicalSignal;
       opportunities.push({
         pair,
         segment: result.marketSegment,
         price: result.currentPrice,
-        bias: result.consensusDirection === 'SELL' ? 'SELL' : result.consensusDirection === 'BUY' ? 'BUY' : 'NEUTRAL',
+        bias: (sig?.direction ?? result.consensusDirection) === 'SELL' ? 'SELL' : (sig?.direction ?? result.consensusDirection) === 'BUY' ? 'BUY' : 'NEUTRAL',
         technicalScore: tech.confidenceScore,
         fundamentalScore: fund.confidenceScore,
         forexScore: fx.confidenceScore,
         newsScore: result.agents.news.confidenceScore,
         riskVerdict: risk.verdict,
-        grade: result.confluenceGrade,
-        potentialLots: risk.parameters.positionSizeLots,
-        riskReward: risk.parameters.riskRewardRatio,
+        grade: sig?.grade ?? result.confluenceGrade,
+        potentialLots: sig?.lotSize ?? result.executionSignal.lots,
+        riskReward: sig?.rrRatio ?? result.executionSignal.riskReward,
         status,
       });
     }
@@ -1241,7 +1358,7 @@ export class SwarmCoordinator {
       citedRuleName: techSupportRule.ruleName,
       strategyCategory: 'TECHNICAL',
       winRate: techSupportRule.expectedWinRate,
-      side: dominantSide,
+      side: tech.bias.includes('BUY') ? 'BUY' : tech.bias.includes('SELL') ? 'SELL' : dominantSide,
     });
 
     messages.push({
@@ -1261,7 +1378,7 @@ export class SwarmCoordinator {
       citedRuleName: fundSupportRule.ruleName,
       strategyCategory: 'FUNDAMENTAL',
       winRate: fundSupportRule.expectedWinRate,
-      side: dominantSide,
+      side: fund.bias.includes('BUY') ? 'BUY' : fund.bias.includes('SELL') ? 'SELL' : dominantSide,
     });
 
     messages.push({
@@ -1270,21 +1387,21 @@ export class SwarmCoordinator {
       role: 'news_analyst',
       agentName: news.agentName,
       avatarColor: 'text-sky-400 bg-sky-950/60 border-sky-800',
-      content: `Real-time scraping across 38 monitored financial outlets and central bank wires (Bloomberg, Reuters, Kitco, Fed, LBMA, WSJ, CNBC, FT) indicates a ${news.marketMood.replace('_', ' ')} posture with sentiment score of ${news.sentimentScore > 0 ? '+' : ''}${news.sentimentScore}. Top wire catalyst: "${news.topCatalysts[0] || 'Broad institutional order flow'}". Breaking speed-wire synthesis confirms high alignment with the ${dominantSide} channel.`,
+      content: `Real-time scraping across 38 monitored financial outlets and central bank wires (Bloomberg, Reuters, Kitco, Fed, LBMA, WSJ, CNBC, FT) indicates a ${news.marketMood.replace('_', ' ')} posture with sentiment score of ${news.sentimentScore > 0 ? '+' : ''}${news.sentimentScore}. Top wire catalyst: "${news.topCatalysts[0] || 'Broad institutional order flow'}". Breaking speed-wire synthesis registers ${news.bias} conviction.`,
       sentiment: news.bias.includes('BUY') ? 'BULLISH' : news.bias.includes('SELL') ? 'BEARISH' : 'NEUTRAL',
       timestamp: '00:05s',
       citedRuleId: 'NEWS-WIRE-038',
       citedRuleName: '38-Outlet Speed-Wire Real-Time Confluence Protocol',
       strategyCategory: 'NEWS',
       winRate: 76.8,
-      side: dominantSide,
+      side: news.bias.includes('BUY') ? 'BUY' : news.bias.includes('SELL') ? 'SELL' : dominantSide,
     });
 
     messages.push({
       id: 'deb-4',
       round: 1,
       role: 'forex_analyst',
-      agentName: 'Kenji Sato (Forex & Intermarket Order Flow)',
+      agentName: 'Mateo Silva (Forex & Intermarket Order Flow)',
       avatarColor: 'text-amber-400 bg-amber-950/60 border-amber-800',
       content: isIndian
         ? `Rupee cross-currency dynamics: USD/INR trades in tight consolidation with RBI smoothing interventions. DXY is in a ${fx.dxyTrend} stance. Active session (${fx.activeTradingSession.session}) offers ${fx.activeTradingSession.liquidityRating} liquidity.`
@@ -1297,7 +1414,7 @@ export class SwarmCoordinator {
       citedRuleName: 'Active Session Liquidity & Currency Strength Index Alignment',
       strategyCategory: 'FOREX',
       winRate: 75.3,
-      side: dominantSide,
+      side: fx.bias.includes('BUY') ? 'BUY' : fx.bias.includes('SELL') ? 'SELL' : dominantSide,
     });
 
     // 5th Dedicated Specialist: Kaelen Voss (Order Flow & Institutional Liquidity)
@@ -1544,7 +1661,7 @@ export class SwarmCoordinator {
 • Dialectical Pressure: Buy Channel ${buySideChannelWeight}% | Sell Channel ${sellSideChannelWeight}%
 • Risk-Adjusted Sizing: ${debatedPositionSize} Standard Lots (reduced from ${baselinePositionSize} lots, R:R ${debatedRiskReward}:1)
 • Zero-Loss Protocol: 1:1 Breakeven Ratchet ARMED. Stop Loss positioned ${dominantSide === 'SELL' ? 'ABOVE' : 'BELOW'} entry; Target positioned ${dominantSide === 'SELL' ? 'BELOW' : 'ABOVE'} entry.`
-        : `CHIEF RISK OFFICER BINDING VERDICT: 24/7 AUTONOMOUS MONITORING ACTIVE. Unlimited Profit Potential Authorized (Uncapped Runner Mode) with Zero-Loss Exposure Protocol across all 7 specialist desks:
+        : `CHIEF RISK OFFICER BINDING VERDICT: 24/7 AUTONOMOUS MONITORING ACTIVE. Unlimited Profit Potential Authorized (Uncapped Runner Mode) with Zero-Loss Exposure Protocol across all 8 specialist agents:
 • Definitive Bias: ${dominantSide} (${confluenceGrade} Grade, ${debatedConfidence}% Confidence)
 • Dialectical Pressure: Buy Channel ${buySideChannelWeight}% | Sell Channel ${sellSideChannelWeight}%
 • Zero-Loss Protocol: Automated 1:1 Breakeven Ratchet ARMED. Stop automatically ratchets to entry + 1 pip spread buffer at 1:1 R:R distance, completely eliminating downside risk while letting profits run uncapped

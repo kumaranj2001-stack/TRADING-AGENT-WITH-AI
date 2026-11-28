@@ -11,6 +11,7 @@ import {
 } from './types';
 import { BASE_PRICES, FOREX_PAIRS, METALS_COMMODITIES, INDIAN_MARKET_ASSETS, PIP_VALUES } from './marketData';
 import { LiveMarketFeedManager } from './liveMarketFeed';
+import { canonicalMarketStore, validateDirectionalInvariants } from './canonicalMarketStore';
 import { ssotPriceSyncEngine } from './ssotPriceSyncEngine';
 import { liveMarketAnchorConstraintEngine } from './liveMarketAnchorConstraintEngine';
 
@@ -266,17 +267,25 @@ export class ScalpingEngine {
       const decimals = isJpy ? 3 : (isGold || isIndian) ? 2 : 5;
       const pipMultiplier = isJpy ? 0.01 : (isGold || isIndian) ? 0.1 : 0.0001;
 
-      // Realistic micro spreads
-      const spread = isGold ? 0.18 : isJpy ? 0.8 : isIndian ? 1.5 : 0.7;
-      const maxPermissibleSpread = isGold ? 0.35 : isJpy ? 1.4 : isIndian ? 2.5 : 1.5;
-      const spreadPassed = spread <= maxPermissibleSpread;
+      // Real canonical Bid/Ask spread computed directly from Canonical/LiveFeed quote
+      const quote = LiveMarketFeedManager.getCanonicalBidAsk(pair);
+      const spread = quote.spreadPips;
+      const maxPermissibleSpread = isGold ? 2.5 : isJpy ? 1.8 : isIndian ? 3.0 : pair.includes('BTC') || pair.includes('ETH') ? 4.0 : 1.5;
+      const spreadPassed = spread > 0 ? spread <= maxPermissibleSpread : true;
 
-      // Direction: if active pair has consensus direction, use it; otherwise alternate
-      let direction: 'BUY' | 'SELL' = (params?.activePair === pair && params?.consensusDirection)
+      // Align with authoritative CanonicalSignalObject when published, preserving BUY/SELL directional invariants
+      const canonSig = canonicalMarketStore.getSignal(pair, '1h');
+      const hasActionableCanon = Boolean(canonSig && canonSig.symbol === pair && canonSig.direction !== 'HOLD');
+
+      let direction: 'BUY' | 'SELL' = hasActionableCanon && canonSig
+        ? (canonSig.direction as 'BUY' | 'SELL')
+        : (params?.activePair === pair && params?.consensusDirection)
         ? params.consensusDirection
         : (isGold ? 'SELL' : (index % 2 === 0 ? 'BUY' : 'SELL'));
 
-      const grade: 'A+' | 'A' | 'B' = index === 0 ? 'A+' : index === 1 ? 'A' : index % 3 === 0 ? 'A' : 'B';
+      const grade: 'A+' | 'A' | 'B' = hasActionableCanon && canonSig
+        ? (canonSig.grade === 'A+' ? 'A+' : canonSig.grade === 'A' ? 'A' : 'B')
+        : index === 0 ? 'A+' : index === 1 ? 'A' : index % 3 === 0 ? 'A' : 'B';
 
       // Calibrate scalp setup with strict micro-variance (0.5 - 2.2 pips from live spot)
       const calibrated = liveMarketAnchorConstraintEngine.calibrateScalpSetup({
@@ -286,11 +295,19 @@ export class ScalpingEngine {
         subIndex: index,
       });
 
-      const entryPrice = calibrated.entryPrice;
-      const takeProfit = calibrated.takeProfit;
-      const stopLoss = calibrated.stopLoss;
+      const inv = validateDirectionalInvariants({
+        symbol: pair,
+        direction,
+        entry: calibrated.entryPrice,
+        stopLoss: calibrated.stopLoss,
+        takeProfit: calibrated.takeProfit,
+      });
+
+      const entryPrice = inv.entry;
+      const takeProfit = inv.takeProfit;
+      const stopLoss = inv.stopLoss;
       const distancePips = calibrated.distancePips;
-      const riskRewardRatio = calibrated.riskRewardRatio;
+      const riskRewardRatio = inv.rrRatio;
       const tpPips = calibrated.tpPips;
       const slPips = calibrated.slPips;
 

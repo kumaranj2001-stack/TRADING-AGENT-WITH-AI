@@ -45,7 +45,8 @@ import {
   TieredSourceCategory
 } from '@/lib/types';
 import { HIGH_IMPACT_MACRO_CATALYSTS, macroIntelligenceEngine } from '@/lib/macroIntelligenceEngine';
-import { BASE_PRICES } from '@/lib/marketData';
+import { BASE_PRICES, formatInstrumentPrice } from '@/lib/marketData';
+import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
 import { dynamicTieredSourceDirectory } from '@/lib/dynamicTieredSourceDirectory';
 import { macroTelemetryBridge } from '@/lib/macroTelemetryBridge';
 
@@ -332,13 +333,27 @@ export const MacroIntelligenceDesk: React.FC<MacroIntelligenceDeskProps> = ({
           </div>
 
           <div className="flex items-center gap-2 text-[10px] flex-wrap">
-            <span>Terminal Asset: <strong className="text-white">{selectedPair}</strong></span>
-            <span>•</span>
-            <span>Live Price: <strong className="text-cyan-400">${(BASE_PRICES as any)[selectedPair] || activeReport?.orderFlowStructure.currentPrice || '2,734.50'}</strong></span>
-            <span>•</span>
-            <span>Support: <strong className="text-rose-400">${activeReport?.trendGate?.supportPrice.toFixed(2) || '2,709.50'}</strong></span>
-            <span>•</span>
-            <span>Resistance: <strong className="text-emerald-400">${activeReport?.trendGate?.resistancePrice.toFixed(2) || '2,759.50'}</strong></span>
+            {(() => {
+              const reportForPair = activeReport && activeReport.selectedPair === selectedPair ? activeReport : null;
+              const liveSpot =
+                reportForPair?.orderFlowStructure.currentPrice ||
+                LiveMarketFeedManager.getCanonicalPrice(selectedPair) ||
+                (BASE_PRICES as Record<string, number>)[selectedPair] ||
+                2734.5;
+              const sup = reportForPair?.trendGate?.supportPrice ?? liveSpot * 0.996;
+              const res = reportForPair?.trendGate?.resistancePrice ?? liveSpot * 1.004;
+              return (
+                <>
+                  <span>Terminal Asset: <strong className="text-white">{selectedPair}</strong></span>
+                  <span>•</span>
+                  <span>Live Price: <strong className="text-cyan-400">{formatInstrumentPrice(selectedPair, liveSpot)}</strong></span>
+                  <span>•</span>
+                  <span>Support: <strong className="text-emerald-400">{formatInstrumentPrice(selectedPair, sup)}</strong></span>
+                  <span>•</span>
+                  <span>Resistance: <strong className="text-rose-400">{formatInstrumentPrice(selectedPair, res)}</strong></span>
+                </>
+              );
+            })()}
           </div>
         </div>
 

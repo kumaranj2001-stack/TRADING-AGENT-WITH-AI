@@ -556,6 +556,9 @@ export interface OptionsDerivativesSnapshot {
 
 export interface CryptoOnChainSnapshot {
   asset: string;
+  assetClass?: string;
+  isCryptoNative?: boolean;
+  contextBanner?: string;
   spotPrice: number;
   soprMetrics: {
     entityAdjustedSopr: number;

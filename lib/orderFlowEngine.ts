@@ -714,8 +714,11 @@ export class OrderFlowEngine {
     });
 
     const vaPrices = profileBins.filter(b => b.isValueArea).map(b => b.price);
-    const vahPrice = vaPrices.length > 0 ? Math.max(...vaPrices) : basePrice + tickStep * 2;
-    const valPrice = vaPrices.length > 0 ? Math.min(...vaPrices) : basePrice - tickStep * 2;
+    let vahPrice = vaPrices.length > 0 ? Math.max(...vaPrices) : Number((sessionPoc + tickStep * 2).toFixed(decimals));
+    let valPrice = vaPrices.length > 0 ? Math.min(...vaPrices) : Number((sessionPoc - tickStep * 2).toFixed(decimals));
+    const minVaOffset = Math.max(tickStep, Math.pow(10, -decimals));
+    if (valPrice >= sessionPoc) valPrice = Number((sessionPoc - minVaOffset).toFixed(decimals));
+    if (vahPrice <= sessionPoc) vahPrice = Number((sessionPoc + minVaOffset).toFixed(decimals));
 
     const vahBin = profileBins.find(b => b.price === vahPrice);
     if (vahBin) vahBin.isVah = true;

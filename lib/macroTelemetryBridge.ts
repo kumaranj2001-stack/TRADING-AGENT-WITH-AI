@@ -119,10 +119,19 @@ export class MacroTelemetryBridge {
     } = params;
 
     const pipMultiplier = PIP_VALUES[symbol] || (symbol.includes('JPY') ? 0.01 : symbol === 'XAU/USD' ? 0.10 : 0.0001);
-    
-    // Default support/resistance derivation if not explicitly provided
-    const supportPrice = params.supportLevel || Number((currentPrice - 25 * pipMultiplier).toFixed(5));
-    const resistancePrice = params.resistanceLevel || Number((currentPrice + 25 * pipMultiplier).toFixed(5));
+    const minLevelGap = Math.max(pipMultiplier * 5, currentPrice * 0.0008);
+
+    // Strictly enforce Support < currentPrice < Resistance regardless of external feed drift
+    const rawSupport = params.supportLevel && Number.isFinite(params.supportLevel)
+      ? params.supportLevel
+      : currentPrice - 25 * pipMultiplier;
+    const rawResistance = params.resistanceLevel && Number.isFinite(params.resistanceLevel)
+      ? params.resistanceLevel
+      : currentPrice + 25 * pipMultiplier;
+
+    const decimals = symbol.includes('JPY') || symbol.includes('XAG') ? 3 : symbol === 'XAU/USD' || symbol.includes('NIFTY') || symbol.includes('BTC') || symbol.includes('ETH') || symbol === 'NVDA' ? 2 : 5;
+    const supportPrice = Number(Math.min(rawSupport, currentPrice - minLevelGap).toFixed(decimals));
+    const resistancePrice = Number(Math.max(rawResistance, currentPrice + minLevelGap).toFixed(decimals));
 
     const mtf = this.evaluateMultiTimeframeMomentum(symbol, candles);
 

@@ -162,7 +162,6 @@ export function runHistoricalCandleReplay(
     stepCounter++;
     const historySlice = candles.slice(0, i + 1);
     const bar = historySlice[historySlice.length - 1];
-    LiveMarketFeedManager.setCanonicalFeed(pair, timeframe, historySlice);
 
     const currentDdPct = peakEquity > 0 ? Math.max(0, ((peakEquity - currentEquity) / peakEquity) * 100) : 0;
     const signal = evaluateSignal({

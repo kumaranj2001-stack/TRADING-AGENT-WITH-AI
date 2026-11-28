@@ -2,7 +2,7 @@ import { getMarketSegmentForSymbol } from '../marketData';
 import { unifiedMarketAuthority } from '../unifiedMarketAuthority';
 import type { Candle, CurrencyPair, TimeFrame } from '../types';
 import type { TechnicalScreenerSnapshot } from './types';
-import { resolveInstitutionalAssetContext, seededRange } from './helpers';
+import { classifyInstitutionalAsset, resolveInstitutionalAssetContext, seededRange } from './helpers';
 
 const DEFAULT_PINE_V5 = `//@version=5
 indicator("QRI Institutional EMA Cross + RSI Filter", overlay=true)
@@ -274,16 +274,21 @@ export class TechnicalScreenerEngine {
       },
     ];
 
+    const assetClass = classifyInstitutionalAsset(ctx.symbol);
+
     const mtfTrendlines: TechnicalScreenerSnapshot['mtfTrendlines'] = (['15m', '1h', '4h', '1d'] as const).map((tf, k) => {
-      const dist = Number(seededRange(`${ctx.symbol}:tl:${tf}`, -0.65, 0.85).toFixed(2));
+      const isSupport = k % 2 === 0;
+      const dist = isSupport
+        ? Number((-seededRange(`${ctx.symbol}:tl:${tf}:sup`, 0.14, 0.85)).toFixed(2))
+        : Number(seededRange(`${ctx.symbol}:tl:${tf}:res`, 0.14, 0.85).toFixed(2));
       return {
         timeframe: tf,
-        type: k % 2 === 0 ? 'ASCENDING_SUPPORT' : 'DESCENDING_RESISTANCE',
-        slopePerBar: Number((ctx.tickStep * (k % 2 === 0 ? 0.6 : -0.7)).toFixed(ctx.decimals)),
+        type: isSupport ? 'ASCENDING_SUPPORT' : 'DESCENDING_RESISTANCE',
+        slopePerBar: Number((ctx.tickStep * (isSupport ? 0.6 : -0.7)).toFixed(ctx.decimals)),
         touchCount: 3 + (k % 3),
         currentLinePrice: Number((ctx.spotPrice * (1 + dist / 100)).toFixed(ctx.decimals)),
         distancePct: dist,
-        breakoutStatus: Math.abs(dist) < 0.25 ? 'TESTING' : dist > 0.5 ? 'BROKEN' : 'HOLDING',
+        breakoutStatus: Math.abs(dist) < 0.25 ? 'TESTING' : Math.abs(dist) > 0.65 ? 'BROKEN' : 'HOLDING',
       };
     });
 
@@ -308,35 +313,119 @@ export class TechnicalScreenerEngine {
       };
     });
 
-    const hollyAiStrategies: TechnicalScreenerSnapshot['hollyAiStrategies'] = [
-      { strategyName: 'Holly Grail Opening Drive Pullback', direction: 'LONG', signalSymbol: ctx.symbol, winRatePct: 67.4, profitFactor: 2.38, expectedValueR: 0.44, riskOffTargetExit: Number((ctx.spotPrice * 1.018).toFixed(ctx.decimals)) },
-      { strategyName: 'Nickelodeon VWAP Squeeze Reclaim', direction: 'LONG', signalSymbol: 'NVDA', winRatePct: 64.1, profitFactor: 2.15, expectedValueR: 0.39, riskOffTargetExit: 147.8 },
-      { strategyName: 'Mighty Mouse Exhaustion Mean-Revert', direction: 'SHORT', signalSymbol: 'EUR/USD', winRatePct: 61.8, profitFactor: 1.94, expectedValueR: 0.31, riskOffTargetExit: 1.0885 },
-    ];
+    const hollyAiStrategies: TechnicalScreenerSnapshot['hollyAiStrategies'] =
+      assetClass === 'METALS_COMMODITIES'
+        ? [
+            { strategyName: 'London/NY Vault Liquidity Sweep Reclaim', direction: 'LONG', signalSymbol: ctx.symbol, winRatePct: 67.4, profitFactor: 2.38, expectedValueR: 0.44, riskOffTargetExit: Number((ctx.spotPrice * 1.014).toFixed(ctx.decimals)) },
+            { strategyName: 'COMEX Session VWAP Pullback Continuation', direction: 'LONG', signalSymbol: 'XAG/USD', winRatePct: 64.1, profitFactor: 2.15, expectedValueR: 0.39, riskOffTargetExit: Number((ctx.spotPrice * 0.0115).toFixed(2)) },
+            { strategyName: 'Real-Yield Spike Exhaustion Fade', direction: 'SHORT', signalSymbol: ctx.symbol, winRatePct: 61.8, profitFactor: 1.94, expectedValueR: 0.31, riskOffTargetExit: Number((ctx.spotPrice * 0.986).toFixed(ctx.decimals)) },
+          ]
+        : assetClass === 'FOREX'
+          ? [
+              { strategyName: 'London Open Stop-Hunt Mean Reversion', direction: 'LONG', signalSymbol: ctx.symbol, winRatePct: 66.2, profitFactor: 2.29, expectedValueR: 0.42, riskOffTargetExit: Number((ctx.spotPrice * 1.006).toFixed(ctx.decimals)) },
+              { strategyName: 'NY Fixing Rate Differential Momentum', direction: 'LONG', signalSymbol: 'EUR/USD', winRatePct: 63.5, profitFactor: 2.08, expectedValueR: 0.36, riskOffTargetExit: 1.0945 },
+              { strategyName: 'ECB/Fed Overnight Carry Drain', direction: 'SHORT', signalSymbol: ctx.symbol, winRatePct: 60.9, profitFactor: 1.88, expectedValueR: 0.29, riskOffTargetExit: Number((ctx.spotPrice * 0.994).toFixed(ctx.decimals)) },
+            ]
+          : assetClass === 'INDIAN_EQUITY_INDEX'
+            ? [
+                { strategyName: 'NSE Opening Range VWAP Breakout', direction: 'LONG', signalSymbol: ctx.symbol, winRatePct: 68.1, profitFactor: 2.41, expectedValueR: 0.46, riskOffTargetExit: Number((ctx.spotPrice * 1.012).toFixed(ctx.decimals)) },
+                { strategyName: 'BankNifty Gamma Pin Mean Reversion', direction: 'LONG', signalSymbol: 'BANK NIFTY', winRatePct: 63.8, profitFactor: 2.11, expectedValueR: 0.37, riskOffTargetExit: 52640.0 },
+                { strategyName: 'FII Cash Flow Exhaustion Reversal', direction: 'SHORT', signalSymbol: 'RELIANCE', winRatePct: 61.4, profitFactor: 1.92, expectedValueR: 0.30, riskOffTargetExit: 1362.5 },
+              ]
+            : [
+                { strategyName: 'Holly Grail Opening Drive Pullback', direction: 'LONG', signalSymbol: ctx.symbol, winRatePct: 67.4, profitFactor: 2.38, expectedValueR: 0.44, riskOffTargetExit: Number((ctx.spotPrice * 1.018).toFixed(ctx.decimals)) },
+                { strategyName: 'Nickelodeon VWAP Squeeze Reclaim', direction: 'LONG', signalSymbol: 'NVDA', winRatePct: 64.1, profitFactor: 2.15, expectedValueR: 0.39, riskOffTargetExit: 147.8 },
+                { strategyName: 'Mighty Mouse Exhaustion Mean-Revert', direction: 'SHORT', signalSymbol: 'AAPL', winRatePct: 61.8, profitFactor: 1.94, expectedValueR: 0.31, riskOffTargetExit: 222.4 },
+              ];
 
-    const rvolSurges: TechnicalScreenerSnapshot['rvolSurges'] = [
-      { symbol: ctx.symbol, price: ctx.spotPrice, rvolMultiplier: 3.42, changePct: 1.84, floatTurnoverPct: 2.1, alertTag: 'EXTREME_SURGE' },
-      { symbol: 'NVDA', price: 142.1, rvolMultiplier: 2.86, changePct: 3.12, floatTurnoverPct: 4.8, alertTag: 'INSTITUTIONAL_OPEN' },
-      { symbol: 'RELIANCE', price: 1377.5, rvolMultiplier: 2.41, changePct: 1.65, floatTurnoverPct: 1.3, alertTag: 'INSTITUTIONAL_OPEN' },
-      { symbol: 'XAU/USD', price: 3538.2, rvolMultiplier: 2.78, changePct: 1.24, floatTurnoverPct: 3.2, alertTag: 'EXTREME_SURGE' },
-    ];
+    const rvolSurges: TechnicalScreenerSnapshot['rvolSurges'] =
+      assetClass === 'METALS_COMMODITIES'
+        ? [
+            { symbol: ctx.symbol, price: ctx.spotPrice, rvolMultiplier: 3.42, changePct: 1.48, floatTurnoverPct: 3.2, alertTag: 'EXTREME_SURGE' },
+            { symbol: 'XAG/USD', price: 32.85, rvolMultiplier: 2.64, changePct: 1.82, floatTurnoverPct: 2.7, alertTag: 'INSTITUTIONAL_OPEN' },
+            { symbol: 'XPT/USD', price: 985.4, rvolMultiplier: 2.19, changePct: 0.94, floatTurnoverPct: 1.6, alertTag: 'INSTITUTIONAL_OPEN' },
+            { symbol: 'COPPER', price: 4.382, rvolMultiplier: 2.41, changePct: 1.25, floatTurnoverPct: 1.9, alertTag: 'EXTREME_SURGE' },
+          ]
+        : assetClass === 'FOREX'
+          ? [
+              { symbol: ctx.symbol, price: ctx.spotPrice, rvolMultiplier: 3.18, changePct: 0.46, floatTurnoverPct: 4.1, alertTag: 'EXTREME_SURGE' },
+              { symbol: 'EUR/USD', price: 1.0935, rvolMultiplier: 2.52, changePct: 0.32, floatTurnoverPct: 3.4, alertTag: 'INSTITUTIONAL_OPEN' },
+              { symbol: 'GBP/USD', price: 1.2984, rvolMultiplier: 2.24, changePct: 0.28, floatTurnoverPct: 2.8, alertTag: 'INSTITUTIONAL_OPEN' },
+              { symbol: 'USD/JPY', price: 153.42, rvolMultiplier: 2.79, changePct: -0.54, floatTurnoverPct: 3.7, alertTag: 'EXTREME_SURGE' },
+            ]
+          : assetClass === 'INDIAN_EQUITY_INDEX'
+            ? [
+                { symbol: ctx.symbol, price: ctx.spotPrice, rvolMultiplier: 3.28, changePct: 1.12, floatTurnoverPct: 2.4, alertTag: 'EXTREME_SURGE' },
+                { symbol: 'RELIANCE', price: 1377.5, rvolMultiplier: 2.61, changePct: 1.65, floatTurnoverPct: 1.8, alertTag: 'INSTITUTIONAL_OPEN' },
+                { symbol: 'HDFC BANK', price: 1742.8, rvolMultiplier: 2.34, changePct: 1.18, floatTurnoverPct: 1.5, alertTag: 'INSTITUTIONAL_OPEN' },
+                { symbol: 'TCS', price: 4125.4, rvolMultiplier: 2.12, changePct: 0.89, floatTurnoverPct: 1.1, alertTag: 'EXTREME_SURGE' },
+              ]
+            : [
+                { symbol: ctx.symbol, price: ctx.spotPrice, rvolMultiplier: 3.42, changePct: 1.84, floatTurnoverPct: 2.1, alertTag: 'EXTREME_SURGE' },
+                { symbol: 'NVDA', price: 142.1, rvolMultiplier: 2.86, changePct: 3.12, floatTurnoverPct: 4.8, alertTag: 'INSTITUTIONAL_OPEN' },
+                { symbol: 'BTC/USD', price: 96420.0, rvolMultiplier: 2.58, changePct: 2.45, floatTurnoverPct: 3.2, alertTag: 'INSTITUTIONAL_OPEN' },
+                { symbol: 'ETH/USD', price: 3410.0, rvolMultiplier: 2.29, changePct: 1.94, floatTurnoverPct: 2.6, alertTag: 'EXTREME_SURGE' },
+              ];
 
-    const sp500SectorHeatmap = [
-      { sector: 'Information Technology', weightPct: 31.4, changePct: 1.85, leader: 'NVDA', leaderChangePct: 3.12 },
-      { sector: 'Financials', weightPct: 13.2, changePct: 0.94, leader: 'JPM', leaderChangePct: 1.48 },
-      { sector: 'Communication Services', weightPct: 9.1, changePct: 1.42, leader: 'META', leaderChangePct: 2.19 },
-      { sector: 'Health Care', weightPct: 11.4, changePct: -0.32, leader: 'LLY', leaderChangePct: 0.88 },
-      { sector: 'Consumer Discretionary', weightPct: 10.6, changePct: 0.71, leader: 'AMZN', leaderChangePct: 1.64 },
-      { sector: 'Industrials', weightPct: 8.5, changePct: 0.56, leader: 'GE', leaderChangePct: 1.91 },
-      { sector: 'Energy', weightPct: 3.7, changePct: -1.14, leader: 'XOM', leaderChangePct: -0.95 },
-      { sector: 'Utilities & Staples', weightPct: 12.1, changePct: -0.45, leader: 'COST', leaderChangePct: 0.42 },
-    ];
+    const sp500SectorHeatmap =
+      assetClass === 'METALS_COMMODITIES'
+        ? [
+            { sector: 'Spot Bullion & LBMA Vaults', weightPct: 34.0, changePct: 1.48, leader: ctx.symbol, leaderChangePct: 1.48 },
+            { sector: 'COMEX Metals Futures', weightPct: 24.5, changePct: 1.72, leader: 'XAG/USD', leaderChangePct: 1.82 },
+            { sector: 'Sovereign Central Bank Demand', weightPct: 19.0, changePct: 1.15, leader: 'GLD ETF', leaderChangePct: 1.18 },
+            { sector: 'Precious & Platinum Group', weightPct: 12.5, changePct: 0.84, leader: 'XPT/USD', leaderChangePct: 0.94 },
+            { sector: 'Industrial Base Metals', weightPct: 10.0, changePct: 1.04, leader: 'COPPER', leaderChangePct: 1.25 },
+          ]
+        : assetClass === 'FOREX'
+          ? [
+              { sector: 'G10 Euro & Swiss Complexes', weightPct: 36.2, changePct: 0.42, leader: 'EUR/USD', leaderChangePct: 0.45 },
+              { sector: 'USD Dollar Index Basket', weightPct: 28.4, changePct: -0.38, leader: 'DXY', leaderChangePct: -0.38 },
+              { sector: 'G10 Safe-Haven Yen', weightPct: 18.0, changePct: 0.54, leader: 'USD/JPY', leaderChangePct: -0.54 },
+              { sector: 'Commodity FX (AUD/CAD)', weightPct: 17.4, changePct: 0.61, leader: 'AUD/USD', leaderChangePct: 0.64 },
+            ]
+          : assetClass === 'INDIAN_EQUITY_INDEX'
+            ? [
+                { sector: 'NIFTY Financial Services', weightPct: 33.8, changePct: 1.32, leader: 'HDFC BANK', leaderChangePct: 1.48 },
+                { sector: 'NIFTY IT Services', weightPct: 14.6, changePct: 0.94, leader: 'TCS', leaderChangePct: 1.12 },
+                { sector: 'NIFTY Oil & Gas Energy', weightPct: 12.4, changePct: 1.56, leader: 'RELIANCE', leaderChangePct: 1.65 },
+                { sector: 'NIFTY Auto & Industrials', weightPct: 11.2, changePct: 0.78, leader: 'TATAMOTORS', leaderChangePct: 0.92 },
+                { sector: 'NIFTY Pharma & Healthcare', weightPct: 8.4, changePct: 0.41, leader: 'SUNPHARMA', leaderChangePct: 0.65 },
+              ]
+            : [
+                { sector: 'Information Technology', weightPct: 31.4, changePct: 1.85, leader: 'NVDA', leaderChangePct: 3.12 },
+                { sector: 'Financials', weightPct: 13.2, changePct: 0.94, leader: 'JPM', leaderChangePct: 1.48 },
+                { sector: 'Communication Services', weightPct: 9.1, changePct: 1.42, leader: 'META', leaderChangePct: 2.19 },
+                { sector: 'Health Care', weightPct: 11.4, changePct: -0.32, leader: 'LLY', leaderChangePct: 0.88 },
+                { sector: 'Consumer Discretionary', weightPct: 10.6, changePct: 0.71, leader: 'AMZN', leaderChangePct: 1.64 },
+                { sector: 'Industrials', weightPct: 8.5, changePct: 0.56, leader: 'GE', leaderChangePct: 1.91 },
+                { sector: 'Energy', weightPct: 3.7, changePct: -1.14, leader: 'XOM', leaderChangePct: -0.95 },
+                { sector: 'Utilities & Staples', weightPct: 12.1, changePct: -0.45, leader: 'COST', leaderChangePct: 0.42 },
+              ];
 
-    const insiderTrades: TechnicalScreenerSnapshot['insiderTrades'] = [
-      { filingDate: 'Today 08:14', symbol: 'NVDA', insiderName: 'Jensen Huang', role: 'CEO / President', transactionType: 'OPEN_MARKET_SELL', shares: 120000, valueUsd: 17052000, isClusterBuy: false },
-      { filingDate: 'Yesterday 16:42', symbol: 'MSFT', insiderName: 'Director Buy Cluster (3 Filers)', role: 'Board / EVP', transactionType: 'OPEN_MARKET_BUY', shares: 18500, valueUsd: 7927250, isClusterBuy: true },
-      { filingDate: '2d Ago', symbol: 'TSLA', insiderName: 'Independent Director', role: 'Board Audit Chair', transactionType: 'OPEN_MARKET_BUY', shares: 22000, valueUsd: 5772800, isClusterBuy: false },
-    ];
+    const insiderTrades: TechnicalScreenerSnapshot['insiderTrades'] =
+      assetClass === 'METALS_COMMODITIES'
+        ? [
+            { filingDate: 'COT Weekly Report', symbol: ctx.symbol, insiderName: 'Managed Money Net Long (CFTC)', role: 'Commercial / Swap Dealer', transactionType: 'OPEN_MARKET_BUY', shares: 48200, valueUsd: 16840000, isClusterBuy: true },
+            { filingDate: 'Today LD4 Vault', symbol: ctx.symbol, insiderName: 'Central Bank Reserve Desk (PBoC/NBP)', role: 'Sovereign Buyer', transactionType: 'OPEN_MARKET_BUY', shares: 31500, valueUsd: 11025000, isClusterBuy: true },
+            { filingDate: '2d Ago COMEX', symbol: 'XAG/USD', insiderName: 'Producer / Merchant Hedging Desk', role: 'Commercial Short Cover', transactionType: 'OPEN_MARKET_BUY', shares: 19400, valueUsd: 6420000, isClusterBuy: false },
+          ]
+        : assetClass === 'FOREX'
+          ? [
+              { filingDate: 'COT Institutional', symbol: ctx.symbol, insiderName: 'Asset Manager G10 Positioning', role: 'Real-Money Fund Desk', transactionType: 'OPEN_MARKET_BUY', shares: 64000, valueUsd: 14200000, isClusterBuy: true },
+              { filingDate: 'Today WM/R Fix', symbol: ctx.symbol, insiderName: 'Cross-Border Reserve Rebalance', role: 'Sovereign FX Desk', transactionType: 'OPEN_MARKET_BUY', shares: 42000, valueUsd: 9650000, isClusterBuy: false },
+              { filingDate: '2d Ago BIS', symbol: 'USD/JPY', insiderName: 'Leveraged Carry Unwind Desk', role: 'CTAs / Macro Fund', transactionType: 'OPEN_MARKET_SELL', shares: 38500, valueUsd: 8140000, isClusterBuy: false },
+            ]
+          : assetClass === 'INDIAN_EQUITY_INDEX'
+            ? [
+                { filingDate: 'NSE Bulk Deal Today', symbol: ctx.symbol, insiderName: 'Domestic Mutual Fund (DII Block)', role: 'Institutional AMC', transactionType: 'OPEN_MARKET_BUY', shares: 285000, valueUsd: 12450000, isClusterBuy: true },
+                { filingDate: 'NSE FII Flow', symbol: 'RELIANCE', insiderName: 'Promoter / Strategic Group', role: 'Promoter Filing', transactionType: 'OPEN_MARKET_BUY', shares: 140000, valueUsd: 5980000, isClusterBuy: true },
+                { filingDate: 'Yesterday F&O', symbol: 'HDFC BANK', insiderName: 'FPI Derivative Hedge Desk', role: 'Foreign Portfolio', transactionType: 'OPEN_MARKET_SELL', shares: 95000, valueUsd: 4120000, isClusterBuy: false },
+              ]
+            : [
+                { filingDate: 'Today 08:14', symbol: 'NVDA', insiderName: 'Jensen Huang', role: 'CEO / President', transactionType: 'OPEN_MARKET_SELL', shares: 120000, valueUsd: 17052000, isClusterBuy: false },
+                { filingDate: 'Yesterday 16:42', symbol: 'MSFT', insiderName: 'Director Buy Cluster (3 Filers)', role: 'Board / EVP', transactionType: 'OPEN_MARKET_BUY', shares: 18500, valueUsd: 7927250, isClusterBuy: true },
+                { filingDate: '2d Ago', symbol: 'TSLA', insiderName: 'Independent Director', role: 'Board Audit Chair', transactionType: 'OPEN_MARKET_BUY', shares: 22000, valueUsd: 5772800, isClusterBuy: false },
+              ];
 
     const audioSquawkFeed: TechnicalScreenerSnapshot['audioSquawkFeed'] = [
       {

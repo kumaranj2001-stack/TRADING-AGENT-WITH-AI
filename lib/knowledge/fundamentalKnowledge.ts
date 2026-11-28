@@ -345,7 +345,7 @@ export function generateFundamentalKnowledgeBase(): KnowledgeRule[] {
       conditionDescription: isBull
         ? `CFTC Commitments of Traders non-commercial net positioning indicates commercial hedger absorption with aggressive speculative short covering.`
         : `Non-commercial net positions liquidate rapidly with heavy commercial distribution and foreign institutional cash outflows.`,
-      confidenceWeight: 9 + (i % 3),
+      confidenceWeight: Math.min(10, 8 + (i % 3)),
       signalAction: isBull ? 'STRONG_BUY' : 'STRONG_SELL',
       invalidationCriteria: 'Weekly COT report prints multi-month liquidation extreme or FII outflow spike.',
       ...metrics,

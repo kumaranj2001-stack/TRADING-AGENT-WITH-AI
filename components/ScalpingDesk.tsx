@@ -51,7 +51,7 @@ import { scalpingEngine } from '@/lib/scalpingEngine';
 import { LiveMarketFeedManager } from '@/lib/liveMarketFeed';
 import { ssotPriceSyncEngine, ImmutableEventRecord } from '@/lib/ssotPriceSyncEngine';
 import { liveMarketAnchorConstraintEngine } from '@/lib/liveMarketAnchorConstraintEngine';
-import { BASE_PRICES, PIP_VALUES } from '@/lib/marketData';
+import { BASE_PRICES, PIP_VALUES, formatInstrumentPrice } from '@/lib/marketData';
 
 export interface ScalpingDeskProps {
   pair?: CurrencyPair;
@@ -429,7 +429,7 @@ export const ScalpingDesk: React.FC<ScalpingDeskProps> = ({
             <div className="flex items-baseline justify-between">
               <span className="text-[11px] text-slate-400">{initialPair} Live Terminal Price:</span>
               <span className="text-sm font-bold text-cyan-300 font-mono tracking-wide">
-                ${currentLivePrice.toFixed(initialPair === 'XAU/USD' ? 2 : initialPair.includes('JPY') ? 3 : 5)}
+                {formatInstrumentPrice(initialPair, currentLivePrice)}
               </span>
             </div>
             <div className="flex items-center justify-between text-[10px] text-slate-400">
@@ -446,7 +446,9 @@ export const ScalpingDesk: React.FC<ScalpingDeskProps> = ({
                 8-AGENT DEBATE CONSENSUS
               </span>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 font-bold">
-                SUPERMAJORITY (5/7)
+                {(consensus?.chiefReviewerAudit?.totalDesksReviewed || 8) > 0
+                  ? `${consensus?.chiefReviewerAudit?.status === 'VETOED' ? 'VETOED' : 'SUPERMAJORITY'} (${consensus?.chiefReviewerAudit?.agreeCount ?? 7}/${consensus?.chiefReviewerAudit?.totalDesksReviewed ?? 8})`
+                  : 'SUPERMAJORITY (7/8)'}
               </span>
             </div>
             <div className="flex items-baseline justify-between text-[11px]">
@@ -924,18 +926,33 @@ export const ScalpingDesk: React.FC<ScalpingDeskProps> = ({
                 <span>VOLUME: 68% DOMINANCE</span>
               </div>
               <div className="space-y-1.5 text-[11px]">
-                <div className="flex justify-between p-1.5 rounded bg-emerald-500/10">
-                  <span>Tier 1 Ask Sweep Defense: 4004.20</span>
-                  <span className="font-bold text-emerald-400">185 Contracts</span>
-                </div>
-                <div className="flex justify-between p-1.5 rounded bg-emerald-500/10">
-                  <span>Tier 2 Delta Absorption Wall: 4002.50</span>
-                  <span className="font-bold text-emerald-400">142 Contracts</span>
-                </div>
-                <div className="flex justify-between p-1.5 rounded bg-emerald-500/10">
-                  <span>Tier 3 Structural Floor Pivot: 3998.80</span>
-                  <span className="font-bold text-emerald-400">220 Contracts</span>
-                </div>
+                {(() => {
+                  const step = Math.max(
+                    currentLivePrice * 0.00045,
+                    initialPair.includes('JPY') ? 0.04 : initialPair === 'XAU/USD' ? 1.5 : 0.0005
+                  );
+                  const d = initialPair.includes('BTC') || initialPair.includes('ETH') || initialPair === 'XAU/USD' || initialPair === 'NIFTY 50' || initialPair === 'BANK NIFTY' || initialPair === 'NVDA'
+                    ? 2
+                    : initialPair.includes('JPY') || initialPair === 'XAG/USD'
+                      ? 3
+                      : 5;
+                  return (
+                    <>
+                      <div className="flex justify-between p-1.5 rounded bg-emerald-500/10">
+                        <span>Tier 1 Ask Sweep Defense: {(currentLivePrice - step * 1.2).toFixed(d)}</span>
+                        <span className="font-bold text-emerald-400">185 Contracts</span>
+                      </div>
+                      <div className="flex justify-between p-1.5 rounded bg-emerald-500/10">
+                        <span>Tier 2 Delta Absorption Wall: {(currentLivePrice - step * 2.5).toFixed(d)}</span>
+                        <span className="font-bold text-emerald-400">142 Contracts</span>
+                      </div>
+                      <div className="flex justify-between p-1.5 rounded bg-emerald-500/10">
+                        <span>Tier 3 Structural Floor Pivot: {(currentLivePrice - step * 4.2).toFixed(d)}</span>
+                        <span className="font-bold text-emerald-400">220 Contracts</span>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
 
@@ -946,18 +963,33 @@ export const ScalpingDesk: React.FC<ScalpingDeskProps> = ({
                 <span>VOLUME: 32% EXHAUSTION</span>
               </div>
               <div className="space-y-1.5 text-[11px]">
-                <div className="flex justify-between p-1.5 rounded bg-rose-500/10">
-                  <span>Tier 1 Resting Limit Wall: 4008.50</span>
-                  <span className="font-bold text-rose-400">88 Contracts</span>
-                </div>
-                <div className="flex justify-between p-1.5 rounded bg-rose-500/10">
-                  <span>Tier 2 Breakout Liquidity Hunt: 4012.00</span>
-                  <span className="font-bold text-rose-400">64 Contracts</span>
-                </div>
-                <div className="flex justify-between p-1.5 rounded bg-rose-500/10">
-                  <span>Tier 3 Macro Resistance Ceiling: 4018.50</span>
-                  <span className="font-bold text-rose-400">110 Contracts</span>
-                </div>
+                {(() => {
+                  const step = Math.max(
+                    currentLivePrice * 0.00045,
+                    initialPair.includes('JPY') ? 0.04 : initialPair === 'XAU/USD' ? 1.5 : 0.0005
+                  );
+                  const d = initialPair.includes('BTC') || initialPair.includes('ETH') || initialPair === 'XAU/USD' || initialPair === 'NIFTY 50' || initialPair === 'BANK NIFTY' || initialPair === 'NVDA'
+                    ? 2
+                    : initialPair.includes('JPY') || initialPair === 'XAG/USD'
+                      ? 3
+                      : 5;
+                  return (
+                    <>
+                      <div className="flex justify-between p-1.5 rounded bg-rose-500/10">
+                        <span>Tier 1 Resting Limit Wall: {(currentLivePrice + step * 1.2).toFixed(d)}</span>
+                        <span className="font-bold text-rose-400">88 Contracts</span>
+                      </div>
+                      <div className="flex justify-between p-1.5 rounded bg-rose-500/10">
+                        <span>Tier 2 Breakout Liquidity Hunt: {(currentLivePrice + step * 2.5).toFixed(d)}</span>
+                        <span className="font-bold text-rose-400">64 Contracts</span>
+                      </div>
+                      <div className="flex justify-between p-1.5 rounded bg-rose-500/10">
+                        <span>Tier 3 Macro Resistance Ceiling: {(currentLivePrice + step * 4.2).toFixed(d)}</span>
+                        <span className="font-bold text-rose-400">110 Contracts</span>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </div>

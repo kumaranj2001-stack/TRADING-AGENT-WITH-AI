@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { resolveInstitutionalAssetContext, seededRange } from '@/lib/institutional/helpers';
 import { institutionalHubService } from '@/lib/institutional/InstitutionalHubService';
+import { MarketSessionManager } from '@/lib/marketSessionManager';
 import type { TimeFrame } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -20,8 +21,8 @@ export async function GET(req: NextRequest) {
       const sendFrame = () => {
         seq += 1;
         const ctx = resolveInstitutionalAssetContext(symbol, timeframe);
-        const microDelta = seededRange(`${symbol}:sse:${seq}`, -0.0004, 0.0004);
-        const tickSpot = Number((ctx.spotPrice * (1 + microDelta)).toFixed(ctx.decimals));
+        const isFrozen = MarketSessionManager.isMarketFrozen(ctx.symbol as any);
+        const tickSpot = Number(ctx.spotPrice.toFixed(ctx.decimals));
         const enrichment = institutionalHubService.getDebateEnrichment(ctx.symbol, timeframe);
 
         const payload = {
@@ -30,8 +31,9 @@ export async function GET(req: NextRequest) {
           symbol: ctx.symbol,
           timeframe,
           spotPrice: tickSpot,
-          fixLatencyMs: Number(seededRange(`lat:${seq}`, 1.2, 4.8).toFixed(1)),
-          rvolMultiplier: Number(seededRange(`rvol:${seq}`, 1.8, 3.7).toFixed(2)),
+          isFrozen,
+          fixLatencyMs: isFrozen ? 0 : Number(seededRange(`lat:${seq}`, 1.2, 4.8).toFixed(1)),
+          rvolMultiplier: Number(seededRange(`${ctx.symbol}:rvol:${seq}`, 1.8, 3.7).toFixed(2)),
           zeroGammaFlip: enrichment.zeroGammaFlipLevel,
           slippageBps: enrichment.slippageBps,
           altAlphaScore: enrichment.altDataAlphaScore,
@@ -42,7 +44,18 @@ export async function GET(req: NextRequest) {
       };
 
       sendFrame();
-      timer = setInterval(sendFrame, 1200);
+      if (!MarketSessionManager.isMarketFrozen(symbol as any)) {
+        timer = setInterval(() => {
+          if (MarketSessionManager.isMarketFrozen(symbol as any)) {
+            if (timer) {
+              clearInterval(timer);
+              timer = null;
+            }
+            return;
+          }
+          sendFrame();
+        }, 1200);
+      }
     },
     cancel() {
       if (timer) {

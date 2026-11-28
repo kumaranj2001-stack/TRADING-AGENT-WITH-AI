@@ -46,18 +46,60 @@ export class AlternativeDataEngine {
       { group: 'Corporate Real Economy', category: 'Capex & Inventory Cycle', eventType: 'AI / Cloud Data Center Build', historicalBetaWeight: 0.69, activeRegimeSignal: 'SECULAR_EXPANSION' },
     ];
 
-    const satelliteParkingData = [
-      { retailer: 'Costco Wholesale', ticker: 'COST', fillRatePct: 84.6, yoyTrafficDeltaPct: 6.4, regionsSampled: 412 },
-      { retailer: 'Walmart Supercenters', ticker: 'WMT', fillRatePct: 79.2, yoyTrafficDeltaPct: 4.1, regionsSampled: 1280 },
-      { retailer: 'Home Depot', ticker: 'HD', fillRatePct: 68.4, yoyTrafficDeltaPct: -1.8, regionsSampled: 640 },
-      { retailer: 'Target Stores', ticker: 'TGT', fillRatePct: 72.1, yoyTrafficDeltaPct: 2.3, regionsSampled: 580 },
-    ];
+    const satelliteParkingData =
+      assetClass === 'METALS_COMMODITIES'
+        ? [
+            { retailer: 'LBMA London Vaults (Brinks/HSBC)', ticker: 'LBMA_AU', fillRatePct: 86.2, yoyTrafficDeltaPct: 5.8, regionsSampled: 14 },
+            { retailer: 'Zurich / Swiss Assay Refineries', ticker: 'PAMP_CH', fillRatePct: 91.4, yoyTrafficDeltaPct: 7.2, regionsSampled: 9 },
+            { retailer: 'Shanghai Gold Exchange Hubs', ticker: 'SGE_AU', fillRatePct: 78.9, yoyTrafficDeltaPct: 4.5, regionsSampled: 18 },
+            { retailer: 'COMEX Approved Depositories', ticker: 'COMEX_NY', fillRatePct: 73.1, yoyTrafficDeltaPct: -2.4, regionsSampled: 11 },
+          ]
+        : assetClass === 'FOREX'
+          ? [
+              { retailer: 'Rotterdam Europort Freight Hubs', ticker: 'EUR_TRADE', fillRatePct: 81.5, yoyTrafficDeltaPct: 2.8, regionsSampled: 32 },
+              { retailer: 'Los Angeles / Long Beach Ports', ticker: 'USD_IMPORT', fillRatePct: 84.3, yoyTrafficDeltaPct: 5.1, regionsSampled: 26 },
+              { retailer: 'Yokohama / Tokyo Auto & Tech Export', ticker: 'JPY_EXP', fillRatePct: 76.8, yoyTrafficDeltaPct: 3.4, regionsSampled: 19 },
+              { retailer: 'London GatewayFX Clearing Zones', ticker: 'GBP_CLR', fillRatePct: 79.0, yoyTrafficDeltaPct: 1.9, regionsSampled: 15 },
+            ]
+          : assetClass === 'INDIAN_EQUITY_INDEX'
+            ? [
+                { retailer: 'JNPT & Mundra Port Cargo Terminals', ticker: 'INDIA_PORT', fillRatePct: 88.7, yoyTrafficDeltaPct: 9.2, regionsSampled: 44 },
+                { retailer: 'Dedicated Freight Corridor Hubs', ticker: 'IR_DFC', fillRatePct: 85.1, yoyTrafficDeltaPct: 7.8, regionsSampled: 112 },
+                { retailer: 'NHAI FASTag Highway Logistics', ticker: 'NHAI_TOLL', fillRatePct: 89.4, yoyTrafficDeltaPct: 11.4, regionsSampled: 420 },
+                { retailer: 'Gujarat & Maharashtra Industrial Zones', ticker: 'IND_MFG', fillRatePct: 82.6, yoyTrafficDeltaPct: 6.3, regionsSampled: 96 },
+              ]
+            : assetClass === 'CRYPTO'
+              ? [
+                  { retailer: 'North America BTC Mining Immersion Sites', ticker: 'BTC_HASH', fillRatePct: 92.5, yoyTrafficDeltaPct: 14.2, regionsSampled: 68 },
+                  { retailer: 'Institutional Cold Custody Vaults', ticker: 'CUSTODY', fillRatePct: 87.9, yoyTrafficDeltaPct: 18.6, regionsSampled: 24 },
+                  { retailer: 'Texas / ERCOT Power Load Shedding Nodes', ticker: 'ERCOT_MW', fillRatePct: 74.0, yoyTrafficDeltaPct: 5.4, regionsSampled: 31 },
+                  { retailer: 'Equinix LD4 / TY3 Colocation Racks', ticker: 'COLO_L3', fillRatePct: 90.2, yoyTrafficDeltaPct: 8.1, regionsSampled: 16 },
+                ]
+              : [
+                  { retailer: 'Costco Wholesale', ticker: 'COST', fillRatePct: 84.6, yoyTrafficDeltaPct: 6.4, regionsSampled: 412 },
+                  { retailer: 'Walmart Supercenters', ticker: 'WMT', fillRatePct: 79.2, yoyTrafficDeltaPct: 4.1, regionsSampled: 1280 },
+                  { retailer: 'Home Depot', ticker: 'HD', fillRatePct: 68.4, yoyTrafficDeltaPct: -1.8, regionsSampled: 640 },
+                  { retailer: 'Target Stores', ticker: 'TGT', fillRatePct: 72.1, yoyTrafficDeltaPct: 2.3, regionsSampled: 580 },
+                ];
 
-    const consumerTransactionPanels = [
-      { merchantCategory: 'Cloud & Enterprise SaaS Card Spend', spendYoYPct: 18.4, avgTicketChangePct: 5.2, cardPanelUsersMillions: 14.2 },
-      { merchantCategory: 'Consumer Apparel & Luxury Retail', spendYoYPct: 1.9, avgTicketChangePct: -2.1, cardPanelUsersMillions: 14.2 },
-      { merchantCategory: 'Travel, Airlines & Hospitality', spendYoYPct: 9.7, avgTicketChangePct: 3.4, cardPanelUsersMillions: 14.2 },
-    ];
+    const consumerTransactionPanels =
+      assetClass === 'METALS_COMMODITIES'
+        ? [
+            { merchantCategory: 'Physical Bullion Bars & Coins Retail Demand', spendYoYPct: 14.8, avgTicketChangePct: 6.4, cardPanelUsersMillions: 6.8 },
+            { merchantCategory: 'Asian Sovereign & Bridal Jewellery Fabrication', spendYoYPct: 9.2, avgTicketChangePct: 4.1, cardPanelUsersMillions: 18.4 },
+            { merchantCategory: 'Industrial Solar & Electronics Paste Demand', spendYoYPct: 11.5, avgTicketChangePct: 3.0, cardPanelUsersMillions: 4.2 },
+          ]
+        : assetClass === 'FOREX'
+          ? [
+              { merchantCategory: 'Cross-Border SWIFT & FX Corporate Settlement', spendYoYPct: 7.4, avgTicketChangePct: 2.1, cardPanelUsersMillions: 12.6 },
+              { merchantCategory: 'International Tourism & Duty-Free Spend', spendYoYPct: 11.2, avgTicketChangePct: 4.6, cardPanelUsersMillions: 14.2 },
+              { merchantCategory: 'G10 Sovereign T-Bill & MMF Flows', spendYoYPct: 15.1, avgTicketChangePct: 5.9, cardPanelUsersMillions: 9.4 },
+            ]
+          : [
+              { merchantCategory: 'Cloud & Enterprise SaaS Card Spend', spendYoYPct: 18.4, avgTicketChangePct: 5.2, cardPanelUsersMillions: 14.2 },
+              { merchantCategory: 'Consumer Apparel & Luxury Retail', spendYoYPct: 1.9, avgTicketChangePct: -2.1, cardPanelUsersMillions: 14.2 },
+              { merchantCategory: 'Travel, Airlines & Hospitality', spendYoYPct: 9.7, avgTicketChangePct: 3.4, cardPanelUsersMillions: 14.2 },
+            ];
 
     const primaryDeskLabel =
       assetClass === 'METALS_COMMODITIES'
@@ -72,11 +114,36 @@ export class AlternativeDataEngine {
       { company: 'Legacy Retail Peer', openRoles: 840, aiEngineeringDelta30dPct: -3.2, salesHiringDelta30dPct: -6.8, signal: 'HIRING_FREEZE' },
     ];
 
-    const ecommercePricingTracker = [
-      { brand: 'Apple Consumer Hardware', avgDiscountPct: 2.4, priceIndexVs30d: 101.2, outOfStockRatePct: 4.8 },
-      { brand: 'Nike Direct DTC', avgDiscountPct: 18.6, priceIndexVs30d: 96.4, outOfStockRatePct: 8.1 },
-      { brand: 'NVIDIA Partner GPU SKUs', avgDiscountPct: 0.4, priceIndexVs30d: 108.5, outOfStockRatePct: 26.4 },
-    ];
+    const ecommercePricingTracker =
+      assetClass === 'METALS_COMMODITIES'
+        ? [
+            { brand: 'London AM/PM Bullion Benchmark Premium', avgDiscountPct: 0.2, priceIndexVs30d: 103.8, outOfStockRatePct: 3.1 },
+            { brand: 'Shanghai Gold Physical Fix Premium ($/oz)', avgDiscountPct: 0.0, priceIndexVs30d: 106.4, outOfStockRatePct: 12.5 },
+            { brand: 'Swiss Mint / Sovereign Gold Coin Premium', avgDiscountPct: 1.1, priceIndexVs30d: 104.2, outOfStockRatePct: 9.8 },
+          ]
+        : assetClass === 'FOREX'
+          ? [
+              { brand: 'EUR/USD 3M Cross-Currency Basis Index', avgDiscountPct: 0.3, priceIndexVs30d: 100.8, outOfStockRatePct: 1.2 },
+              { brand: 'USD/JPY Forward Swap Implied Index', avgDiscountPct: 0.5, priceIndexVs30d: 102.4, outOfStockRatePct: 2.0 },
+              { brand: 'DXY Real Rate Differential Tracker', avgDiscountPct: 0.1, priceIndexVs30d: 101.6, outOfStockRatePct: 1.5 },
+            ]
+          : assetClass === 'INDIAN_EQUITY_INDEX'
+            ? [
+                { brand: 'NSE Retail Consumption & Auto Basket', avgDiscountPct: 3.8, priceIndexVs30d: 103.1, outOfStockRatePct: 2.9 },
+                { brand: 'UPI Digital Merchant Settlement Index', avgDiscountPct: 0.2, priceIndexVs30d: 109.4, outOfStockRatePct: 0.4 },
+                { brand: 'India IT Services Export Deal Pipeline', avgDiscountPct: 1.5, priceIndexVs30d: 102.2, outOfStockRatePct: 1.8 },
+              ]
+            : assetClass === 'CRYPTO'
+              ? [
+                  { brand: 'Spot BTC ETF Net Creation Premium (bps)', avgDiscountPct: 0.1, priceIndexVs30d: 107.8, outOfStockRatePct: 1.4 },
+                  { brand: 'CME Annualized Front-Month Basis', avgDiscountPct: 0.2, priceIndexVs30d: 109.2, outOfStockRatePct: 2.1 },
+                  { brand: 'Stablecoin On-Chain Peg Liquidity Index', avgDiscountPct: 0.0, priceIndexVs30d: 100.1, outOfStockRatePct: 0.3 },
+                ]
+              : [
+                  { brand: 'Apple Consumer Hardware', avgDiscountPct: 2.4, priceIndexVs30d: 101.2, outOfStockRatePct: 4.8 },
+                  { brand: 'Nike Direct DTC', avgDiscountPct: 18.6, priceIndexVs30d: 96.4, outOfStockRatePct: 8.1 },
+                  { brand: 'NVIDIA Partner GPU SKUs', avgDiscountPct: 0.4, priceIndexVs30d: 108.5, outOfStockRatePct: 26.4 },
+                ];
 
     const compositeAltAlphaScore = Math.round(
       (esgGeopoliticalNlp[2].score * 0.2 +

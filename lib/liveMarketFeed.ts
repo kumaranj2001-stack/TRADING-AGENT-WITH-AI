@@ -1,8 +1,9 @@
 import { Candle, CurrencyPair, EntryProximityFilterResult, LatchedTradeState, MarketSegment, Position, SwarmConsensusResult, TimeFrame } from './types';
-import { BASE_PRICES, PIP_VALUES, getMarketSegmentForSymbol, generateCandles } from './marketData';
+import { BASE_PRICES, PIP_VALUES, getMarketSegmentForSymbol, generateCandles, getSymbolDecimals } from './marketData';
 import { MarketSessionManager } from './marketSessionManager';
 import { stateLatchingEngine, RECALIBRATION_INTERVAL_SECONDS } from './stateLatchingEngine';
 import { liveMarketAnchorConstraintEngine } from './liveMarketAnchorConstraintEngine';
+import { canonicalMarketStore } from './canonicalMarketStore';
 
 export interface MarketFeedTickEvent {
   pair: CurrencyPair;
@@ -74,6 +75,18 @@ export class LiveMarketFeedManager {
     const latestPrice = candles[candles.length - 1].close;
     this.canonicalPrices.set(pair, latestPrice);
     this.lastTickTimestamp = Date.now();
+    const ba = this.getCanonicalBidAsk(pair);
+    canonicalMarketStore.publishQuote({
+      symbol: pair,
+      timeframe,
+      bid: ba.bid,
+      ask: ba.ask,
+      mid: latestPrice,
+      candles,
+      timestamp: this.lastTickTimestamp,
+      source: 'LIVE_MARKET_FEED',
+      latencyMs: this.currentWsTelemetry.latencyMs,
+    });
   }
 
   /**
@@ -129,21 +142,23 @@ export class LiveMarketFeedManager {
     const isJpy = pair.includes('JPY');
     const isGold = pair === 'XAU/USD';
     const isSilver = pair === 'XAG/USD';
-    const isIndian = pair === 'NIFTY 50' || pair === 'BANK NIFTY' || pair === 'RELIANCE' || pair === 'TCS';
-    const isOil = pair.includes('CRUDE');
-    const pipMultiplier = PIP_VALUES[pair] || (isGold ? 0.10 : isJpy ? 0.01 : 0.0001);
+    const isIndian = pair === 'NIFTY 50' || pair === 'BANK NIFTY' || pair === 'RELIANCE' || pair === 'TCS' || pair === 'HDFC BANK' || pair === 'INFY';
+    const isCrypto = pair === 'BTC/USD' || pair === 'ETH/USD';
+    const pipMultiplier = PIP_VALUES[pair] || (isGold ? 0.10 : isJpy ? 0.01 : isIndian ? 0.05 : 0.0001);
+    const decimals = getSymbolDecimals(pair);
+    const minTick = Math.pow(10, -decimals);
 
-    let decimals = 5;
-    if (isIndian || isGold || isOil) decimals = 2;
-    else if (isSilver || isJpy) decimals = 3;
+    // Target institutional spread in integer tick increments so IEEE-754 rounding never wobbles bid/ask separation
+    const targetSpreadPips = isCrypto ? 2.5 : isGold ? 1.8 : isSilver ? 2.5 : isJpy ? 1.1 : isIndian ? 2.0 : 0.9;
+    const rawSpreadTicks = Math.max(2, Math.round((targetSpreadPips * pipMultiplier) / minTick));
+    const lowTicks = Math.floor(rawSpreadTicks / 2);
+    const highTicks = rawSpreadTicks - lowTicks;
 
-    // Institutional spreads in pips
-    const spreadPips = isGold ? 1.8 : isSilver ? 2.5 : isJpy ? 1.1 : isIndian ? 2.0 : 0.9;
-    const halfSpread = (spreadPips * pipMultiplier) / 2;
-
-    const bid = Number((mid - halfSpread).toFixed(decimals));
-    const ask = Number((mid + halfSpread).toFixed(decimals));
-    const spread = Number((ask - bid).toFixed(decimals));
+    const midSnapped = Number(mid.toFixed(decimals));
+    const bid = Number((midSnapped - lowTicks * minTick).toFixed(decimals));
+    const ask = Number((midSnapped + highTicks * minTick).toFixed(decimals));
+    const spread = Math.max(0, Number((ask - bid).toFixed(decimals)));
+    const spreadPips = spread > 0 ? Number((spread / pipMultiplier).toFixed(2)) : 0;
 
     return {
       bid,
@@ -270,17 +285,19 @@ export class LiveMarketFeedManager {
       this.activeTicker = null;
     }
 
+    canonicalMarketStore.setActiveContext(pair, timeframe);
+
     // Connect WebSocket streaming pipeline
     this.updateWsTelemetry({
       isConnected: true,
       status: 'LIVE_STREAMING',
       endpoint: `wss://stream.qri-trader.internal/market/${pair.toLowerCase().replace('/', '')}`,
-      latencyMs: Math.round(11 + Math.random() * 8),
+      latencyMs: 12,
     });
 
     const session = MarketSessionManager.getMarketSessionInfo(pair);
 
-    // ❄️ Global State Freeze: If market is closed, maintain active heartbeat and stream telemetry while locking price
+    // ❄️ Global State Freeze: Pause all tick intervals and synthetic micro-tickers cleanly while frozen
     if (session.isFrozen) {
       const key = `${this.currentPair}_${this.currentTimeframe}`;
       const candles = this.canonicalCandles.get(key) || [];
@@ -289,34 +306,41 @@ export class LiveMarketFeedManager {
       MarketSessionManager.setFrozenPrice(this.currentPair, lockedPrice);
       const base = BASE_PRICES[this.currentPair] || lockedPrice;
       const change24h = Number((((lockedPrice - base) / base) * 100).toFixed(2));
+      this.lastTickTimestamp = Date.now();
+      this.updateWsTelemetry({
+        isConnected: false,
+        status: 'STANDBY',
+        latencyMs: 0,
+      });
 
-      const broadcastFrozenHeartbeat = () => {
-        this.lastTickTimestamp = Date.now();
-        this.updateWsTelemetry({
-          isConnected: true,
-          status: 'LIVE_STREAMING',
-          latencyMs: 10,
-        });
+      const ba = this.getCanonicalBidAsk(this.currentPair);
+      canonicalMarketStore.publishQuote({
+        symbol: this.currentPair,
+        timeframe: this.currentTimeframe,
+        bid: ba.bid,
+        ask: ba.ask,
+        mid: lockedPrice,
+        candles,
+        timestamp: this.lastTickTimestamp,
+        source: 'GLOBAL_STATE_FREEZE',
+        latencyMs: 0,
+      });
 
-        if (lastCandle) {
-          const frozenEvent: MarketFeedTickEvent = {
-            pair: this.currentPair,
-            timeframe: this.currentTimeframe,
-            livePrice: lockedPrice,
-            candle: lastCandle,
-            candles,
-            change24h,
-            timestamp: this.lastTickTimestamp,
-            isFrozen: true,
-            sourceProtocol: 'WSS_WEBSOCKET',
-            latencyMs: 10,
-          };
-          this.listeners.forEach(fn => fn(frozenEvent));
-        }
-      };
-
-      broadcastFrozenHeartbeat();
-      this.activeTicker = setInterval(broadcastFrozenHeartbeat, 2500);
+      if (lastCandle) {
+        const frozenEvent: MarketFeedTickEvent = {
+          pair: this.currentPair,
+          timeframe: this.currentTimeframe,
+          livePrice: lockedPrice,
+          candle: lastCandle,
+          candles,
+          change24h,
+          timestamp: this.lastTickTimestamp,
+          isFrozen: true,
+          sourceProtocol: 'DIRECT_STREAM',
+          latencyMs: 0,
+        };
+        this.listeners.forEach(fn => fn(frozenEvent));
+      }
 
       return () => {
         this.stopLiveFeed();
@@ -324,7 +348,7 @@ export class LiveMarketFeedManager {
     }
 
     this.activeTicker = setInterval(() => {
-      // In case session transitions to closed during the interval
+      // Stop immediately if Global State Freeze engages
       if (MarketSessionManager.isMarketFrozen(this.currentPair)) {
         this.stopLiveFeed();
         return;
@@ -339,37 +363,20 @@ export class LiveMarketFeedManager {
       if (!candles || candles.length === 0) return;
 
       const lastCandle = candles[candles.length - 1];
-      const isJpy = this.currentPair.includes('JPY');
-      const isIndian = this.currentPair === 'NIFTY 50' || this.currentPair === 'BANK NIFTY' || 
-                       this.currentPair === 'RELIANCE' || this.currentPair === 'TCS' || 
-                       this.currentPair === 'HDFC BANK' || this.currentPair === 'INFY';
-      const isGold = this.currentPair === 'XAU/USD';
-      const isSilver = this.currentPair === 'XAG/USD';
-      const isPlatinum = this.currentPair === 'XPT/USD';
-      const isCopper = this.currentPair === 'COPPER';
-      const isOil = this.currentPair === 'WTI_CRUDE' || this.currentPair === 'BRENT_CRUDE';
-      const isRupee = this.currentPair.includes('/INR');
-
-      let decimals = 5;
-      if (isIndian || isGold || isPlatinum || isOil) decimals = 2;
-      else if (isSilver || isJpy || isRupee) decimals = 3;
-      else if (isCopper) decimals = 4;
-
-      const pip = PIP_VALUES[this.currentPair] || 0.0001;
-      // Bounded deterministic micro-oscillation anchored cleanly to canonical candle trend without random price jumps
-      const tickPhase = Math.sin(Date.now() / 4200);
-      const tickDelta = tickPhase * pip * 0.12;
-      const newClose = Number((lastCandle.close + tickDelta).toFixed(decimals));
+      const decimals = getSymbolDecimals(this.currentPair);
+      // Sync purely from authoritative CanonicalMarketStore without injecting synthetic Math.sin micro-ticks
+      const canonicalRecord = canonicalMarketStore.getQuote(this.currentPair, this.currentTimeframe);
+      const newClose = Number(
+        (canonicalRecord && canonicalRecord.mid > 0 ? canonicalRecord.mid : lastCandle.close).toFixed(decimals)
+      );
       const newHigh = Number(Math.max(lastCandle.high, newClose).toFixed(decimals));
       const newLow = Number(Math.min(lastCandle.low, newClose).toFixed(decimals));
 
-      // Update latest candle in-place
       const updatedLastCandle: Candle = {
         ...lastCandle,
         close: newClose,
         high: newHigh,
         low: newLow,
-        volume: lastCandle.volume + 2,
       };
 
       const updatedCandles = [...candles.slice(0, candles.length - 1), updatedLastCandle];
@@ -377,6 +384,19 @@ export class LiveMarketFeedManager {
       this.canonicalPrices.set(this.currentPair, newClose);
       this.lastTickTimestamp = Date.now();
       this.totalWsTicksReceived++;
+
+      const ba = this.getCanonicalBidAsk(this.currentPair);
+      canonicalMarketStore.publishQuote({
+        symbol: this.currentPair,
+        timeframe: this.currentTimeframe,
+        bid: ba.bid,
+        ask: ba.ask,
+        mid: newClose,
+        candles: updatedCandles,
+        timestamp: this.lastTickTimestamp,
+        source: 'LIVE_MARKET_FEED',
+        latencyMs: 12,
+      });
 
       const base = BASE_PRICES[this.currentPair] || newClose;
       const change24h = Number((((newClose - base) / base) * 100).toFixed(2));

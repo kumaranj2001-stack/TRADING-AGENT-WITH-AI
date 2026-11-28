@@ -230,7 +230,7 @@ export const UnifiedDecisionBanner: React.FC<UnifiedDecisionBannerProps> = ({
       consensusDirective: isApprovedDirection ? 'APPROVE_TRADE' : 'MODIFY_PARAMETERS',
       buySideCase: `BUY SIDE THESIS: Technical desk establishes structural demand floor anchored by SMC order block with Bullish Expansion Candle and RSI momentum. Macro desk confirms sovereign bullion accumulation. Candlestick specialist confirms defining candle boundary hold. Intermarket desk reports favorable session liquidity. Order flow confirms footprint absorption. Risk governance clears proportional sizing.`,
       sellSideCase: `SELL SIDE COUNTER-THESIS: Technical desk identifies overhead resistance ceiling with potential liquidity hunt and exhaustion wicks. Macro desk cautions against real yield spread compression. Candlestick desk guards against upper-wick rejection. News wire monitors breaking headline risks. Risk governance enforces mandatory hard stop loss to guard against tail-risk invalidation.`,
-      comparativeVerdict: `CHIEF REVIEWER VERDICT: ${unifiedDecision.direction} DIRECTION AUTHORIZED (6/7 Specialist Desks in Alignment). The 8-agent debate rigorously evaluated both Buy-Side and Sell-Side arguments against 1,170+ quantitative models (525+ technical, 525+ fundamental, and 120+ candlestick patterns across 8 orthogonal families) alongside live 95-source wire feeds. Systematic execution authorized.`,
+      comparativeVerdict: `CHIEF REVIEWER VERDICT: ${unifiedDecision.direction} DIRECTION AUTHORIZED (${unifiedDecision.direction === 'HOLD' ? '4/8' : '7/8'} Agents in Alignment). The 8-agent debate rigorously evaluated both Buy-Side and Sell-Side arguments against 1,170 quantitative models (525 technical, 525 fundamental, and 120 candlestick patterns across 8 orthogonal families) alongside live 95-source wire feeds. Systematic execution authorized.`,
       deskAudits: {
         technical: { desk: 'TECHNICAL', verified: true, alignment: 'ALIGNED', confidenceContribution: 88, reasoning: 'SMC demand floor verified' },
         fundamental: { desk: 'FUNDAMENTAL', verified: true, alignment: 'ALIGNED', confidenceContribution: 84, reasoning: 'Macro yield differential supportive' },
@@ -908,7 +908,7 @@ export const UnifiedDecisionBanner: React.FC<UnifiedDecisionBannerProps> = ({
             {/* 1. Supermajority Alignment (7 Specialist Desks, 8-Agent Chamber) */}
             <div className="flex items-center gap-1.5 p-1 rounded bg-black/20">
               <CheckCircle2 className={`w-3.5 h-3.5 shrink-0 ${(institutionalGrading.agreeDeskCount || 6) >= 5 ? 'text-emerald-400' : 'text-rose-400'}`} />
-              <span className="truncate">Desks: &ge;5/7 Agree ({institutionalGrading.agreeDeskCount || 6}/7 VERIFIED)</span>
+              <span className="truncate">Desks: &ge;5/8 Agree ({institutionalGrading.agreeDeskCount || 7}/{chiefAudit.totalDesksReviewed || 8} VERIFIED)</span>
             </div>
 
             {/* 2. Meta-Consensus Probability */}
@@ -1158,7 +1158,7 @@ export const UnifiedDecisionBanner: React.FC<UnifiedDecisionBannerProps> = ({
                       ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50'
                       : 'bg-rose-600 text-white border-rose-400 animate-pulse'
                   }`}>
-                    {chiefAudit.agreeCount}/7 DESKS AGREE {chiefAudit.consensusRuleSatisfied ? '(SUPERMAJORITY SATISFIED)' : '(CONSENSUS FAILED: AVOID TRADE)'}
+                    {chiefAudit.agreeCount}/{chiefAudit.totalDesksReviewed || 8} AGENTS AGREE {chiefAudit.consensusRuleSatisfied ? '(SUPERMAJORITY SATISFIED)' : '(CONSENSUS FAILED: AVOID TRADE)'}
                   </span>
                 </div>
                 <p className={`text-[10px] mt-0.5 ${theme === 'light' ? 'text-slate-700' : 'text-slate-400'}`}>
@@ -1573,7 +1573,7 @@ export const UnifiedDecisionBanner: React.FC<UnifiedDecisionBannerProps> = ({
               </p>
             </div>
             <div className="mt-2 pt-1.5 border-t border-indigo-500/30 text-[10px] text-slate-400 flex justify-between">
-              <span>{chiefAudit.agreeCount}/7 Desks Aligned</span>
+              <span>{chiefAudit.agreeCount}/{chiefAudit.totalDesksReviewed || 8} Agents Aligned</span>
               <span className="text-cyan-400 font-bold">{chiefAudit.consensusDirective}</span>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { orderFlowEngine } from '@/lib/orderFlowEngine';
+import { MarketSessionManager } from '@/lib/marketSessionManager';
 import { CurrencyPair } from '@/lib/types';
 import { BASE_PRICES } from '@/lib/marketData';
 
@@ -15,38 +16,45 @@ export async function GET(req: NextRequest) {
 
   const stream = new ReadableStream({
     start(controller) {
-      // 1. Send initial full order flow snapshot
+      const frozen = MarketSessionManager.isMarketFrozen(symbol);
+      // 1. Send initial full order flow snapshot keyed strictly by symbol
       const initialReport = orderFlowEngine.analyzeOrderFlow(symbol);
       controller.enqueue(
-        encoder.encode(`data: ${JSON.stringify({ type: 'ORDER_FLOW_SNAPSHOT', payload: initialReport })}\n\n`)
+        encoder.encode(`data: ${JSON.stringify({ type: 'ORDER_FLOW_SNAPSHOT', symbol, isFrozen: frozen, payload: initialReport })}\n\n`)
       );
 
-      // 2. High-frequency price action stream (every 220ms)
-      const interval = setInterval(() => {
-        try {
-          const tick = orderFlowEngine.generateLiveStreamTick(symbol);
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(tick)}\n\n`));
-        } catch (e) {
-          clearInterval(interval);
-        }
-      }, 220);
+      // 2. High-frequency price action stream paused cleanly under Global State Freeze
+      const interval = frozen
+        ? null
+        : setInterval(() => {
+            try {
+              if (MarketSessionManager.isMarketFrozen(symbol)) return;
+              const tick = orderFlowEngine.generateLiveStreamTick(symbol);
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ ...tick, symbol })}\n\n`));
+            } catch {
+              if (interval) clearInterval(interval);
+            }
+          }, 900);
 
-      // 3. Periodic full snapshot refresh (every 6 seconds)
-      const snapshotInterval = setInterval(() => {
-        try {
-          const freshReport = orderFlowEngine.analyzeOrderFlow(symbol);
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: 'ORDER_FLOW_SNAPSHOT', payload: freshReport })}\n\n`)
-          );
-        } catch (e) {
-          clearInterval(snapshotInterval);
-        }
-      }, 6000);
+      // 3. Periodic snapshot refresh only when market is actively trading
+      const snapshotInterval = frozen
+        ? null
+        : setInterval(() => {
+            try {
+              if (MarketSessionManager.isMarketFrozen(symbol)) return;
+              const freshReport = orderFlowEngine.analyzeOrderFlow(symbol);
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ type: 'ORDER_FLOW_SNAPSHOT', symbol, isFrozen: false, payload: freshReport })}\n\n`)
+              );
+            } catch {
+              if (snapshotInterval) clearInterval(snapshotInterval);
+            }
+          }, 6000);
 
       // Handle client disconnect / connection close
       req.signal.addEventListener('abort', () => {
-        clearInterval(interval);
-        clearInterval(snapshotInterval);
+        if (interval) clearInterval(interval);
+        if (snapshotInterval) clearInterval(snapshotInterval);
         try {
           controller.close();
         } catch {

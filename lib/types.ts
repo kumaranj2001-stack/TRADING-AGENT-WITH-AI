@@ -1476,6 +1476,25 @@ export interface DebateSynthesisResult {
   };
 }
 
+export interface CanonicalSignalObject {
+  id: string;
+  symbol: CurrencyPair;
+  exchange: string;
+  timeframe: TimeFrame;
+  timestamp: number;
+  direction: 'BUY' | 'SELL' | 'HOLD';
+  grade: ConfluenceGrade;
+  probability: number;
+  entry: number;
+  stopLoss: number;
+  takeProfit: number;
+  rrRatio: number;
+  lotSize: number;
+  agreementRatio: string;
+  invalidationReason?: string;
+  haltedByCircuitBreaker?: boolean;
+}
+
 export interface SwarmConsensusResult {
   pair: CurrencyPair;
   marketSegment: MarketSegment;
@@ -1595,6 +1614,7 @@ export interface SwarmConsensusResult {
   multiTierScreening?: MultiTierScreeningTelemetry;
   unifiedProfitableSetup?: UnifiedProfitableSetup;
   preTradeValidationGate?: PreTradeValidationGateResult;
+  canonicalSignal?: CanonicalSignalObject;
 }
 
 // ============================================================================
@@ -1944,7 +1964,7 @@ export interface SevenStagePipelineResult {
 }
 
 export interface DeskAuditVerdict {
-  desk: 'TECHNICAL' | 'FUNDAMENTAL' | 'NEWS_WIRE' | 'FOREX_INTERMARKET' | 'ORDER_FLOW' | 'CANDLESTICK_PATTERN' | 'RISK_GOVERNANCE';
+  desk: 'TECHNICAL' | 'FUNDAMENTAL' | 'NEWS_WIRE' | 'FOREX_INTERMARKET' | 'ORDER_FLOW' | 'CANDLESTICK_PATTERN' | 'RISK_GOVERNANCE' | 'CHIEF_REVIEWER';
   analystName: string;
   verdict: 'COMPLIANT' | 'WARNING' | 'NON_COMPLIANT';
   finding: string;
@@ -1952,7 +1972,7 @@ export interface DeskAuditVerdict {
 }
 
 export interface DeskVoteDetail {
-  desk: 'TECHNICAL' | 'FUNDAMENTAL' | 'NEWS_WIRE' | 'FOREX_INTERMARKET' | 'ORDER_FLOW' | 'CANDLESTICK_PATTERN' | 'RISK_GOVERNANCE';
+  desk: 'TECHNICAL' | 'FUNDAMENTAL' | 'NEWS_WIRE' | 'FOREX_INTERMARKET' | 'ORDER_FLOW' | 'CANDLESTICK_PATTERN' | 'RISK_GOVERNANCE' | 'CHIEF_REVIEWER';
   analystName: string;
   bias: string;
   vote: 'AGREE' | 'DISAGREE';
@@ -1969,6 +1989,8 @@ export interface ChiefReviewerAuditResult {
   overallConfluenceScore: number;
   agreeCount: number;
   disagreeCount: number;
+  totalDesksReviewed?: number;
+  agreementRatio?: string;
   consensusRuleSatisfied: boolean;
   consensusDirective: 'APPROVE_TRADE' | 'AVOID_TRADE' | 'MODIFY_PARAMETERS';
   buySideCase: string;
@@ -1982,8 +2004,9 @@ export interface ChiefReviewerAuditResult {
     orderFlow?: DeskAuditVerdict;
     candlestickPattern?: DeskAuditVerdict;
     riskGovernance: DeskAuditVerdict;
+    chiefReviewer?: DeskAuditVerdict;
   };
-  deskVotes: Partial<Record<'TECHNICAL' | 'FUNDAMENTAL' | 'NEWS_WIRE' | 'FOREX_INTERMARKET' | 'ORDER_FLOW' | 'CANDLESTICK_PATTERN' | 'RISK_GOVERNANCE', DeskVoteDetail>>;
+  deskVotes: Partial<Record<'TECHNICAL' | 'FUNDAMENTAL' | 'NEWS_WIRE' | 'FOREX_INTERMARKET' | 'ORDER_FLOW' | 'CANDLESTICK_PATTERN' | 'RISK_GOVERNANCE' | 'CHIEF_REVIEWER', DeskVoteDetail>>;
   completeInvalidationCriteriaList: string[];
   contradictionResolution: {
     hasContradiction: boolean;
